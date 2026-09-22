@@ -307,34 +307,47 @@ terraform apply
 
 ## GitHub 설정 (KAN-127)
 
-배포 워크플로(`.github/workflows/web-deploy.yml`)는 GitHub environment `staging`,
-`prod`를 지정해 실행되고, 그 environment의 변수에서 대상을 읽는다. 역할의 신뢰
-정책이 `repo:AISWM-2PL1/Accentury:environment:{env}`로 묶여 있어 environment
-이름은 Terraform의 `env`와 같아야 한다.
+배포 워크플로(이 레포의 `deploy.yml`, `e2e-smoke.yml`과 Accentury_App의 `web-deploy.yml`)는
+GitHub environment `staging`, `prod`를 지정해 실행되고, 그 environment의 변수에서 대상을
+읽는다. 역할의 신뢰 정책이 `repo:AISWM-2PL1/<레포>:environment:{env}`로 묶여 있어 environment
+이름은 Terraform의 `env`와 같아야 한다. 레포 분리(KAN-221) 뒤에는 배포 역할 하나를
+Accentury_Server와 Accentury_App 두 레포가 함께 맡는다 - 신뢰 정책의 sub 목록에 두 레포가
+들어 있고 (`envs/*/variables.tf`의 `github_repositories`), environment와 변수는 두 레포에 각각 있다.
 
 역할의 신뢰 정책은 이름만 있는 구형식과 숫자 ID가 붙는 불변 형식
-(`repo:AISWM-2PL1@295795156/Accentury@1308814203:environment:{env}`)을 둘 다
-허용한다. 이 레포는 불변 형식을 쓴다 (2026-07-15 이후 생성 저장소 기본). 저장소를
-옮기거나 다시 만들면 ID가 바뀌므로 `gh api repos/OWNER/REPO/actions/oidc/customization/sub`의
-`sub_claim_prefix`를 확인해 `envs/*/variables.tf`의 기본값을 맞춘다.
+(`repo:AISWM-2PL1@295795156/Accentury_Server@1380964825:environment:{env}`)을 레포마다 둘 다
+허용한다. 두 레포는 불변 형식을 쓴다 (2026-07-15 이후 생성 저장소 기본). 저장소를
+옮기거나 다시 만들면 ID가 바뀌므로 `gh api repos/OWNER/REPO --jq '[.owner.id, .id]'`로 다시 받아
+`envs/*/variables.tf`의 `github_repositories` 기본값을 맞춘다. 분리 전 레포
+Accentury_Prototype(id 1308814203)은 아카이브라 목록에 없다.
 
 어느 브랜치가 어느 environment로 배포하는지는 deployment branch policy로 고정한다
 (staging = Dev, prod = Release). 이것이 없으면 아무 브랜치의 워크플로가 environment를
 지정해 역할을 맡을 수 있다.
 
 ```
-for env in staging prod; do
-  branch=$([ "$env" = prod ] && echo Release || echo Dev)
-  gh api -X PUT "repos/AISWM-2PL1/Accentury/environments/$env" --input - <<'JSON'
+for repo in Accentury_Server Accentury_App; do
+  for env in staging prod; do
+    branch=$([ "$env" = prod ] && echo Release || echo Dev)
+    gh api -X PUT "repos/AISWM-2PL1/$repo/environments/$env" --input - <<'JSON'
 {"deployment_branch_policy":{"protected_branches":false,"custom_branch_policies":true}}
 JSON
-  gh api -X POST "repos/AISWM-2PL1/Accentury/environments/$env/deployment-branch-policies" \
-    -f name="$branch" -f type=branch
+    gh api -X POST "repos/AISWM-2PL1/$repo/environments/$env/deployment-branch-policies" \
+      -f name="$branch" -f type=branch
+  done
 done
 ```
 
+prod의 required reviewers(승인 게이트, KAN-128)도 environment 설정이라 레포마다 둔다
+(`gh api -X PUT repos/AISWM-2PL1/<repo>/environments/prod --input -`에 `reviewers` 배열).
+
+``````
+
 변수 4개는 환경 apply 출력에서 채운다 (재구축으로 배포 ID나 역할 ARN이 바뀌면 다시).
-`APP_DOMAIN`은 이미지 파이프라인의 E2E 스모크 대상이다 (KAN-128).
+`APP_DOMAIN`은 이미지 파이프라인의 E2E 스모크 대상이다 (KAN-128). 같은 값을 두 레포에
+넣는다 - `gh variable set`에 `-R AISWM-2PL1/Accentury_Server`와 `-R AISWM-2PL1/Accentury_App`을
+각각 준다. 웹 배포 전용 변수(REGION_SELECT, ADSENSE_*, GA4_*, STORE_LISTING_READY,
+DEPLOY_PAUSED)는 Accentury_App에만 있다.
 
 ```
 cd infra/envs/staging   # 또는 prod

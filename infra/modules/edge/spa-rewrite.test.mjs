@@ -123,17 +123,21 @@ function aasaPaths(env) {
   return new Set(details[0].components.map((component) => component['/']));
 }
 
-/** AndroidManifest의 `android:path` 집합. XML 파서를 끌어오지 않고 속성만 긁는다. */
+/**
+ * AndroidManifest의 `android:path` 집합. 레포 분리(KAN-221) 전에는 매니페스트를 직접 읽었지만
+ * 이제 Accentury_App에 있으므로 그 복사본(app-link-paths.json)을 읽는다. 매니페스트를 바꾸면
+ * 이 파일도 같이 고친다 - Accentury_App의 AppLinkTest가 매니페스트 쪽을 붙들고 있다.
+ */
 function manifestPaths() {
-  const xml = readFileSync(join(REPO_ROOT, 'app', 'src', 'main', 'AndroidManifest.xml'), 'utf8');
-  const matches = xml.matchAll(/android:path="([^"]*)"/g);
-  return new Set(Array.from(matches, (match) => match[1]));
+  const copy = JSON.parse(readFileSync(join(HERE, 'app-link-paths.json'), 'utf8'));
+  return new Set(copy.paths);
 }
 
 test('AASA와 매니페스트의 경로 집합이 같다', () => {
   // 진입 경로는 세 곳(매니페스트, AASA, 양 플랫폼 parseAppLink)에 흩어져 있고, 한쪽만 고쳐도
-  // 빌드와 단위 테스트는 조용한데 링크만 죽는다. parseAppLink 쪽은 AppLinkTest·AppLinkTests가
-  // 매니페스트와 대조하고 있으므로, 여기서 AASA를 그 매니페스트에 묶으면 셋이 한 줄로 이어진다.
+  // 빌드와 단위 테스트는 조용한데 링크만 죽는다. parseAppLink 쪽은 Accentury_App의 AppLinkTest와
+  // AppLinkTests가 매니페스트와 대조하고 있으므로, 여기서 AASA를 매니페스트 복사본에 묶으면 셋이
+  // 한 줄로 이어진다. 복사본이 매니페스트와 어긋나는 것은 사람이 지키는 규칙이다 (KAN-221).
   const expected = new Set(['/t', '/t/']);
   assert.deepEqual(manifestPaths(), expected);
   for (const env of ENVS) {
