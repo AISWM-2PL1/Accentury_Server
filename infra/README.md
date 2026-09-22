@@ -1399,7 +1399,7 @@ OK 양쪽을 알린다. 해제 알림이 없으면 아직 죽어 있는지를 �
 ### 수신 주소와 구독 확인
 
 수신 주소는 `envs/{env}/variables.tf`의 `alert_email` 기본값이다 (2026-08-28 확정).
-두 환경이 같은 값이라 `github_repository`와 같은 이유로 tfvars가 아니라 기본값에 둔다.
+두 환경이 같은 값이라 `github_repositories`와 같은 이유로 tfvars가 아니라 기본값에 둔다.
 환경별로 나누려면 해당 tfvars에 `alert_email = "..."` 한 줄을 넣으면 된다.
 
 SNS 이메일 구독은 Terraform이 확인까지 해 줄 수 없다. apply 직후 상태는

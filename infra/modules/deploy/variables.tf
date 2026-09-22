@@ -3,9 +3,9 @@ variable "env" {
   description = "환경 이름 (staging | prod). GitHub environment 이름과 같아야 한다 - 신뢰 정책의 sub 조건이 이 값에 묶인다."
 }
 
-variable "github_repository" {
+variable "github_owner" {
   type        = string
-  description = "배포 워크플로가 도는 GitHub 저장소 (OWNER/REPO)"
+  description = "배포 워크플로가 도는 GitHub 저장소들의 소유자(조직) 이름"
 }
 
 variable "github_owner_id" {
@@ -13,9 +13,12 @@ variable "github_owner_id" {
   description = "저장소 소유자(조직)의 숫자 ID. 불변 subject claim(repo:OWNER@ID/REPO@ID:...)에 들어간다."
 }
 
-variable "github_repository_id" {
-  type        = number
-  description = "저장소의 숫자 ID. 불변 subject claim에 들어간다."
+variable "github_repositories" {
+  type = list(object({
+    name = string # 저장소 이름 (소유자 제외)
+    id   = number # 저장소의 숫자 ID. 불변 subject claim에 들어간다.
+  }))
+  description = "이 환경의 배포 역할을 맡을 수 있는 저장소 목록 (KAN-221). 레포 분리 뒤 Accentury_Server(이미지 배포, 스모크)와 Accentury_App(웹 배포)이 같은 역할을 맡는다. 목록에 없는 저장소는 environment 이름이 같아도 AssumeRoleWithWebIdentity가 거부된다."
 }
 
 variable "web_bucket_arn" {

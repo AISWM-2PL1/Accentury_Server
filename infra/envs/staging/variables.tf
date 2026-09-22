@@ -108,21 +108,26 @@ variable "db_skip_final_snapshot" {
   description = "RDS 삭제 시 최종 스냅샷 생략 (staging true)"
 }
 
-variable "github_repository" {
+variable "github_owner" {
   type        = string
-  description = "배포 워크플로가 도는 GitHub 저장소 (OWNER/REPO). OIDC 신뢰 정책의 sub 조건에 들어간다 (KAN-127). 두 환경이 같은 값이라 tfvars가 아니라 기본값이다."
-  default     = "AISWM-2PL1/Accentury"
+  description = "배포 워크플로가 도는 GitHub 저장소들의 소유자(조직). OIDC 신뢰 정책의 sub 조건에 들어간다 (KAN-127). 두 환경이 같은 값이라 tfvars가 아니라 기본값이다."
+  default     = "AISWM-2PL1"
 }
 
-# 불변 subject claim용 숫자 ID (KAN-127). 확인: gh api repos/AISWM-2PL1/Accentury --jq '[.owner.id, .id]'
+# 불변 subject claim용 숫자 ID (KAN-127). 확인: gh api repos/AISWM-2PL1/<repo> --jq '[.owner.id, .id]'
 variable "github_owner_id" {
   type    = number
   default = 295795156
 }
 
-variable "github_repository_id" {
-  type    = number
-  default = 1308814203
+# 배포 역할을 맡는 저장소 목록 (KAN-221 레포 분리). Server는 이미지 배포와 스모크, App은 웹 배포.
+# 분리 전 저장소 Accentury(id 1308814203, 지금은 Accentury_Prototype)는 아카이브라 뺐다.
+variable "github_repositories" {
+  type = list(object({ name = string, id = number }))
+  default = [
+    { name = "Accentury_Server", id = 1380964825 },
+    { name = "Accentury_App", id = 1380964859 },
+  ]
 }
 
 variable "alert_email" {
