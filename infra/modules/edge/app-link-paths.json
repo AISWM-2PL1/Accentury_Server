@@ -1,0 +1,7 @@
+{
+  "_comment": "Accentury_App의 app/src/main/AndroidManifest.xml에 있는 android:path 집합의 복사본 (KAN-221 레포 분리). 매니페스트를 바꾸면 여기도 같이 고친다 - spa-rewrite.test.mjs가 AASA와 대조한다.",
+  "paths": [
+    "/t",
+    "/t/"
+  ]
+}

@@ -55,10 +55,11 @@ OS가 각 host의 이 파일을 직접 받아 대조한다. 통과하면 링크�
 
 | 무엇 | 어디 | 붙들고 있는 테스트 |
 |---|---|---|
-| 안드로이드 host·path·autoVerify | `app/src/main/AndroidManifest.xml` | `AppLinkTest` (매니페스트를 직접 읽어 `APP_LINK_ORIGINS`와 대조) |
-| 안드로이드 진입 origin | `app/.../web/AppLink.kt`의 `APP_LINK_ORIGINS` | 위와 같음 |
-| iOS host | `ios/Accentury/Accentury.entitlements` | `AppLinkTests` (entitlements를 직접 읽어 `appLinkOrigins`와 대조) |
-| iOS 진입 origin | `ios/AccenturyCore/.../Web/AppLink.swift`의 `appLinkOrigins` | 위와 같음 |
+| 안드로이드 host·path·autoVerify | Accentury_App `app/src/main/AndroidManifest.xml` | `AppLinkTest` (매니페스트를 직접 읽어 `APP_LINK_ORIGINS`와 대조) |
+| 매니페스트 `android:path` 복사본 | `infra/modules/edge/app-link-paths.json` (KAN-221, 매니페스트를 바꾸면 같이 고친다) | `spa-rewrite.test.mjs` (AASA와 대조) |
+| 안드로이드 진입 origin | Accentury_App `app/.../web/AppLink.kt`의 `APP_LINK_ORIGINS` | 위와 같음 |
+| iOS host | Accentury_App `ios/Accentury/Accentury.entitlements` | `AppLinkTests` (entitlements를 직접 읽어 `appLinkOrigins`와 대조) |
+| iOS 진입 origin | Accentury_App `ios/AccenturyCore/.../Web/AppLink.swift`의 `appLinkOrigins` | 위와 같음 |
 | 진입 경로 `/t`·`/t/` | 양 플랫폼 `parseAppLink` | `AppLinkTest`·`AppLinkTests` |
 | 이 디렉터리의 AASA 경로 집합 | `apple-app-site-association` | `infra/modules/edge/spa-rewrite.test.mjs` (매니페스트 `android:path`와 대조) |
 | `/.well-known/` 리라이트 예외 | `infra/modules/edge/spa-rewrite.js` | 같은 테스트 |

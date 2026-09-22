@@ -5,7 +5,8 @@
 #   scripts/publish-share-assets.sh prod
 #
 # ── 무엇을 어디에 ────────────────────────────────────────────────────────────
-# `assets/share/<tier>.png` 5장(KAN-162 생성물)을 `s3://<웹 버킷>/share/<tier>.png`로 올린다.
+# `infra/share-assets/<tier>.png` 5장(KAN-162 생성물의 복사본, 원본은 Accentury_App assets/share)을
+# `s3://<웹 버킷>/share/<tier>.png`로 올린다.
 # backend는 SSM `ACCENTURY_RESULT_ASSETBASEURL`(= https://<도메인>/share)에 등급 code를 붙여
 # `/result`의 `share.imageUrl`을 만든다 (TierAssets). 파일명은 등급 code 소문자로 고정이라 이
 # 스크립트도 backend도 이름을 다시 정하지 않는다.
@@ -39,7 +40,7 @@ usage() {
   cat <<'USAGE'
 사용법: scripts/publish-share-assets.sh <staging|prod>
 
-  assets/share/<tier>.png 5장을 그 환경의 웹 S3 버킷 share/ 아래에 올리고,
+  infra/share-assets/<tier>.png 5장을 그 환경의 웹 S3 버킷 share/ 아래에 올리고,
   CloudFront를 무효화한 뒤 도메인으로 실제 응답(200, image/png, 내용 일치)을 확인한다.
 
 환경 변수로 덮어쓸 수 있는 값 (없으면 terraform output에서 읽는다):
@@ -72,13 +73,15 @@ case "$ENV_NAME" in
 esac
 
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-SRC_DIR="$REPO_ROOT/assets/share"
+# 원본은 Accentury_App의 assets/share (assets/characters/build.py 산출물)이고, 여기는 그 복사본이다
+# (KAN-221 레포 분리). 캐릭터를 다시 만들면 복사본도 갱신한다 - infra/share-assets/README.md.
+SRC_DIR="$REPO_ROOT/infra/share-assets"
 # 등급 code 소문자 = 파일명 (backend ScorePolicyRegistry.TIER_CODES, TierAssets.imageUrl)
 TIERS=(outsider traveler wannabe honorary native)
 
 for tier in "${TIERS[@]}"; do
   if [[ ! -f "$SRC_DIR/$tier.png" ]]; then
-    echo "오류: $SRC_DIR/$tier.png 이(가) 없다. assets/characters/build.py로 만든다." >&2
+    echo "오류: $SRC_DIR/$tier.png 이(가) 없다. Accentury_App의 assets/characters/build.py로 만들어 복사한다." >&2
     exit 1
   fi
 done
@@ -199,5 +202,5 @@ backend가 내려주는 값과 맞는지 - 완주한 세션의 /result:
   (SSM /accentury/$ENV_NAME/ACCENTURY_RESULT_ASSETBASEURL = https://$DOMAIN/share, 태스크 재배포 뒤 반영)
 
 카카오 카드가 그려지려면 이 도메인($DOMAIN)이 카카오 개발자 콘솔의 플랫폼 도메인에
-등록돼 있어야 한다 (assets/share/README.md) - AWS 밖 설정이라 이 스크립트가 확인하지 않는다.
+등록돼 있어야 한다 (Accentury_App assets/share/README.md) - AWS 밖 설정이라 이 스크립트가 확인하지 않는다.
 NEXT
