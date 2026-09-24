@@ -10,7 +10,10 @@ import mockwebserver3.RecordedRequest;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.extension.ExtendWith;
 import org.junit.jupiter.api.function.Executable;
+import org.springframework.boot.test.system.CapturedOutput;
+import org.springframework.boot.test.system.OutputCaptureExtension;
 import tools.jackson.databind.json.JsonMapper;
 
 import java.time.Duration;
@@ -18,6 +21,7 @@ import java.time.LocalDate;
 import java.util.concurrent.TimeUnit;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 
@@ -25,6 +29,7 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
  * 카카오와 네이버 사용자 조회 검증 (KAN-223 요구 7, 명세서 §3.9). MockWebServer가 IdP API 자리에 서서 성공, 카카오 app_id
  * 불일치, 4xx, 5xx, 타임아웃을 흉내 낸다.
  */
+@ExtendWith(OutputCaptureExtension.class)
 class RestIdpVerifiersTest {
 
     private static final String KAKAO_APP_ID = "1234567";
@@ -125,6 +130,31 @@ class RestIdpVerifiersTest {
         enqueueJson(500, "{}");
 
         assertUnavailable(() -> kakao().verify(new IdpCredential(Provider.KAKAO, "t", null, null)));
+    }
+
+    @Test
+    void IdP_호출_한도_초과_429는_토큰_무효가_아니라_502다() {
+        // 401로 내면 앱이 멀쩡한 토큰을 버리고 사용자를 다시 로그인시킨다 (PR #2 리뷰).
+        enqueueJson(429, "{}");
+
+        assertUnavailable(() -> kakao().verify(new IdpCredential(Provider.KAKAO, "t", null, null)));
+    }
+
+    @Test
+    void 실제_IdP_경로에서도_토큰_원문이_로그에_남지_않는다(CapturedOutput output) {
+        // 가짜 IdP 경로(AuthApiTest)와 달리 IdpHttp가 실제 HTTP 호출을 하고 실패를 로그로 남기는 경로다 (PR #2 리뷰).
+        String kakaoToken = "kakao-raw-access-token-9f8e7d6c5b4a";
+        String naverToken = "naver-raw-access-token-1a2b3c4d5e6f";
+        enqueueJson(401, "{\"code\": -401, \"msg\": \"InvalidTokenException\"}");
+        enqueueJson(500, "{}");
+        enqueueJson(200, "{\"id\": 1, \"app_id\": 9999999}");
+
+        assertInvalid(() -> kakao().verify(new IdpCredential(Provider.KAKAO, kakaoToken, null, null)));
+        assertUnavailable(() -> naver(Duration.ofSeconds(2)).verify(new IdpCredential(Provider.NAVER, naverToken, null, null)));
+        assertInvalid(() -> kakao().verify(new IdpCredential(Provider.KAKAO, kakaoToken, null, null)));
+
+        assertFalse(output.getAll().contains(kakaoToken), "카카오 토큰 원문이 로그에 남았다");
+        assertFalse(output.getAll().contains(naverToken), "네이버 토큰 원문이 로그에 남았다");
     }
 
     @Test

@@ -21,7 +21,7 @@ import java.time.Duration;
  * JSON을 받는다.
  * <p>
  * 실패 분류가 이 클래스의 일이다: IdP가 4xx로 답하면 토큰이 틀린 것(401 {@code AUTH_IDP_TOKEN_INVALID})이고,
- * 5xx이거나 닿지 못했거나 시간이 넘었거나 본문이 JSON이 아니면 IdP 장애(502 {@code AUTH_IDP_UNAVAILABLE})다.
+ * 429(호출 한도 초과)이거나 5xx이거나 닿지 못했거나 시간이 넘었거나 본문이 JSON이 아니면 IdP 장애(502 {@code AUTH_IDP_UNAVAILABLE})다.
  * 응답 본문은 로그에 남기지 않는다 - 이메일, 이름, 생년월일이 들어 있다 (§2.6).
  */
 final class IdpHttp {
@@ -54,6 +54,11 @@ final class IdpHttp {
                     .header(HttpHeaders.AUTHORIZATION, "Bearer " + accessToken)
                     .retrieve()
                     .body(String.class);
+        } catch (HttpClientErrorException.TooManyRequests e) {
+            // 429는 토큰이 틀린 것이 아니라 우리 앱의 IdP 호출 쿼터가 찬 것이다 - 401로 내면 앱이 멀쩡한 토큰을 버리고
+            // 사용자를 다시 로그인시킨다. 잠시 뒤 재시도할 상류 장애로 낸다 (PR #2 리뷰).
+            log.warn("{} {} 호출 한도 초과 status=429", idpName, path);
+            throw new ApiException(ErrorCode.AUTH_IDP_UNAVAILABLE);
         } catch (HttpClientErrorException e) {
             // 상태 코드만 남긴다 - 오류 본문에 토큰 조각이 되돌아오는 IdP가 있을 수 있다.
             log.info("{} {} 거절 status={}", idpName, path, e.getStatusCode().value());

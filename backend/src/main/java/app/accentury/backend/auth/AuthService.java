@@ -72,6 +72,8 @@ public class AuthService {
         IdpProfile profile = idpVerifiers.verify(credential);
         rejectUnderAge(profile);
 
+        // 계정 커밋 뒤에 Refresh를 발급한다 - 여기서 Redis가 죽으면(503) 계정 행만 남지만, 다음 시도가 재로그인으로 이어져
+        // 잃는 것이 없다. 순서를 뒤집으면 커밋 실패 때 주인 없는 Refresh가 Redis에 남는다.
         Account account = findOrCreate(profile, request);
         String accessToken = accessTokens.issue(account.user().id());
         String refreshToken = refreshTokens.issue(account.user().id());
