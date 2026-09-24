@@ -9,4 +9,8 @@ services:
       POSTGRES_DB: accentury
       POSTGRES_PASSWORD: local
     # 127.0.0.1 바인딩 - 같은 네트워크의 다른 기기가 개발 DB에 접근하지 못하게 (Codex 리뷰 P1)
-    ports: ["127.0.0.1:5432:5432"]
+    ports: ["127.0.0.1:5432:5432"]  # Refresh 토큰 저장소 (KAN-223) - application.yml 기본값(localhost:6379, 비밀번호 없음)과 맞춘다.
+  # 배포(ElastiCache)와 같은 7 메이저다. 로그인을 안 쓰는 개발은 이 서비스 없이도 된다 - 연결은 첫 로그인 때 맺는다.
+  redis:
+    image: redis:7
+    ports: ["127.0.0.1:6379:6379"]

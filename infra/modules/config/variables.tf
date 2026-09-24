@@ -73,3 +73,33 @@ variable "training_bucket_name" {
   description = "staging 전용 학습 데이터 S3 버킷 이름 (KAN-201). 값이 있으면 ACCENTURY_TRAINING_BUCKET 파라미터를 만들어 backend가 분석 종결마다 음성 WAV와 메타 JSON을 그 버킷에 남긴다 (accentury.training.bucket). null이면 파라미터 자체가 없고 backend는 저장 코드를 만들지 않는다 - prod는 반드시 null이다 (FR-DP-01 그대로)."
   default     = null
 }
+
+variable "redis_host" {
+  type        = string
+  description = "Refresh 토큰 저장소 ElastiCache 기본 엔드포인트 호스트 (data 모듈 출력 redis_host, KAN-223)."
+}
+
+variable "redis_auth_token" {
+  type        = string
+  sensitive   = true
+  description = "ElastiCache AUTH 토큰 (data 모듈 출력 redis_auth_token, KAN-223). SSM SecureString으로만 넘긴다."
+}
+
+# 기본값은 backend SsmPlaceholder.UNSET과 같은 문자열이다 - backend가 이 값을 "설정 전"으로 읽어 그 IdP 로그인만 막는다.
+variable "auth_google_client_id" {
+  type        = string
+  description = "구글 서버용(웹) OAuth 클라이언트 ID (KAN-223, KAN-224). ID 토큰의 aud와 정확 일치해야 한다."
+  default     = "unset-put-parameter-after-apply"
+}
+
+variable "auth_apple_bundle_id" {
+  type        = string
+  description = "iOS 번들 ID (KAN-223). 애플 identityToken의 aud와 정확 일치해야 한다."
+  default     = "unset-put-parameter-after-apply"
+}
+
+variable "auth_kakao_app_id" {
+  type        = string
+  description = "카카오 앱 ID(숫자, KAN-223). access_token_info의 app_id와 일치해야 한다 - 다른 앱의 토큰을 막는 유일한 검사다."
+  default     = "unset-put-parameter-after-apply"
+}

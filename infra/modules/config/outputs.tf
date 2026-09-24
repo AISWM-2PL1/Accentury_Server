@@ -15,6 +15,12 @@ output "parameter_names" {
     aws_ssm_parameter.analysis_dispatch_concurrency.name,
     aws_ssm_parameter.kakao_admin_key.name,
     aws_ssm_parameter.feedback_slack_webhook_url.name,
+    aws_ssm_parameter.jwt_secret.name,
+    aws_ssm_parameter.redis_host.name,
+    aws_ssm_parameter.redis_password.name,
+    aws_ssm_parameter.google_client_id.name,
+    aws_ssm_parameter.apple_bundle_id.name,
+    aws_ssm_parameter.kakao_app_id.name,
   ], aws_ssm_parameter.training_bucket[*].name)
   description = "이 모듈이 만드는 backend용 SSM 파라미터 이름. fargate 모듈이 태스크 정의 secrets와 실행 역할 허용 목록으로 쓴다 (KAN-165). IMAGE_TAG(KAN-128)는 여기 없다."
 }

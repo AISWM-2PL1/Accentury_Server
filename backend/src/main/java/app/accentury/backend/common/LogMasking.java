@@ -33,6 +33,20 @@ public final class LogMasking {
     private static final Pattern SESSION_TOKEN = Pattern.compile("\\bst_[A-Za-z0-9_-]{8,}");
 
     /**
+     * Refresh 토큰 원문 - {@code rt_} + base64url (KAN-223, {@code RefreshTokens}). 세션 토큰과 같은 규칙이다 -
+     * 요청 본문({@code refreshToken})으로 오므로 {@link #BEARER}에는 걸리지 않는다.
+     */
+    private static final Pattern REFRESH_TOKEN = Pattern.compile("\\brt_[A-Za-z0-9_-]{8,}");
+
+    /**
+     * JWT 모양 - {@code eyJ}(base64url로 쓴 {@code {"})로 시작하는 헤더와 본문이 점으로 이어진 값 (KAN-223). 우리 Access
+     * 토큰과 구글, 애플 ID 토큰이 이 모양이다. {@code Bearer} 뒤가 아닌 자리(요청 본문의 {@code idToken}, 라이브러리
+     * 예외 메시지)에 찍혀도 지운다. 서명 부분은 비어 있을 수 있다({@code alg=none} 위조 토큰).
+     */
+    private static final Pattern JWT = Pattern.compile(
+            "\\beyJ[A-Za-z0-9_-]{4,}\\.eyJ[A-Za-z0-9_-]{4,}\\.[A-Za-z0-9_-]*");
+
+    /**
      * 카카오 웹훅의 {@code Authorization: KakaoAK ...} 값 (KAN-164) - {@link #BEARER}와 같은 자리다.
      * 헤더 이름 없이 값만 찍혀도 걸린다. 이 값은 앱 Admin 키라 새면 카카오 관리 API까지 열린다.
      */
@@ -87,6 +101,11 @@ public final class LogMasking {
      * {@code ACCENTURY_FEEDBACK_SLACKWEBHOOKURL}. URL 자체가 시크릿이다 - 아는 사람은 누구나 그
      * 채널에 글을 쓸 수 있다. 이름 없이 값만 찍힌 형태는 {@link #SLACK_WEBHOOK}이 잡는다.
      * <p>
+     * 계정 인증(KAN-223)의 토큰과 시크릿도 이름으로 한 번 더 건다 - 요청 본문의 {@code refreshToken},
+     * {@code idToken}, {@code accessToken}(카카오와 네이버 SDK 토큰은 모양이 정해져 있지 않아 이름 말고는 잡을 길이
+     * 없다), 애플 SDK 이름 {@code identityToken}, Access JWT 서명 키의 설정 키와 필드와 환경 변수
+     * ({@code ACCENTURY_AUTH_JWTSECRET}), Refresh 저장소(Redis) 비밀번호의 환경 변수와 설정 키.
+     * <p>
      * 따옴표로 열린 값은 <b>닫는 따옴표까지</b> 통째로 받는다 - 공백을 만나면 멈추게 두면
      * {@code "opaque value"} 같은 값의 뒷부분이 로그에 그대로 남고, 열린 따옴표만 닫혀
      * JSON 한 줄이 깨진다. 따옴표가 없으면 예전처럼 공백에서 끊는다 -
@@ -100,7 +119,10 @@ public final class LogMasking {
                     + "|kakaoAdminKey|kakao-admin-key|accentury\\.share\\.kakao-admin-key"
                     + "|ACCENTURY_SHARE_KAKAO_?ADMIN_?KEY"
                     + "|slackWebhookUrl|slack-webhook-url|accentury\\.feedback\\.slack-webhook-url"
-                    + "|ACCENTURY_FEEDBACK_SLACK_?WEBHOOK_?URL)\\b"
+                    + "|ACCENTURY_FEEDBACK_SLACK_?WEBHOOK_?URL"
+                    + "|refreshToken|idToken|accessToken|identityToken"
+                    + "|jwtSecret|jwt-secret|accentury\\.auth\\.jwt-secret|ACCENTURY_AUTH_JWT_?SECRET"
+                    + "|SPRING_DATA_REDIS_PASSWORD|spring\\.data\\.redis\\.password)\\b"
                     + "(\"?\\s*[=:]\\s*)(?:\"([^\"\\r\\n]*)\"|([^\\s\",;}]+))");
 
     /**
@@ -189,6 +211,8 @@ public final class LogMasking {
         masked = KAKAO_AK.matcher(masked).replaceAll("KakaoAK ***");
         masked = AUTHORIZATION.matcher(masked).replaceAll(LogMasking::maskAuthorization);
         masked = SESSION_TOKEN.matcher(masked).replaceAll("st_***");
+        masked = REFRESH_TOKEN.matcher(masked).replaceAll("rt_***");
+        masked = JWT.matcher(masked).replaceAll("eyJ***");
         masked = NAMED_SECRET.matcher(masked).replaceAll(matchResult -> {
             // 값이 따옴표로 열렸으면 닫아 준다 - 로그 한 줄이 JSON으로 읽히던 것을 깨지 않는다.
             boolean quoted = matchResult.group(3) != null;

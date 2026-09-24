@@ -57,6 +57,12 @@ dependencies {
 	implementation 'io.micrometer:micrometer-registry-cloudwatch2'
 	runtimeOnly 'software.amazon.awssdk:cloudwatch'
 	runtimeOnly 'software.amazon.awssdk:netty-nio-client'
+	// 계정 인증 (KAN-223). Refresh 토큰 저장소가 Redis(ElastiCache)다 - 세션과 요청 제한은 여전히 DB와 메모리이고
+	// Redis는 Refresh에만 쓴다 (명세서 §2.1). 클라이언트는 Boot 기본인 Lettuce다.
+	implementation 'org.springframework.boot:spring-boot-starter-data-redis'
+	// Access JWT(HS256) 발급과 검증, 구글과 애플 ID 토큰의 JWKS 서명 검증을 한 라이브러리로 한다 (KAN-223).
+	// Spring Security는 들이지 않는다 - 보호할 경로가 넷뿐이라 필터 체인 도입 비용이 더 크다. Boot BOM 밖이라 버전을 적는다.
+	implementation 'com.nimbusds:nimbus-jose-jwt:10.10'
 	annotationProcessor 'org.projectlombok:lombok'
 	testImplementation 'org.springframework.boot:spring-boot-starter-actuator-test'
 	testImplementation 'org.springframework.boot:spring-boot-starter-data-jpa-test'
@@ -66,6 +72,8 @@ dependencies {
 	// PG 전용 문법이 마이그레이션에 들어와도 테스트가 배포 전에 잡는다. Docker가 필요하다.
 	testImplementation 'org.springframework.boot:spring-boot-testcontainers'
 	testImplementation 'org.testcontainers:testcontainers-postgresql'
+	// 카카오와 네이버 사용자 조회 API를 흉내 내는 HTTP 서버 (KAN-223) - 성공, app_id 불일치, 5xx 경로를 잡는다.
+	testImplementation 'com.squareup.okhttp3:mockwebserver3:5.5.0'
 	testCompileOnly 'org.projectlombok:lombok'
 	testRuntimeOnly 'org.junit.platform:junit-platform-launcher'
 	testAnnotationProcessor 'org.projectlombok:lombok'

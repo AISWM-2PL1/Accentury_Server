@@ -23,6 +23,11 @@ output "rds_sg_id" {
   value = aws_security_group.rds.id
 }
 
+output "redis_sg_id" {
+  value       = aws_security_group.redis.id
+  description = "Refresh 토큰 저장소 ElastiCache의 SG - backend-sg에서 오는 6379만 허용 (KAN-223)"
+}
+
 output "ai_sg_id" {
   value       = aws_security_group.ai.id
   description = "AI 호스트 SG - ai-alb-sg에서 오는 8000만 허용 (KAN-36, KAN-165, KAN-201)"

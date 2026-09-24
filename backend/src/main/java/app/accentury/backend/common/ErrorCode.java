@@ -65,6 +65,23 @@ public enum ErrorCode {
     // 발행 검증이 경북 정의를 애초에 싣지 않으므로 지금은 도달하지 않는 방어선이다.
     ADMIN_DIALECT_NOT_ALLOWED(HttpStatus.CONFLICT, false, "MVP에서 활성화할 수 없는 방언의 정의입니다."),
 
+    // === AUTH_* : 앱 계정 인증 (§2.1, §2.4, §3.9~§3.13, KAN-223) ===
+    // Access 토큰의 부재, 서명 불일치, 만료, 모르는 사용자를 구분하지 않는다 - 세션 토큰(SESSION_EXPIRED)과
+    // 같은 이유다. 클라이언트는 이 401이면 refresh 한 번 뒤 원래 요청을 다시 보낸다.
+    AUTH_TOKEN_INVALID(HttpStatus.UNAUTHORIZED, false, "로그인이 필요합니다."),
+    AUTH_IDP_TOKEN_INVALID(HttpStatus.UNAUTHORIZED, false, "로그인 정보를 확인할 수 없습니다. 다시 시도해 주세요."),
+    // IdP 서버가 5xx를 주거나 응답하지 않을 때 - 우리 쪽이 아니라 상류 장애라 502다.
+    AUTH_IDP_UNAVAILABLE(HttpStatus.BAD_GATEWAY, true, "로그인 서비스에 연결할 수 없습니다. 잠시 뒤 다시 시도해 주세요."),
+    AUTH_CONSENT_REQUIRED(HttpStatus.BAD_REQUEST, false, "개인정보 수집 이용에 동의해야 가입할 수 있습니다."),
+    // 만 14세 미만은 법정대리인 동의가 필요하다 (개인정보보호법 제22조의2) - 그 절차가 없으므로 가입을 막는다.
+    AUTH_UNDER_AGE(HttpStatus.BAD_REQUEST, false, "만 14세 이상만 가입할 수 있습니다."),
+    AUTH_REFRESH_INVALID(HttpStatus.UNAUTHORIZED, false, "로그인이 만료되었습니다. 다시 로그인해 주세요."),
+    // 이미 회전된 Refresh의 재사용 - 복사본이 있다는 뜻이라 그 로그인의 토큰 패밀리 전체를 폐기한다.
+    AUTH_REFRESH_REUSED(HttpStatus.UNAUTHORIZED, false, "로그인이 만료되었습니다. 다시 로그인해 주세요."),
+    AUTH_PROFILE_INCOMPLETE(HttpStatus.FORBIDDEN, false, "추가 정보를 입력해야 테스트를 시작할 수 있습니다."),
+    // Refresh 저장소(Redis) 장애 - 로그인, refresh, 로그아웃만 해당하고 익명 응시는 영향이 없다 (NFR-AV-02).
+    AUTH_STORE_UNAVAILABLE(HttpStatus.SERVICE_UNAVAILABLE, true, "잠시 뒤 다시 시도해 주세요."),
+
     // === SHARE_* : 카카오톡 공유 웹훅 (§3.8, KAN-164) ===
     // 호출자가 앱이 아니라 카카오 서버라 ADMIN_*처럼 §2.4 밖의 별도 묶음이다. 헤더 누락, 다른 스킴,
     // 키 불일치를 구분하지 않는다 - 카카오가 아닌 호출자에게 무엇이 틀렸는지 알려 줄 이유가 없다.

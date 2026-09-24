@@ -84,7 +84,7 @@ resource "aws_route_table_association" "private" {
   route_table_id = aws_route_table.private.id
 }
 
-# ---- 보안 그룹 3종 + ai-sg ----
+# ---- 보안 그룹 3종 + redis-sg + ai-sg ----
 # 규칙은 인라인이 아니라 aws_vpc_security_group_*_rule 리소스로 분리한다.
 # 인라인로 서로 참조하면 SG 간 순환 참조가 생긴다.
 # description은 교체 강제 속성이고 name이 고정이라(같은 이름을 먼저 만들 수 없다) 살아 있는 스택에서 문구를
@@ -160,6 +160,27 @@ resource "aws_vpc_security_group_ingress_rule" "rds_from_backend" {
   ip_protocol                  = "tcp"
   from_port                    = 5432
   to_port                      = 5432
+  referenced_security_group_id = aws_security_group.backend.id
+}
+
+# ---- Refresh 토큰 저장소 Redis (KAN-223) ----
+
+# ElastiCache Redis는 backend 태스크만 부른다 - rds-sg와 같은 모양이다. 아웃바운드 규칙이 없는 것은 의도다
+# (Redis가 먼저 거는 연결이 없다).
+resource "aws_security_group" "redis" {
+  name        = "${local.name}-redis-sg"
+  description = "ElastiCache Redis - inbound 6379 only from backend-sg"
+  vpc_id      = aws_vpc.this.id
+
+  tags = { Name = "${local.name}-redis-sg" }
+}
+
+resource "aws_vpc_security_group_ingress_rule" "redis_from_backend" {
+  security_group_id            = aws_security_group.redis.id
+  description                  = "redis 6379 from backend tasks only"
+  ip_protocol                  = "tcp"
+  from_port                    = 6379
+  to_port                      = 6379
   referenced_security_group_id = aws_security_group.backend.id
 }
 

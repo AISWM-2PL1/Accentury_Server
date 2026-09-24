@@ -19,7 +19,7 @@ import java.util.regex.Pattern;
  * 에러 없이 <b>조용히</b> 오동작한다 - trusted-proxies가 비면 전원이 ALB IP 하나로 묶여 서로의
  * 요청 제한을 깎고(§2.5), ai-base-url이 비면 분석을 전달하지 않는 개발 모드로 뜨며
  * ({@code NoopAnalysisDispatcher}), ai-token이 비면 AI가 모든 분석을 401로 끊어 회로가 열리며(KAN-36),
- * admin token이 비면 관리자 API가 404다. 헬스체크는 전부 UP이라
+ * admin token이 비면 관리자 API가 404이고, Redis나 JWT 키가 비면 로그인이 무너진다(KAN-223). 헬스체크는 전부 UP이라
  * 부하 테스트나 실사용자 불만에서야 드러난다. 배포 프로파일에서는 빠진 값을 <b>전부 나열하고</b>
  * 기동을 세운다.
  * <p>
@@ -70,10 +70,18 @@ class DeploymentConfigGuard {
     static final SsmName WEB_TEST_URL = new SsmName("accentury.result.web-test-url", "ACCENTURY_RESULT_WEBTESTURL");
     static final SsmName ASSET_BASE_URL = new SsmName("accentury.result.asset-base-url", "ACCENTURY_RESULT_ASSETBASEURL");
     static final SsmName KAKAO_ADMIN_KEY = new SsmName("accentury.share.kakao-admin-key", "ACCENTURY_SHARE_KAKAOADMINKEY");
+    // 계정 인증 (KAN-223). 서명 키와 Redis 접속은 시크릿이고, IdP 값 셋은 시크릿이 아니다.
+    static final SsmName JWT_SECRET = new SsmName("accentury.auth.jwt-secret", "ACCENTURY_AUTH_JWTSECRET");
+    static final SsmName REDIS_HOST = new SsmName("spring.data.redis.host", "SPRING_DATA_REDIS_HOST");
+    static final SsmName REDIS_PASSWORD = new SsmName("spring.data.redis.password", "SPRING_DATA_REDIS_PASSWORD");
+    static final SsmName GOOGLE_CLIENT_ID = new SsmName("accentury.auth.google-client-id", "ACCENTURY_AUTH_GOOGLECLIENTID");
+    static final SsmName APPLE_BUNDLE_ID = new SsmName("accentury.auth.apple-bundle-id", "ACCENTURY_AUTH_APPLEBUNDLEID");
+    static final SsmName KAKAO_APP_ID = new SsmName("accentury.auth.kakao-app-id", "ACCENTURY_AUTH_KAKAOAPPID");
 
     /** 배포에서 값이 와야 하는 프로퍼티 전부 (자격 증명 둘은 Secrets Manager URL이면 비어 있어도 된다). */
     static final List<SsmName> SSM_NAMES = List.of(DATASOURCE_URL, DATASOURCE_USERNAME, DATASOURCE_PASSWORD,
-            AI_BASE_URL, AI_TOKEN, TRUSTED_PROXIES, ADMIN_TOKEN, WEB_TEST_URL, ASSET_BASE_URL, KAKAO_ADMIN_KEY);
+            AI_BASE_URL, AI_TOKEN, TRUSTED_PROXIES, ADMIN_TOKEN, WEB_TEST_URL, ASSET_BASE_URL, KAKAO_ADMIN_KEY,
+            JWT_SECRET, REDIS_HOST, REDIS_PASSWORD, GOOGLE_CLIENT_ID, APPLE_BUNDLE_ID, KAKAO_APP_ID);
 
     /**
      * JDBC URL에 이 파라미터가 <b>값과 함께</b> 있으면 자격 증명은 AWS Advanced JDBC Wrapper의
@@ -144,6 +152,29 @@ class DeploymentConfigGuard {
         // 헬스체크는 UP이라 전송 완료 수가 0으로만 보인다. Terraform이 자리를 만들고 값은 콘솔에서 옮겨 넣는다.
         if (isBlank(binder, KAKAO_ADMIN_KEY.property())) {
             missing.add(KAKAO_ADMIN_KEY.label());
+        }
+        // 계정 인증 (KAN-223). 서명 키가 없으면 AccessTokens가 기동마다 새 난수 키를 쓰는데(로컬 전용 경로), 배포에서
+        // 그러면 태스크마다 키가 달라 한 태스크가 발급한 Access를 다른 태스크가 전부 401로 거절한다. Redis 주소가 없으면
+        // localhost로 붙으려다 로그인만 503이고 헬스체크는 UP이라(Redis는 health에서 뺐다) 조용히 지나간다.
+        if (isBlank(binder, JWT_SECRET.property())) {
+            missing.add(JWT_SECRET.label());
+        }
+        if (isBlank(binder, REDIS_HOST.property())) {
+            missing.add(REDIS_HOST.label());
+        }
+        if (isBlank(binder, REDIS_PASSWORD.property())) {
+            missing.add(REDIS_PASSWORD.label());
+        }
+        // IdP 값 셋은 콘솔에서 받기 전에는 자리 표시 값이다 - 그 값이면 해당 IdP 로그인만 401이고 기동은 한다
+        // (JwksIdTokens.configured). 비어 있는 것은 Terraform이 파라미터를 안 만든 것이라 세운다.
+        if (isBlank(binder, GOOGLE_CLIENT_ID.property())) {
+            missing.add(GOOGLE_CLIENT_ID.label());
+        }
+        if (isBlank(binder, APPLE_BUNDLE_ID.property())) {
+            missing.add(APPLE_BUNDLE_ID.label());
+        }
+        if (isBlank(binder, KAKAO_APP_ID.property())) {
+            missing.add(KAKAO_APP_ID.label());
         }
         return missing;
     }

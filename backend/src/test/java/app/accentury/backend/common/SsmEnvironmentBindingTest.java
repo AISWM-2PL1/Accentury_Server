@@ -76,6 +76,13 @@ class SsmEnvironmentBindingTest {
         ssm.put(DeploymentConfigGuard.WEB_TEST_URL.ssmName(), "https://staging.accentury.app/t?c=kko_share");
         ssm.put(DeploymentConfigGuard.ASSET_BASE_URL.ssmName(), "https://staging.accentury.app/share");
         ssm.put(DeploymentConfigGuard.KAKAO_ADMIN_KEY.ssmName(), "0123456789abcdef0123456789abcdef");
+        // 계정 인증 (KAN-223)
+        ssm.put(DeploymentConfigGuard.JWT_SECRET.ssmName(), "jwt-secret-0123456789abcdef0123456789abcdef");
+        ssm.put(DeploymentConfigGuard.REDIS_HOST.ssmName(), "master.accentury-staging-redis.cache.amazonaws.com");
+        ssm.put(DeploymentConfigGuard.REDIS_PASSWORD.ssmName(), "redis-auth-token-0123456789abcdef");
+        ssm.put(DeploymentConfigGuard.GOOGLE_CLIENT_ID.ssmName(), "1234-abc.apps.googleusercontent.com");
+        ssm.put(DeploymentConfigGuard.APPLE_BUNDLE_ID.ssmName(), "app.accentury.ios");
+        ssm.put(DeploymentConfigGuard.KAKAO_APP_ID.ssmName(), "1234567");
 
         // OS 환경 변수와 같은 종류의 소스다 - 진짜 셸 값보다 앞에 둔다. 이름이 "-systemEnvironment"로
         // 끝나야 Boot가 환경 변수용 이름 규칙(대시 제거)을 적용한다 - 타입만 맞고 이름이 다르면 일반
