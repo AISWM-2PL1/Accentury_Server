@@ -357,4 +357,42 @@ class LogMaskingTest extends IntegrationTest {
         assertNotNull(encoder);
         return new String(encoder.encode(event), StandardCharsets.UTF_8);
     }
+
+    // === 계정 인증 (KAN-223) ===
+
+    @Test
+    void Refresh_토큰_원문을_접두사만_남기고_지운다() {
+        String refresh = "rt_" + "Q".repeat(43);
+
+        String masked = LogMasking.mask("refresh 실패 " + refresh);
+
+        assertFalse(masked.contains(refresh), masked);
+        assertTrue(masked.contains("rt_***"), masked);
+    }
+
+    @Test
+    void Bearer_뒤가_아니어도_JWT_모양은_지운다() {
+        // 요청 본문의 idToken이나 라이브러리 예외 메시지에 JWT가 통째로 박히는 경로다. 서명이 빈 위조 토큰도 걸린다.
+        String jwt = "eyJhbGciOiJSUzI1NiJ9.eyJzdWIiOiIxMjM0NTYifQ.c2lnbmF0dXJl";
+        String unsigned = "eyJhbGciOiJub25lIn0.eyJzdWIiOiIxIn0.";
+
+        String masked = LogMasking.mask("검증 실패 " + jwt + " / " + unsigned);
+
+        assertFalse(masked.contains(jwt), masked);
+        assertFalse(masked.contains("eyJzdWIiOiIxIn0"), masked);
+    }
+
+    @Test
+    void 계정_인증의_토큰과_시크릿은_이름으로도_지운다() {
+        // 카카오와 네이버 SDK 토큰은 모양이 정해져 있지 않아 이름 말고는 잡을 길이 없다.
+        String masked = LogMasking.mask("""
+                {"provider": "KAKAO", "accessToken": "kakao-opaque-1234", "idToken": "opaque-5678",
+                 "refreshToken": "opaque-9012"} ACCENTURY_AUTH_JWTSECRET=jwt-secret-value SPRING_DATA_REDIS_PASSWORD=redis-pass""");
+
+        for (String secret : new String[]{"kakao-opaque-1234", "opaque-5678", "opaque-9012", "jwt-secret-value", "redis-pass"}) {
+            assertFalse(masked.contains(secret), masked);
+        }
+        // 응답 필드 accessTokenExpiresInSec은 이름이 accessToken으로 시작해도 값이 아니다 - 걸리면 안 된다.
+        assertEquals("accessTokenExpiresInSec=1800", LogMasking.mask("accessTokenExpiresInSec=1800"));
+    }
 }

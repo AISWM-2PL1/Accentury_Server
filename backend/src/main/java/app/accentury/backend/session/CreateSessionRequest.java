@@ -25,7 +25,9 @@ import org.jspecify.annotations.Nullable;
  *                      선택 화면(KAN-202, staging 빌드 한정)이 보내고, 앱과 앱 안 WebView는 보내지
  *                      않는다. 코드 10개 밖의 값은 400 {@code VALIDATION_FAILED}이고 검증은
  *                      {@link SessionService}가 한다 (campaignToken의 형식 검증과 같은 결과). 응답에는
- *                      실리지 않는다.
+ *                      실리지 않는다. 계정 세션(KAN-223)은 이 값을 무시하고 계정의 출신지역을 쓴다.
+ * @param previousSessionToken 재응시 때 폐기할 이전 세션 토큰 ({@code st_...}, KAN-223, §3.1). 헤더 자리를 Access 토큰이
+ *                      차지하는 로그인한 앱이 쓴다. 웹과 로그인 전 앱은 지금처럼 헤더로 보낸다. 무효면 조용히 무시된다.
  */
 public record CreateSessionRequest(
         @Nullable
@@ -36,8 +38,18 @@ public record CreateSessionRequest(
 
         @Nullable Integer voiceSet,
 
-        @Nullable String region
+        @Nullable String region,
+
+        @Nullable
+        @Size(max = 128, message = "최대 128자입니다")
+        String previousSessionToken
 ) {
+
+    /** 재응시 본문 필드가 없는 요청 - KAN-223 이전 모양이다. */
+    public CreateSessionRequest(@Nullable String campaignToken, @Nullable Client client,
+                                @Nullable Integer voiceSet, @Nullable String region) {
+        this(campaignToken, client, voiceSet, region, null);
+    }
 
     /**
      * 클라이언트 정보 - 익명 집계에만 쓴다.

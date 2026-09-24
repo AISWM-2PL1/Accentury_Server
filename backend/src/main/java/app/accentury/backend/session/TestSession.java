@@ -14,6 +14,7 @@ import org.jspecify.annotations.Nullable;
 import org.springframework.data.domain.Persistable;
 
 import java.time.Instant;
+import java.util.UUID;
 
 /**
  * 익명 테스트 세션 (KAN-9).
@@ -21,7 +22,8 @@ import java.time.Instant;
  * API 명세서 §2.1 - 토큰은 원문이 아닌 SHA-256 해시로만 저장한다.
  * DB가 유출돼도 유효한 토큰을 복원할 수 없다.
  * <p>
- * 사용자 계정과 광고 식별자 등 개인 식별 정보 컬럼은 두지 않는다 (KAN-9 AC).
+ * 광고 식별자 등 개인 식별 정보 컬럼은 두지 않는다 (KAN-9 AC). 앱 로그인 사용자의 세션은 계정 id
+ * 하나({@code user_id})만 들고, 계정 정보 자체는 {@code app_user}에 있다 (KAN-223, §3.1). 웹 세션은 익명이다.
  * {@code campaignToken}은 공유 유입 계측용 코드로 개인 식별이 불가능하다 (§3.1).
  * <p>
  * {@link Persistable}인 이유: 식별자를 직접 정하는 엔티티라 {@code save()}가 merge(조회
@@ -82,6 +84,13 @@ public class TestSession implements Persistable<String> {
     private @Nullable String region;
 
     /**
+     * 이 세션이 귀속된 계정 (KAN-223, FR-AC-11) - 앱이 Access 토큰을 싣고 만든 세션만 값이 있고, 웹과
+     * 로그인 전 앱의 세션은 null이다. 세션 이후 경로는 이 값을 보지 않는다 - 인증은 계속 세션 토큰이다.
+     */
+    @Column(name = "user_id")
+    private @Nullable UUID userId;
+
+    /**
      * 이 세션이 실사용자인지 검증용 합성 트래픽인지 (KAN-138).
      * <p>
      * 생성 시점에 한 번 정해지고 이후 바뀌지 않는다. 완주 카운터(KAN-106)가 이 값을 따라가므로
@@ -116,6 +125,15 @@ public class TestSession implements Persistable<String> {
     public TestSession(String id, String tokenHash, String testVersion, String scoreVersion, int voiceSet,
                        @Nullable String platform, @Nullable String appVersion, @Nullable String campaignToken,
                        @Nullable Region region, Traffic traffic, Instant createdAt, Instant expiresAt) {
+        this(id, tokenHash, testVersion, scoreVersion, voiceSet, platform, appVersion, campaignToken,
+                region, traffic, null, createdAt, expiresAt);
+    }
+
+    /** 계정 귀속 세션 (KAN-223) - {@code userId}가 null이면 위 익명 생성자와 같다. */
+    public TestSession(String id, String tokenHash, String testVersion, String scoreVersion, int voiceSet,
+                       @Nullable String platform, @Nullable String appVersion, @Nullable String campaignToken,
+                       @Nullable Region region, Traffic traffic, @Nullable UUID userId,
+                       Instant createdAt, Instant expiresAt) {
         this.isNew = true;
         this.id = id;
         this.tokenHash = tokenHash;
@@ -127,6 +145,7 @@ public class TestSession implements Persistable<String> {
         this.campaignToken = campaignToken;
         this.region = region != null ? region.name() : null;
         this.traffic = traffic;
+        this.userId = userId;
         this.createdAt = createdAt;
         this.expiresAt = expiresAt;
     }
@@ -220,6 +239,11 @@ public class TestSession implements Persistable<String> {
 
     public Traffic traffic() {
         return traffic;
+    }
+
+    /** 귀속된 계정 - 익명 세션은 null이다 (KAN-223). */
+    public @Nullable UUID userId() {
+        return userId;
     }
 
     public Instant createdAt() {

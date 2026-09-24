@@ -68,7 +68,7 @@ class SchemaBaselineTest extends IntegrationTest {
 
 
     /**
-     * 재베이스라인(KAN-220, 2026-09-21) 뒤 운영 마이그레이션은 V1 하나다 - 옛 V2(발행 이관, KAN-26),
+     * 재베이스라인(KAN-220, 2026-09-21)의 baseline은 V1 하나다 - 옛 V2(발행 이관, KAN-26),
      * V7(공유 웹훅, KAN-164), V12(이용 후기, KAN-211) 등은 전부 V1에 합쳐졌다. 빈 DB에서는 그 V1이
      * 실제로 실행되어 SQL 유형으로 남아야 한다 (staging, prod는 전환 때 baseline 행(BASELINE 유형)만
      * 기록했고 그 설정은 제거됐다 - 빈 DB가 그 경로를 타면 이 단언이 잡는다).
@@ -82,17 +82,18 @@ class SchemaBaselineTest extends IntegrationTest {
     }
 
     /**
-     * 운영 마이그레이션은 V1뿐이어야 한다 - 옛 번호(V2~V12)가 되살아나면 재베이스라인 뒤의 기존
-     * DB(baseline 1만 기록)에는 그것이 "적용 안 된 마이그레이션"으로 보여 기동 시 실행되고,
-     * 이미 있는 테이블을 다시 만들다 실패한다. 테스트 픽스처(V899~)는 test 프로파일에만 있다.
+     * 운영 마이그레이션은 재베이스라인 V1과 그 뒤의 새 번호뿐이어야 한다 - 옛 번호(V2~V12의 옛 내용)가 되살아나면
+     * 재베이스라인 뒤의 기존 DB(baseline 1만 기록)에는 그것이 "적용 안 된 마이그레이션"으로 보여 기동 시 실행되고,
+     * 이미 있는 테이블을 다시 만들다 실패한다. V2는 재베이스라인 뒤 첫 새 마이그레이션(KAN-223 계정)이다.
+     * 테스트 픽스처(V899~)는 test 프로파일에만 있다. 새 마이그레이션을 더하면 이 목록도 함께 늘린다.
      */
     @Test
-    void 운영_마이그레이션은_V1_하나다() {
+    void 운영_마이그레이션은_V1_뒤에_새_번호만_온다() {
         List<String> versions = jdbc.queryForList(
                 "select version from flyway_schema_history where success order by installed_rank",
                 String.class);
-        assertEquals(List.of("1", "899", "900", "901"), versions,
-                "운영 마이그레이션 V1 뒤에는 테스트 픽스처(db/testdata)만 와야 한다");
+        assertEquals(List.of("1", "2", "899", "900", "901"), versions,
+                "운영 마이그레이션 V1, V2 뒤에는 테스트 픽스처(db/testdata)만 와야 한다");
     }
 
     /**
@@ -254,7 +255,9 @@ class SchemaBaselineTest extends IntegrationTest {
     void 인덱스_집합이_baseline과_일치한다() {
         // Map.of가 아니라 ofEntries다 - 테이블이 열한 개가 되면서 Map.of의 쌍 상한(10)을 넘었다 (KAN-211).
         Map<String, Set<String>> expected = Map.ofEntries(
-                Map.entry("test_session", Set.of("pk_test_session", "ux_test_session_token_hash")),
+                // ix_test_session_user는 KAN-223(V2)의 계정 FK 부분 인덱스다.
+                Map.entry("test_session", Set.of("pk_test_session", "ux_test_session_token_hash",
+                        "ix_test_session_user")),
                 // ix_analysis_job_processing은 KAN-167의 부분 인덱스(옛 V4, 지금은 V1) - 혼잡 판정의 PROCESSING count가 탄다.
                 Map.entry("analysis_job", Set.of("pk_analysis_job", "ux_analysis_job_idempotency",
                         "ix_analysis_job_session_item", "ix_analysis_job_processing")),
@@ -272,7 +275,9 @@ class SchemaBaselineTest extends IntegrationTest {
                         "ix_share_webhook_receipt_received_at")),
                 // KAN-211 이용 후기 (옛 V12, 지금은 V1) - 세션당 하나(유니크)이고, 보존 기간 삭제가 created_at으로 탄다.
                 Map.entry("session_feedback", Set.of("pk_session_feedback",
-                        "ux_session_feedback_session", "ix_session_feedback_created_at")));
+                        "ux_session_feedback_session", "ix_session_feedback_created_at")),
+                // KAN-223 계정 (V2) - 계정 식별 키 (provider, provider_user_id) 유일.
+                Map.entry("app_user", Set.of("pk_app_user", "ux_app_user_provider_subject")));
 
         Map<String, Set<String>> actual = new TreeMap<>();
         jdbc.query("select tablename, indexname from pg_indexes"

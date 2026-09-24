@@ -1,4 +1,4 @@
-# 로컬 풀스택 (BE + 가짜 AI + DB) - 앱과 웹의 완주 확인, 브라우저 E2E(KAN-181)가 겨누는 대상이다.
+# 로컬 풀스택 (BE + 가짜 AI + DB + Redis) - 앱과 웹의 완주 확인, 브라우저 E2E(KAN-181)가 겨누는 대상이다.
 #
 # [AI는 가짜 엔진이다 - 2026-09-06, KAN-22 PR #87 리뷰 반영]
 # AI 서버의 운영 이미지는 베이스가 채점 모델 전달본(약 4GB, linux/amd64, RSS 7GB대)이라 개발
@@ -31,6 +31,17 @@ services:
       timeout: 3s
       retries: 12
 
+  # Refresh 토큰 저장소 (KAN-223). 배포(ElastiCache)와 같은 7 메이저이고, 로컬은 비밀번호와 TLS가 없다.
+  # 포트를 공개하지 않는다 - backend만 부른다. 호스트 6379는 backend/docker-compose.yml의 개발용 redis 자리라
+  # 두 스택이 동시에 떠도 겹치지 않는다.
+  redis:
+    image: redis:7
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+
   ai:
     build:
       context: ./ai
@@ -58,6 +69,7 @@ services:
     depends_on:
       db: {condition: service_healthy}
       ai: {condition: service_healthy}
+      redis: {condition: service_healthy}
     environment:
       # application.yml의 값은 로컬 개발(localhost) 기준이다 - 컨테이너 안에서는 서비스
       # 이름으로 서로를 찾으므로 환경 변수로 덮는다.
@@ -73,6 +85,14 @@ services:
       # 32자 미만이면 기동이 실패한다(AdminAuth.requireStrongToken).
       # 이 값이 있어야 E2E 스모크가 자기 트래픽을 통계에서 갈라 놓을 수 있다.
       ACCENTURY_ADMIN_TOKEN: local-e2e-admin-token-0123456789abcdef
+      # 앱 계정 인증 (KAN-223). Refresh 저장소는 위 redis 서비스다.
+      SPRING_DATA_REDIS_HOST: redis
+      # Access JWT 서명 키 - 로컬 전용 고정값이다(32바이트 이상). 비워 두면 재기동마다 새 키라 앱 에뮬레이터의 토큰이
+      # 전부 무효가 된다. 운영 값은 Terraform이 SSM에 넣는다.
+      ACCENTURY_AUTH_JWTSECRET: local-jwt-secret-0123456789abcdef0123456789abcdef
+      # 가짜 IdP (명세서 §3.9) - idToken이나 accessToken을 fake:<sub>로 보내면 IdP 콘솔 없이 로그인한다.
+      # FE가 로그인 게이트와 추가 정보 화면을 붙이는 경로다 (KAN-224). 배포 프로파일에서는 켤 수 없다.
+      ACCENTURY_AUTH_FAKEIDP: "true"
     ports: ["127.0.0.1:8080:8080"]
     # 한도를 두는 이유는 Dockerfile의 MaxRAMPercentage=75를 실제로 좁은 컨테이너에서
     # 재현하기 위해서다 - 한도가 없으면 컨테이너가 호스트 메모리(7.7GB)를 그대로 보고

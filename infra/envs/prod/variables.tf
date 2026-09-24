@@ -135,3 +135,24 @@ variable "alert_email" {
   description = "CloudWatch 경보 수신 주소 (KAN-134, 2026-08-28 확정). 두 환경이 같은 값이라 tfvars가 아니라 기본값이다. 환경별로 나누려면 tfvars에 한 줄 넣으면 된다."
   default     = "team2pl1@gmail.com"
 }
+
+# ---- 앱 계정 인증 (KAN-223) ----
+# IdP 콘솔(KAN-224)에서 값을 받기 전에는 자리 표시 값이다 - backend는 그 IdP 로그인만 401로 막고 나머지는 정상이다.
+
+variable "auth_google_client_id" {
+  type        = string
+  description = "구글 서버용(웹) OAuth 클라이언트 ID - ID 토큰의 aud (KAN-223)"
+  default     = "unset-put-parameter-after-apply"
+}
+
+variable "auth_apple_bundle_id" {
+  type        = string
+  description = "iOS 번들 ID - 애플 identityToken의 aud (KAN-223)"
+  default     = "unset-put-parameter-after-apply"
+}
+
+variable "auth_kakao_app_id" {
+  type        = string
+  description = "카카오 앱 ID(숫자) - access_token_info의 app_id (KAN-223)"
+  default     = "unset-put-parameter-after-apply"
+}

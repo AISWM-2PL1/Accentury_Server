@@ -30,6 +30,7 @@ import java.util.Map;
  * @param share          카카오톡 공유 웹훅의 검증 키와 수신 기록 보존 기간 (KAN-164)
  * @param feedback       결과 화면 이용 후기의 요청 제한과 보존 기간 (KAN-211)
  * @param training       staging 전용 학습 데이터 S3 (KAN-201) - 버킷이 없으면 저장 코드가 호출되지 않는다.
+ * @param auth           앱 계정 인증 (KAN-223) - Access JWT, Refresh 회전, IdP 검증 설정
  * @param trustedProxies 요청 제한의 기준 IP를 정할 때 신뢰하는 프록시 대역 (KAN-28, §2.5).
  *                       CIDR 또는 단일 IP 목록이고, 직접 접속한 상대가 이 목록에 들어야만
  *                       {@code X-Forwarded-For}를 읽는다. 비어 있으면 헤더를 무시하고 접속 IP만
@@ -46,6 +47,7 @@ public record AccenturyProperties(Session session,
                                   @DefaultValue Admin admin, @DefaultValue Share share,
                                   @DefaultValue Feedback feedback,
                                   @DefaultValue Training training,
+                                  @DefaultValue Auth auth,
                                   @DefaultValue List<String> trustedProxies) {
 
     /**
@@ -305,6 +307,53 @@ public record AccenturyProperties(Session session,
      *               CloudWatch 레지스트리와 같은 값을 명시한다 (application-deploy.yml).
      */
     public record Training(@Nullable String bucket, @Nullable String region) {
+    }
+
+    /**
+     * 앱 계정 인증 (KAN-223, {@code auth} 패키지, 명세서 §2.1, §3.9~§3.13).
+     *
+     * @param jwtSecret          Access JWT(HS256)의 서명 키. 32바이트 이상이어야 하고 기동 시
+     *                           {@code AccessTokens}가 검증한다. 배포에서는 SSM SecureString
+     *                           {@code ACCENTURY_AUTH_JWTSECRET}이 넣고 deploy 프로파일은 없으면 기동을 세운다
+     *                           ({@code DeploymentConfigGuard}). <b>로컬에서 비어 있으면 기동마다 새 난수 키를
+     *                           쓴다</b> - 재기동하면 발급한 Access가 전부 무효가 되지만 로컬에서는 refresh가
+     *                           다시 받아 온다. 레포에 고정 키를 적어 두면 그 키가 배포로 새는 길이 생긴다.
+     * @param issuer             Access JWT의 {@code iss}. 검증은 정확 일치다.
+     * @param accessTokenTtl     Access JWT 수명 - 30분 (NFR-SC-03). 짧기 때문에 로그아웃에 블랙리스트를 두지 않는다.
+     * @param refreshTokenTtl    Refresh 토큰 수명 - 30일. 회전할 때마다 새 토큰이 다시 이 수명을 받는다.
+     * @param rateLimitPerMinute IP당 분당 로그인과 refresh 허용 횟수 (§2.5). 인증 없는 경로라 IP가 유일한 키이고,
+     *                           두 경로가 한 통을 나눠 쓴다. 세션 생성(30)과 같은 값이다.
+     * @param fakeIdp            개발용 가짜 IdP 스위치 - 켜면 {@code fake:<sub>} 모양의 토큰을 IdP 호출 없이
+     *                           그 sub로 받는다 (명세서 §3.9). 로컬과 FE 개발용이고, deploy 프로파일에서 켜면
+     *                           기동이 실패한다 ({@code AuthConfig}).
+     * @param googleClientId     구글 서버용(웹) OAuth 클라이언트 ID - ID 토큰의 {@code aud}와 정확 일치해야 한다.
+     *                           Android와 iOS가 모두 이 값을 serverClientId로 지정해 aud를 하나로 모은다 (KAN-224).
+     * @param appleBundleId      iOS 번들 ID - 애플 identityToken의 {@code aud}와 정확 일치해야 한다.
+     * @param kakaoAppId         카카오 앱 ID(숫자) - {@code access_token_info}의 {@code app_id}와 일치해야 한다.
+     *                           다른 앱이 받은 토큰으로 우리 계정에 들어오는 것을 막는 유일한 검사다.
+     *                           세 IdP 값은 시크릿이 아니다. 배포에서는 SSM String 파라미터가 넣고, 콘솔에서 값을
+     *                           받기 전에는 자리 표시 값({@link SsmPlaceholder#UNSET})이다 - 그 IdP의 로그인은
+     *                           전부 401 {@code AUTH_IDP_TOKEN_INVALID}이고 다른 IdP와 응시는 영향이 없다.
+     * @param googleJwksUrl      구글 JWKS 주소. 테스트가 가짜 JWKS로 바꾸는 자리다.
+     * @param appleJwksUrl       애플 JWKS 주소. 위와 같다.
+     * @param kakaoApiBaseUrl    카카오 API 기준 주소 ({@code kapi.kakao.com}). 테스트가 MockWebServer로 바꾼다.
+     * @param naverApiBaseUrl    네이버 API 기준 주소 ({@code openapi.naver.com}). 위와 같다.
+     * @param idpTimeout         IdP 호출(JWKS 조회 포함)의 연결과 읽기 타임아웃. 넘으면 502 {@code AUTH_IDP_UNAVAILABLE}이다.
+     */
+    public record Auth(@Nullable String jwtSecret,
+                       @DefaultValue("accentury") String issuer,
+                       @DefaultValue("30m") Duration accessTokenTtl,
+                       @DefaultValue("30d") Duration refreshTokenTtl,
+                       @DefaultValue("30") int rateLimitPerMinute,
+                       @DefaultValue("false") boolean fakeIdp,
+                       @Nullable String googleClientId,
+                       @Nullable String appleBundleId,
+                       @Nullable String kakaoAppId,
+                       @DefaultValue("https://www.googleapis.com/oauth2/v3/certs") String googleJwksUrl,
+                       @DefaultValue("https://appleid.apple.com/auth/keys") String appleJwksUrl,
+                       @DefaultValue("https://kapi.kakao.com") String kakaoApiBaseUrl,
+                       @DefaultValue("https://openapi.naver.com") String naverApiBaseUrl,
+                       @DefaultValue("5s") Duration idpTimeout) {
     }
 
     /**

@@ -58,6 +58,14 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
         // 등급 이미지 기준 URL (KAN-132) - 배포 프로파일 필수값.
         "accentury.result.asset-base-url=https://staging.accentury.app/share",
         "accentury.share.kakao-admin-key=0123456789abcdef0123456789abcdef",
+        // 계정 인증 (KAN-223) - 배포 프로파일 필수값. Redis는 기동 시 연결하지 않으므로 닿지 않는 주소여도 뜬다
+        // (health에서도 뺐다). IdP 값은 콘솔에서 받기 전의 자리 표시 값 그대로다.
+        "accentury.auth.jwt-secret=deploy-profile-boot-test-jwt-secret-0123456789",
+        "spring.data.redis.host=redis.invalid",
+        "spring.data.redis.password=deploy-profile-boot-test-redis",
+        "accentury.auth.google-client-id=unset-put-parameter-after-apply",
+        "accentury.auth.apple-bundle-id=unset-put-parameter-after-apply",
+        "accentury.auth.kakao-app-id=unset-put-parameter-after-apply",
         // 테스트 DB는 RDS가 아니라 순정 PostgreSQL이다.
         "spring.datasource.hikari.data-source-properties.wrapperDialect=pg"})
 @ActiveProfiles({"test", DeploymentConfigGuard.PROFILE})

@@ -23,7 +23,7 @@ import java.util.concurrent.TimeUnit;
  *
  * <h4>키 선택 규칙</h4>
  * <ul>
- *   <li>인증 없는 경로(세션 생성)는 <b>IP</b>가 유일한 키다 - 계정이 없다.</li>
+ *   <li>인증 없는 경로(세션 생성, 로그인과 refresh)는 <b>IP</b>가 유일한 키다 - 요청자를 가릴 다른 값이 없다.</li>
  *   <li>인증 뒤 경로는 <b>세션</b>이 키다 - NAT 뒤의 정상 응시자들이 서로의 한도를
  *       깎으면 안 된다.</li>
  *   <li>업로드만 둘 다다 - 본문이 큰 유일한 경로라 파싱 비용을 IP로 먼저 끊고
@@ -69,7 +69,9 @@ public class RateLimits {
         /** 완료 폴링 - 세션당 (§3.6) */
         COMPLETE("session"),
         /** 이용 후기 - 세션당 (KAN-211) */
-        FEEDBACK("session");
+        FEEDBACK("session"),
+        /** 로그인과 refresh - IP당, 두 경로가 한 통 (§2.5, KAN-223). 인증 없는 경로라 IP가 유일한 키다. */
+        AUTH("ip");
 
         private final String axis;
 
@@ -127,7 +129,8 @@ public class RateLimits {
                 Scope.VOICE_UPLOAD_SESSION, properties.upload().sessionRateLimitPerMinute(),
                 Scope.VOCAB_ANSWER, properties.vocab().rateLimitPerMinute(),
                 Scope.COMPLETE, properties.completion().rateLimitPerMinute(),
-                Scope.FEEDBACK, properties.feedback().rateLimitPerMinute());
+                Scope.FEEDBACK, properties.feedback().rateLimitPerMinute(),
+                Scope.AUTH, properties.auth().rateLimitPerMinute());
     }
 
     /**

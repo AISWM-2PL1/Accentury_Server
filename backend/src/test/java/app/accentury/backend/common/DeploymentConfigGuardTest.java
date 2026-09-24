@@ -22,11 +22,11 @@ class DeploymentConfigGuardTest {
             "jdbc:aws-wrapper:postgresql://db.internal:5432/accentury?secretsManagerSecretId=arn:aws:secretsmanager:ap-northeast-2:123456789012:secret:rds!db-x";
 
     @Test
-    void 아무것도_없으면_필수값_여덟_가지를_SSM_이름과_함께_전부_나열한다() {
+    void 아무것도_없으면_필수값_열네_가지를_SSM_이름과_함께_전부_나열한다() {
         // 한 번에 다 나와야 한다 - 하나씩 고치고 다시 띄우는 왕복이 배포마다 반복되면 안 된다.
         List<String> missing = DeploymentConfigGuard.missing(new MockEnvironment());
 
-        assertEquals(8, missing.size(), missing.toString());
+        assertEquals(14, missing.size(), missing.toString());
         assertTrue(missing.get(0).contains("SPRING_DATASOURCE_URL"));
         assertTrue(missing.get(1).contains("ACCENTURY_ANALYSIS_AIBASEURL"));
         assertTrue(missing.get(2).contains("ACCENTURY_ANALYSIS_AITOKEN"));
@@ -35,6 +35,13 @@ class DeploymentConfigGuardTest {
         assertTrue(missing.get(5).contains("ACCENTURY_RESULT_WEBTESTURL"));
         assertTrue(missing.get(6).contains("ACCENTURY_RESULT_ASSETBASEURL"));
         assertTrue(missing.get(7).contains("ACCENTURY_SHARE_KAKAOADMINKEY"));
+        // 계정 인증 (KAN-223)
+        assertTrue(missing.get(8).contains("ACCENTURY_AUTH_JWTSECRET"));
+        assertTrue(missing.get(9).contains("SPRING_DATA_REDIS_HOST"));
+        assertTrue(missing.get(10).contains("SPRING_DATA_REDIS_PASSWORD"));
+        assertTrue(missing.get(11).contains("ACCENTURY_AUTH_GOOGLECLIENTID"));
+        assertTrue(missing.get(12).contains("ACCENTURY_AUTH_APPLEBUNDLEID"));
+        assertTrue(missing.get(13).contains("ACCENTURY_AUTH_KAKAOAPPID"));
     }
 
     @Test
@@ -107,6 +114,13 @@ class DeploymentConfigGuardTest {
                 .withProperty("accentury.admin.token", "0123456789abcdef0123456789abcdef")
                 .withProperty("accentury.result.web-test-url", "https://staging.accentury.app/t?c=kko_share")
                 .withProperty("accentury.result.asset-base-url", "https://staging.accentury.app/share")
-                .withProperty("accentury.share.kakao-admin-key", "0123456789abcdef0123456789abcdef");
+                .withProperty("accentury.share.kakao-admin-key", "0123456789abcdef0123456789abcdef")
+                .withProperty("accentury.auth.jwt-secret", "jwt-secret-0123456789abcdef0123456789abcdef")
+                .withProperty("spring.data.redis.host", "master.accentury-staging-redis.cache.amazonaws.com")
+                .withProperty("spring.data.redis.password", "redis-auth-token-0123456789abcdef")
+                // IdP 값은 자리 표시 값이어도 통과다 - 콘솔에서 받기 전의 정상 상태다 (KAN-223).
+                .withProperty("accentury.auth.google-client-id", "unset-put-parameter-after-apply")
+                .withProperty("accentury.auth.apple-bundle-id", "app.accentury.ios")
+                .withProperty("accentury.auth.kakao-app-id", "1234567");
     }
 }

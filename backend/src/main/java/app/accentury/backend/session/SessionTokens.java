@@ -18,6 +18,12 @@ final class SessionTokens {
     private static final SecureRandom RANDOM = new SecureRandom();
     private static final Base64.Encoder BASE64_URL = Base64.getUrlEncoder().withoutPadding();
 
+    /**
+     * 세션 토큰의 접두사. 세션 생성의 {@code Authorization} 헤더에서 재응시용 이전 세션 토큰과 로그인한 앱의 Access
+     * 토큰(JWT)을 가르는 표지다 (KAN-223, §3.1) - 바꾸면 이미 발급된 토큰의 재응시가 401로 돌변한다.
+     */
+    static final String PREFIX = "st_";
+
     /** 토큰 난수 길이 - 256bit. 추측 불가능성의 근거 */
     private static final int TOKEN_BYTES = 32;
 
@@ -33,7 +39,7 @@ final class SessionTokens {
     static String newToken() {
         byte[] bytes = new byte[TOKEN_BYTES];
         RANDOM.nextBytes(bytes);
-        return "st_" + BASE64_URL.encodeToString(bytes);
+        return PREFIX + BASE64_URL.encodeToString(bytes);
     }
 
     /** 저장과 조회용 SHA-256 해시 (hex 64자). 토큰 원문은 DB에 넣지 않는다 (§2.1). */
