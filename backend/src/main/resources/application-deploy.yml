@@ -8,6 +8,12 @@
 # 로컬 기본값(localhost, postgres/local)으로 조용히 뜨는 대신, 무엇이 빠졌는지 나열하고 DB에
 # 닿기 전에 죽는다.
 spring:
+  # Refresh 저장소 ElastiCache는 전송 암호화만 받는다 (KAN-223, infra/modules/data). 주소와 AUTH 토큰은 SSM이 넣는다
+  # (SPRING_DATA_REDIS_HOST, SPRING_DATA_REDIS_PASSWORD). 인증서는 Amazon 루트라 JVM 기본 신뢰 저장소로 검증된다.
+  data:
+    redis:
+      ssl:
+        enabled: true
   datasource:
     # SSM SPRING_DATASOURCE_URL - Terraform이 조립한다:
     #   jdbc:aws-wrapper:postgresql://<RDS 주소>:5432/accentury?secretsManagerSecretId=<시크릿 ARN>

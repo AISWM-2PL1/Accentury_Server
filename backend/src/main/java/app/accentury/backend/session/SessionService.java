@@ -4,6 +4,7 @@ import app.accentury.backend.analysis.AnalysisJobRepository;
 import app.accentury.backend.analytics.AnalyticsCounters;
 import app.accentury.backend.analytics.SyntheticTraffic;
 import app.accentury.backend.analytics.Traffic;
+import app.accentury.backend.auth.AccountTokens;
 import app.accentury.backend.common.AccenturyProperties;
 import app.accentury.backend.common.ApiException;
 import app.accentury.backend.common.ErrorCode;
@@ -47,6 +48,7 @@ public class SessionService {
     private final RateLimits rateLimits;
     private final AnalyticsCounters counters;
     private final SyntheticTraffic syntheticTraffic;
+    private final AccountTokens accountTokens;
     private final TransactionTemplate transactionTemplate;
 
     public SessionService(TestSessionRepository repository,
@@ -57,6 +59,7 @@ public class SessionService {
                           AccenturyProperties properties,
                           RateLimits rateLimits, AnalyticsCounters counters,
                           SyntheticTraffic syntheticTraffic,
+                          AccountTokens accountTokens,
                           TransactionTemplate transactionTemplate) {
         this.repository = repository;
         this.vocabAnswerRepository = vocabAnswerRepository;
@@ -67,6 +70,7 @@ public class SessionService {
         this.rateLimits = rateLimits;
         this.counters = counters;
         this.syntheticTraffic = syntheticTraffic;
+        this.accountTokens = accountTokens;
         // 폐기+생성은 자신이 커밋 지점이어야 한다 (REQUIRES_NEW) - 바깥 트랜잭션에 합류하면
         // "카운터는 커밋 뒤" 불변식이 깨져, 바깥이 롤백해도 존재한 적 없는 세션이 집계에
         // 남는다 (2026-08-17 리뷰). 공용 템플릿 빈의 전파는 바꾸지 않도록 사본을 쓴다.
@@ -107,11 +111,19 @@ public class SessionService {
      * 같은 통으로 간다 ({@link Traffic}). 나머지 경로는 실사용자와 완전히 같다 - 요청 제한도
      * 그대로 받는다. 스모크 전용 분기가 늘수록 "스모크는 통과하는데 사용자는 깨지는" 구간이
      * 생겨, 스모크가 검증하는 경로와 실제 경로가 갈라지기 때문이다.
+     * <p>
+     * <b>계정 귀속 (KAN-223, §3.1).</b> 로그인한 앱은 {@code Authorization: Bearer}에 Access 토큰을 싣는다.
+     * 같은 헤더를 재응시(KAN-107)도 쓰므로 값의 모양으로 가른다 - {@code st_}로 시작하면 이전 세션 토큰(무효면
+     * 조용히 무시)이고, 그 밖은 Access 토큰이다. Access 토큰이 무효면 401 {@code AUTH_TOKEN_INVALID}이고 익명으로
+     * 떨어뜨리지 않는다 - 떨어뜨리면 로그인한 사용자의 응시가 계정에서 빠진 채 아무도 모른다. 프로필이 미완료면
+     * 403 {@code AUTH_PROFILE_INCOMPLETE}다. 계정 세션의 출신지역은 요청 본문이 아니라 계정의 값이다.
+     * 로그인한 앱의 재응시는 헤더 자리를 Access 토큰이 차지하므로 이전 세션 토큰을 본문
+     * {@code previousSessionToken}에 싣는다 - 본문 값이 있으면 그것이 헤더의 {@code st_} 토큰보다 우선한다.
      *
      * @param clientIp            요청 제한의 기준 IP - {@link app.accentury.backend.common.ClientIps}가
      *                            신뢰 프록시 규칙으로 정한 값
-     * @param authorizationHeader 재응시일 때만 실려 오는 이전 세션의 {@code Authorization} 헤더 -
-     *                            이 엔드포인트는 인증 불필요이므로(§2.1) 없으면 최초 응시다.
+     * @param authorizationHeader 재응시의 이전 세션 토큰({@code st_}) 또는 로그인한 앱의 Access 토큰 -
+     *                            이 엔드포인트는 인증 불필요이므로(§2.1) 없으면 익명의 최초 응시다.
      * @param adminToken          합성 트래픽 표시용 {@code X-Admin-Token} 헤더 (KAN-138) -
      *                            없으면 실사용자다.
      */
@@ -122,13 +134,24 @@ public class SessionService {
         // 저장 전에 판정한다 - 표시가 틀렸으면 세션도 만들지 않는다 (KAN-138).
         Traffic traffic = syntheticTraffic.resolve(adminToken);
 
-        String previousTokenHash = retakeTokenHash(authorizationHeader);
+        // 헤더 하나를 두 용도로 가른다 (KAN-223) - 계정 판정은 저장보다 먼저다. 무효 Access 토큰은 여기서 401이다.
+        String bearer = bearerTokenOrNull(authorizationHeader);
+        boolean bearerIsSessionToken = bearer != null && bearer.startsWith(SessionTokens.PREFIX);
+        AccountTokens.SessionAccount account =
+                bearer != null && !bearerIsSessionToken ? accountTokens.forSession(bearer) : null;
+        String bodyRetakeToken = request != null ? request.previousSessionToken() : null;
+        String previousTokenHash = retakeTokenHash(bodyRetakeToken != null && !bodyRetakeToken.isBlank()
+                ? bodyRetakeToken.strip()
+                : bearerIsSessionToken ? bearer : null);
         TestDefinitionRegistry.PublishedDefinition active = testDefinitions.active();
         String testVersion = active.definition().testVersion();
         String scoreVersion = active.definition().scoreVersion();
         int voiceSet = resolveVoiceSet(request, active.voiceSetCount());
-        // 출신 지역은 코드 10개 안에서만 받는다 (KAN-201) - 검증은 저장보다 먼저다.
-        Region region = Region.fromRequest(request != null ? request.region() : null);
+        // 출신 지역은 코드 10개 안에서만 받는다 (KAN-201) - 검증은 저장보다 먼저다. 계정 세션은 본문 값을 보지 않고
+        // 계정의 출신지역을 쓴다 (KAN-223) - 본문이 틀린 값이어도 400이 아니다.
+        Region region = account != null
+                ? account.region()
+                : Region.fromRequest(request != null ? request.region() : null);
         // 세트를 누가 골랐는지는 로그에만 쓴다 - 편중을 나중에 로그로 되짚으려면
         // 서버가 고른 세션과 클라이언트가 지정한 세션이 구분돼야 한다 (KAN-205).
         boolean voiceSetRequested = request != null && request.voiceSet() != null;
@@ -163,6 +186,7 @@ public class SessionService {
                     request != null ? request.campaignToken() : null,
                     region,
                     traffic,
+                    account != null ? account.userId() : null,
                     now,
                     expiresAt));
             return summary;
@@ -176,9 +200,10 @@ public class SessionService {
         }
 
         // 토큰은 로그에 남기지 않는다 (§2.6, NFR-SC-07).
-        log.info("세션 생성 sessionId={} platform={} testVersion={} voiceSet={} voiceSetBy={} region={} traffic={}",
+        log.info("세션 생성 sessionId={} platform={} testVersion={} voiceSet={} voiceSetBy={} region={} traffic={} userId={}",
                 sessionId, client != null ? client.platform() : null, testVersion, voiceSet,
-                voiceSetRequested ? "client" : "server", region, traffic);
+                voiceSetRequested ? "client" : "server", region, traffic,
+                account != null ? account.userId() : null);
 
         // 응시 시도 1건 (KAN-106) - 폐기+생성 트랜잭션이 커밋된 뒤다.
         // 실패는 카운터 쪽에서 삼킨다 - 통계가 세션 생성을 막으면 안 된다 (FR-AN-10).
@@ -276,16 +301,15 @@ public class SessionService {
     private record PurgeSummary(String sessionId, long answers, long attempts, long results) {}
 
     /**
-     * 재응시 요청의 {@code Authorization} 헤더에서 이전 토큰의 해시를 꺼낸다 (KAN-107).
+     * 재응시의 이전 세션 토큰(헤더의 {@code st_} 토큰 또는 본문 {@code previousSessionToken})의 해시 (KAN-107, KAN-223).
      * <p>
-     * 헤더 부재, 형식 오류, 빈 토큰 전부 401이 아니라 조용한 무시(null)다 - 어떤 입력도
+     * 부재, 형식 오류, 빈 토큰 전부 401이 아니라 조용한 무시(null)다 - 어떤 입력도
      * 201 외의 응답으로 갈라지면 이 엔드포인트가 토큰 존재 여부를 알려주는 오라클이 된다
      * (티켓 요구 4). 모르는 토큰과 폐기된 토큰, 만료 후 삭제된 토큰이 전부 같은 응답을
      * 받아야 최초 응시와 재응시가 구분되지 않는다.
      */
-    private static @Nullable String retakeTokenHash(@Nullable String authorizationHeader) {
-        String token = bearerTokenOrNull(authorizationHeader);
-        return token == null ? null : SessionTokens.hash(token);
+    private static @Nullable String retakeTokenHash(@Nullable String previousToken) {
+        return previousToken == null ? null : SessionTokens.hash(previousToken);
     }
 
     /**
@@ -339,8 +363,8 @@ public class SessionService {
     }
 
     /**
-     * Bearer 헤더 파싱의 유일한 정의 - 인증({@link #bearerToken})과 재응시
-     * ({@link #retakeTokenHash})가 같은 파서를 쓴다 (2026-08-17 리뷰). 규칙이 한쪽만
+     * Bearer 헤더 파싱의 유일한 정의 - 인증({@link #bearerToken})과 세션 생성의 재응시, 계정 귀속
+     * ({@link #create})이 같은 파서를 쓴다 (2026-08-17 리뷰). 규칙이 한쪽만
      * 바뀌면 인증은 받는 헤더를 재응시가 조용히 놓쳐 폐기가 무증상으로 멈춘다.
      * 부재, 형식 오류, 빈 토큰은 null - 실패 응답은 호출부가 정한다.
      */

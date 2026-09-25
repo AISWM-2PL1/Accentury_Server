@@ -1,4 +1,4 @@
-# RDS PostgreSQL 프로비저닝 (KAN-122).
+# RDS PostgreSQL 프로비저닝 (KAN-122)과 Refresh 토큰 저장소 ElastiCache Redis (KAN-223).
 #
 # PostgreSQL 16: backend/docker-compose.yml의 로컬 버전(postgres:16)과 동일 메이저.
 # 단일 AZ, 퍼블릭 액세스 차단, 사설 서브넷 배치. 다중 AZ는 프로토타입 범위 외.
@@ -65,4 +65,75 @@ resource "aws_db_instance" "this" {
   final_snapshot_identifier = var.skip_final_snapshot ? null : "${local.name}-final-${random_id.final_snapshot[0].hex}"
 
   tags = { Name = local.name }
+}
+
+# ---- Refresh 토큰 저장소 (KAN-223) ----
+#
+# Redis는 앱 계정 인증의 Refresh 토큰에만 쓴다 (명세서 §2.1) - 세션, 요청 제한, 분석 작업은 여전히 RDS와 태스크
+# 메모리다. 그래서 작게 간다: 단일 노드 cache.t4g.micro, 복제본과 자동 장애 조치 없음, 스냅샷 없음. Redis가 죽으면
+# 로그인과 refresh만 503이고(AUTH_STORE_UNAVAILABLE) 익명 응시는 영향이 없다 (NFR-AV-02). 노드를 새로 만들면 저장된
+# Refresh가 전부 사라져 앱 사용자가 한 번씩 다시 로그인한다 - 그 이상의 손실은 없어 스냅샷을 두지 않는다.
+#
+# 사설 서브넷(RDS와 같은 서브넷 그룹 대역)에 두고, redis-sg가 backend-sg의 6379만 받는다. 전송 암호화(TLS)와 저장
+# 암호화를 켜고 AUTH 토큰을 건다 - 전송 암호화가 켜져 있어야 AUTH 토큰을 걸 수 있다. backend는 deploy 프로파일에서
+# TLS로 붙는다 (application-deploy.yml spring.data.redis.ssl.enabled).
+
+resource "aws_elasticache_subnet_group" "redis" {
+  name       = "${local.name}-redis"
+  subnet_ids = var.private_subnet_ids
+
+  tags = { Name = "${local.name}-redis" }
+}
+
+# AUTH 토큰. ElastiCache 규칙(16~128자, 출력 가능한 ASCII 중 @ " / 공백 제외)에 맞게 영숫자만 쓴다. state에 평문이
+# 남는다 - 관리자 토큰과 같은 수용 범위다 (S3 암호화 + 버전 관리 버킷, KAN-140). backend에는 config 모듈이 SSM
+# SecureString SPRING_DATA_REDIS_PASSWORD로 넘긴다. 재발급은 envs 루트에서
+# `terraform apply -replace='module.data.random_password.redis_auth_token'` 뒤 backend 태스크를 새로 띄운다 -
+# 갱신 전략이 ROTATE라 apply 동안 옛 토큰도 받으므로 떠 있는 태스크가 끊기지 않는다.
+resource "random_password" "redis_auth_token" {
+  length  = 48
+  special = false
+}
+
+# 메모리가 차도 키를 내쫓지 않는다 (Codex 리뷰 P1). 기본 파라미터 그룹(default.redis7)은 volatile-lru라 TTL이 있는
+# 키를 내쫓는데, 여기 키는 전부 TTL이 있다 - 패밀리 집합(rtfam)만 먼저 내쫓기면 로그아웃과 재사용 감지가 토큰을 못
+# 찾아 폐기된 줄 알았던 Refresh가 살아남는다. noeviction이면 가득 찼을 때 쓰기가 오류로 떨어지고, backend는 그것을
+# 503(AUTH_STORE_UNAVAILABLE)으로 돌려준다 - 로그인이 막히는 쪽이 폐기가 새는 쪽보다 안전하다. backend의 Lua 스크립트도
+# 패밀리 집합이 없으면 그 토큰을 무효로 본다 (RefreshTokens, 이중 방어).
+resource "aws_elasticache_parameter_group" "redis" {
+  name   = "${local.name}-redis7"
+  family = "redis7"
+
+  parameter {
+    name  = "maxmemory-policy"
+    value = "noeviction"
+  }
+}
+
+resource "aws_elasticache_replication_group" "redis" {
+  replication_group_id = "${local.name}-redis"
+  description          = "Accentury ${var.env} refresh token store (KAN-223)"
+
+  engine               = "redis"
+  engine_version       = "7.1"
+  parameter_group_name = aws_elasticache_parameter_group.redis.name
+  node_type            = var.redis_node_type
+  num_cache_clusters   = 1
+  port                 = 6379
+
+  automatic_failover_enabled = false
+  multi_az_enabled           = false
+
+  subnet_group_name  = aws_elasticache_subnet_group.redis.name
+  security_group_ids = [var.redis_sg_id]
+
+  at_rest_encryption_enabled = true
+  transit_encryption_enabled = true
+  auth_token                 = random_password.redis_auth_token.result
+  auth_token_update_strategy = "ROTATE"
+
+  snapshot_retention_limit = 0
+  apply_immediately        = true
+
+  tags = { Name = "${local.name}-redis" }
 }

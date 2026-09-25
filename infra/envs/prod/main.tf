@@ -53,6 +53,7 @@ module "data" {
   env                 = var.env
   private_subnet_ids  = module.network.private_subnet_ids
   rds_sg_id           = module.network.rds_sg_id
+  redis_sg_id         = module.network.redis_sg_id
   instance_class      = var.db_instance_class
   deletion_protection = var.db_deletion_protection
   skip_final_snapshot = var.db_skip_final_snapshot
@@ -109,6 +110,12 @@ module "config" {
   rds_endpoint               = module.data.endpoint
   rds_master_user_secret_arn = module.data.master_user_secret_arn
   ai_dns_name                = module.network.ai_dns_name
+  # 앱 계정 인증 (KAN-223) - Refresh 저장소 접속과 IdP 값. IdP 값은 콘솔에서 받기 전까지 tfvars의 자리 표시 값이다.
+  redis_host            = module.data.redis_host
+  redis_auth_token      = module.data.redis_auth_token
+  auth_google_client_id = var.auth_google_client_id
+  auth_apple_bundle_id  = var.auth_apple_bundle_id
+  auth_kakao_app_id     = var.auth_kakao_app_id
   # 학습 데이터 버킷이 있는 환경(staging)에만 ACCENTURY_TRAINING_BUCKET 파라미터가 생긴다 (KAN-201).
   training_bucket_name = one(aws_s3_bucket.training[*].bucket)
 }
@@ -208,9 +215,9 @@ module "deploy" {
   source = "../../modules/deploy"
 
   env                         = var.env
-  github_repository           = var.github_repository
+  github_owner                = var.github_owner
   github_owner_id             = var.github_owner_id
-  github_repository_id        = var.github_repository_id
+  github_repositories         = var.github_repositories
   ssm_prefix                  = var.ssm_prefix
   ci_image_push               = var.ci_image_push
   web_bucket_arn              = module.edge.web_bucket_arn

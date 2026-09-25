@@ -33,3 +33,14 @@ variable "skip_final_snapshot" {
   type        = bool
   description = "삭제 시 최종 스냅샷 생략 여부 (staging true, prod false)"
 }
+
+variable "redis_sg_id" {
+  type        = string
+  description = "redis-sg (backend-sg만 6379 허용, KAN-223)"
+}
+
+variable "redis_node_type" {
+  type        = string
+  description = "Refresh 토큰 저장소 ElastiCache 노드 타입 (KAN-223). Refresh 키 수천 개라 가장 작은 것으로 충분하다."
+  default     = "cache.t4g.micro"
+}

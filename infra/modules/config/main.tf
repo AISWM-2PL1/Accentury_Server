@@ -213,6 +213,59 @@ resource "aws_ssm_parameter" "feedback_slack_webhook_url" {
   value_wo_version = 1
 }
 
+# ---- 앱 계정 인증 (KAN-223) ----
+
+# Access JWT(HS256)의 서명 키. backend(AccessTokens)가 32바이트 미만을 거부하므로 64자 영숫자로 넉넉히 잡는다.
+# 모든 backend 태스크가 같은 키여야 한다 - 한 태스크가 발급한 Access를 다른 태스크가 검증한다. 재발급은
+# `terraform apply -replace='module.config.random_password.jwt_secret'` 뒤 backend 태스크를 새로 띄운다. 그 순간
+# 발급된 Access(최대 30분)가 전부 무효가 되고, 앱은 refresh로 새로 받는다 (Refresh는 Redis라 영향이 없다).
+resource "random_password" "jwt_secret" {
+  length  = 64
+  special = false
+}
+
+resource "aws_ssm_parameter" "jwt_secret" {
+  name  = "${var.ssm_prefix}/ACCENTURY_AUTH_JWTSECRET"
+  type  = "SecureString"
+  value = random_password.jwt_secret.result
+}
+
+# Refresh 토큰 저장소 ElastiCache의 주소와 AUTH 토큰 (data 모듈). 이름은 Spring Boot 프로퍼티 규칙이다
+# (spring.data.redis.host -> SPRING_DATA_REDIS_HOST). TLS는 application-deploy.yml이 켠다.
+resource "aws_ssm_parameter" "redis_host" {
+  name  = "${var.ssm_prefix}/SPRING_DATA_REDIS_HOST"
+  type  = "String"
+  value = var.redis_host
+}
+
+resource "aws_ssm_parameter" "redis_password" {
+  name  = "${var.ssm_prefix}/SPRING_DATA_REDIS_PASSWORD"
+  type  = "SecureString"
+  value = var.redis_auth_token
+}
+
+# IdP 토큰이 우리 앱의 것인지 가르는 값 셋 (명세서 §3.9). 시크릿이 아니라 String이다. 값은 IdP 콘솔에서 만드는 것이라
+# (KAN-224 콘솔 설정) 받기 전에는 tfvars의 기본값인 자리 표시 값이고, 그동안 그 IdP 로그인만 401이다 - 기동과 다른 IdP는
+# 영향이 없다 (backend JwksIdTokens.configured). 값을 받으면 tfvars에 적고 apply한 뒤 backend 태스크를 새로 띄운다.
+# 두 환경이 같은 IdP 앱을 쓰면 값도 같다.
+resource "aws_ssm_parameter" "google_client_id" {
+  name  = "${var.ssm_prefix}/ACCENTURY_AUTH_GOOGLECLIENTID"
+  type  = "String"
+  value = var.auth_google_client_id
+}
+
+resource "aws_ssm_parameter" "apple_bundle_id" {
+  name  = "${var.ssm_prefix}/ACCENTURY_AUTH_APPLEBUNDLEID"
+  type  = "String"
+  value = var.auth_apple_bundle_id
+}
+
+resource "aws_ssm_parameter" "kakao_app_id" {
+  name  = "${var.ssm_prefix}/ACCENTURY_AUTH_KAKAOAPPID"
+  type  = "String"
+  value = var.auth_kakao_app_id
+}
+
 # ---- staging 전용 학습 데이터 S3 (KAN-201) ----
 
 # 값이 있는 환경에만 파라미터가 생긴다 - prod 태스크 정의에는 이 환경 변수가 아예 없어 backend가 S3 클라이언트도

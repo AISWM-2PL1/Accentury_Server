@@ -1098,6 +1098,65 @@ WAF의 AWS 관리 규칙(KAN-149)은 `/recording`만 제외하고 이 경로에�
 (별도 인증이 없다) 레포, 노션, 지라 티켓, 스크린샷 어디에도 적지 않는다. backend 로그도 이 값을
 지운다 (`LogMasking`) - 켜짐 로그는 URL이 아니라 채널 라벨만 찍는다.
 
+### 앱 계정 인증 - Refresh 저장소 Redis, JWT 키, IdP 값 (KAN-223)
+
+앱(Android, iOS)의 소셜 로그인(명세서 §3.9~§3.13)이 쓰는 인프라다. 웹은 익명이라 아무것도 쓰지 않는다.
+Terraform이 만드는 것은 셋이다.
+
+| 무엇 | 어디 | 값의 출처 |
+| --- | --- | --- |
+| Refresh 토큰 저장소 ElastiCache Redis 7.1 (`cache.t4g.micro` 1노드, TLS, 저장 암호화, AUTH 토큰) | `modules/data`, SG는 `modules/network`의 redis-sg(backend-sg의 6379만) | Terraform |
+| `SPRING_DATA_REDIS_HOST`, `SPRING_DATA_REDIS_PASSWORD`(SecureString), `ACCENTURY_AUTH_JWTSECRET`(SecureString) | `modules/config` | Terraform (data 모듈 출력, 난수) |
+| `ACCENTURY_AUTH_GOOGLECLIENTID`, `ACCENTURY_AUTH_APPLEBUNDLEID`, `ACCENTURY_AUTH_KAKAOAPPID`(String) | `modules/config` | tfvars (IdP 콘솔, KAN-224) |
+
+**필수 SSM 파라미터가 여섯 늘었으므로 apply가 코드 배포보다 먼저다** (KAN-132와 같은 규칙). 여섯 모두
+`DeploymentConfigGuard`의 필수 목록이라, 파라미터 없이 새 이미지가 뜨면 태스크가 기동하지 못하고 롤링 배포가
+멈춘다. 순서는 환경마다 이렇다.
+
+1. `terraform apply` - ElastiCache 생성은 다른 자원보다 오래 걸린다(수 분 이상). 태스크 정의의 secrets도 이때 늘어나므로 backend
+   서비스가 새 리비전으로 한 번 롤링된다 (옛 이미지는 새 환경 변수를 무시하므로 문제가 없다).
+2. 이미지 배포 (KAN-128 파이프라인).
+3. 확인 - backend 로그에 기동 실패가 없는지 보고, 가짜 IdP는 배포에서 켤 수 없으므로 실제 IdP 토큰이 있어야
+   로그인 실증이 된다 (KAN-224 빌드). 그 전에는 `POST /v0/auth/refresh`에 아무 `rt_` 토큰을 보내 401
+   `AUTH_REFRESH_INVALID`가 오는지로 Redis 연결을 본다 - 503 `AUTH_STORE_UNAVAILABLE`이면 Redis에 닿지 못한
+   것이다 (SG, TLS, AUTH 토큰 순으로 본다).
+
+**IdP 값 셋은 콘솔에서 받기 전까지 자리 표시 값이다** (`unset-put-parameter-after-apply`, 변수 기본값). 그동안
+그 IdP 로그인만 401 `AUTH_IDP_TOKEN_INVALID`이고 기동과 다른 IdP, 익명 응시는 영향이 없다. 값을 받으면 환경의
+`terraform.tfvars`에 적고 apply한 뒤 backend 태스크를 새로 띄운다 (secrets는 태스크 시작 때 한 번 읽힌다).
+셋 다 시크릿이 아니라 tfvars에 그대로 적어도 된다.
+
+```
+auth_google_client_id = "<서버용(웹) OAuth 클라이언트 ID>.apps.googleusercontent.com"
+auth_apple_bundle_id  = "<iOS 번들 ID>"
+auth_kakao_app_id     = "<카카오 앱 ID(숫자)>"
+```
+
+```
+aws ecs update-service --cluster accentury-staging --service backend --force-new-deployment
+```
+
+네이버는 서버가 보관할 값이 없다 - 토큰 확인이 사용자 조회 API 호출 하나다.
+
+**키 재발급.**
+
+- JWT 서명 키: `terraform apply -replace='module.config.random_password.jwt_secret'` 뒤 backend 태스크를 새로 띄운다.
+  그 순간까지 발급된 Access(최대 30분)가 무효가 되고, 앱은 refresh로 새로 받는다. Refresh는 Redis라 영향이 없다.
+- Redis AUTH 토큰: 세 단계다. `ROTATE`는 새 토큰을 더하되 옛 토큰도 계속 받으므로, 유출 대응이라면 마지막 단계를
+  빼먹으면 옛 토큰이 살아 있다 (Codex 리뷰).
+  1. `terraform apply -replace='module.data.random_password.redis_auth_token'` - 새 토큰이 더해지고 옛 토큰도 받는다.
+     떠 있는 태스크가 끊기지 않는다.
+  2. backend 태스크를 새로 띄워(`--force-new-deployment`) 전부 새 토큰을 쓰게 한다.
+  3. `modules/data`의 `auth_token_update_strategy`를 `"SET"`으로 바꿔 apply하면 옛 토큰이 폐기된다. 그다음 `"ROTATE"`로
+     되돌려 다시 apply한다 - 다음 교체가 또 무중단이 되게.
+
+**Redis가 죽거나 교체되면.** 로그인, refresh, 로그아웃만 503이고 익명 응시와 헬스체크는 멀쩡하다 - Redis는
+backend health 판정에서 뺐다 (`management.health.redis.enabled: false`, 넣으면 ALB가 태스크를 전부 뺀다).
+노드를 새로 만들면 저장된 Refresh가 사라져 앱 사용자가 한 번씩 다시 로그인한다. 그 이상의 손실이 없어 스냅샷을
+두지 않는다.
+
+**비용.** `cache.t4g.micro` 1노드, 환경당 1개다 (스냅샷 없음). 월 금액은 KAN-223 착수 시점의 추정이라 apply 전에 AWS 요금표(서울 리전 온디맨드)로 확인한다.
+
 ### 원격 스모크 수동 실행 (KAN-138)
 
 이미 떠 있는 환경을 도메인 경유로 두드린다. 배포 파이프라인이 두 환경 모두 반영 직후 같은
@@ -1399,7 +1458,7 @@ OK 양쪽을 알린다. 해제 알림이 없으면 아직 죽어 있는지를 �
 ### 수신 주소와 구독 확인
 
 수신 주소는 `envs/{env}/variables.tf`의 `alert_email` 기본값이다 (2026-08-28 확정).
-두 환경이 같은 값이라 `github_repository`와 같은 이유로 tfvars가 아니라 기본값에 둔다.
+두 환경이 같은 값이라 `github_repositories`와 같은 이유로 tfvars가 아니라 기본값에 둔다.
 환경별로 나누려면 해당 tfvars에 `alert_email = "..."` 한 줄을 넣으면 된다.
 
 SNS 이메일 구독은 Terraform이 확인까지 해 줄 수 없다. apply 직후 상태는
@@ -1797,6 +1856,10 @@ SSM 관리 대상이고 VPC 안에 있어 RDS에 닿을 수 있고, 호스트 ip
 ### 임시 통로 열기 (환경당)
 
 1. Mac에 `brew install --cask session-manager-plugin`. `aws ssm start-session`이 이 플러그인을 찾는다.
+   cask는 pkg 설치에 sudo를 요구하므로 sudo 없이 두려면 AWS 번들을 홈에 푼다 (2026-09-22 실제 사용):
+   `curl -sSL -o /tmp/smp.zip https://s3.amazonaws.com/session-manager-downloads/plugin/latest/mac_arm64/sessionmanager-bundle.zip
+   && unzip -q -o /tmp/smp.zip -d ~/.local/lib && ln -sf ~/.local/lib/sessionmanager-bundle/bin/session-manager-plugin ~/.local/bin/`
+   (Intel Mac은 `mac_arm64` 대신 `mac`).
 2. 값을 모은다. `rds_endpoint` 출력은 `host:port` 형태라 뒤의 포트를 뗀다.
 
 ```
@@ -1853,10 +1916,12 @@ aws ec2 describe-security-group-rules --filters Name=group-id,Values="$RDS_SG" \
 ### Flyway 재베이스라인 전환 (KAN-220, 환경당 한 번)
 
 옛 V1~V12를 새 `V1__baseline.sql` 하나로 합쳤다 (2026-09-21 결정, 경위는 그 파일 머리 주석과
-`application.yml`의 flyway 주석). 새 파일은 기존 DB에서 실행되지 않는다 - 이력 테이블을 지우면
-`baseline-on-migrate`가 버전 1의 baseline 행만 기록한다. 그래서 기존 DB의 구 정의 행 삭제도 같은
-SQL 세션에서 사람이 한다. 순서가 중요하다. 이력 표는 지우지 않고 이름을 바꿔 두므로 실패해도 이름을
-되돌리면 구 이미지가 다시 기동한다 (아래 복구 경로, PR #121 리뷰 P1 반영).
+`application.yml`의 flyway 주석). 새 파일은 기존 DB에서 실행되지 않는다 - 이력 테이블을 지우면(이름을
+바꾸면) `baseline-on-migrate: true` + `baseline-version: 1`이 버전 1의 baseline 행만 기록한다. 그래서
+기존 DB의 구 정의 행 삭제도 같은 SQL 세션에서 사람이 한다. 순서가 중요하다. 이력 표는 지우지 않고
+이름을 바꿔 두므로 실패해도 이름을 되돌리면 구 이미지가 다시 기동한다 (아래 복구 경로, PR #121 리뷰
+P1 반영). **두 환경 모두 2026-09-22에 전환을 마쳤고 `baseline-on-migrate`는 그 뒤 제거했다** - 다음
+재베이스라인 때는 그 두 설정을 다시 켠 이미지로 전환하고, 끝나면 다시 지운다.
 
 1. `PUT /admin/v0/active-version`으로 `gn-2026.09.4`를 활성으로 바꾼다 (이미 09.4면 건너뛴다).
 2. 구 버전을 참조하는 **미만료 세션이 0건**이 될 때까지 기다린다. 미완주 세션은 30분이면 만료
@@ -1961,8 +2026,8 @@ commit;
 - 구 정의를 지우면 `previous_test_version`이 null이라 롤백 호출이 409를 낸다. 되돌릴 정의도 없다.
   옛 V2 최초 발행 때와 같은 상태다.
 - `baseline-on-migrate`는 이력 테이블이 없고 스키마가 비어 있지 않은 DB를 조용히 V1 적용 상태로
-  간주한다. 두 환경 전환이 끝나면 이력 테이블이 다시 있으므로 이 설정은 동작하지 않는다 - 제거 여부는
-  그때 결정한다.
+  간주한다. 두 환경 전환이 끝나면 이력 테이블이 다시 있어 동작하지 않으므로 전환 뒤 제거했다
+  (2026-09-22). 전환 중인 이미지에만 켜 둔다.
 - V8 이후 구 이미지 롤백 금지(KAN-200)는 그대로다. 전환 뒤에는 옛 V2~V12를 아는 이미지도 이력이 없어
   기동하지 못한다.
 

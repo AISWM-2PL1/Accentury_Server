@@ -96,6 +96,17 @@ public final class PropertiesFixture {
         return new AccenturyProperties.Admin(null);
     }
 
+    /**
+     * application.yml 기본값 그대로의 계정 인증 설정 (KAN-223) - 서명 키와 IdP 값은 없다(로컬 기본 상태).
+     * 이 설정을 쓰는 단위 테스트가 계정 경로를 타지 않으므로 값이 비어 있어도 된다.
+     */
+    public static AccenturyProperties.Auth auth() {
+        return new AccenturyProperties.Auth(null, "accentury", Duration.ofMinutes(30), Duration.ofDays(30), 30,
+                false, null, null, null,
+                "https://www.googleapis.com/oauth2/v3/certs", "https://appleid.apple.com/auth/keys",
+                "https://kapi.kakao.com", "https://openapi.naver.com", Duration.ofSeconds(5));
+    }
+
     private static AccenturyProperties properties(AccenturyProperties.Analysis analysis,
                                                   AccenturyProperties.Result result,
                                                   List<String> trustedProxies) {
@@ -125,6 +136,7 @@ public final class PropertiesFixture {
                 new AccenturyProperties.Feedback(10, Duration.ofDays(365), null),
                 // 학습 데이터 버킷 없음 - 기본 상태다 (KAN-201). 저장 코드가 호출되지 않는다.
                 new AccenturyProperties.Training(null, null),
+                auth(),
                 trustedProxies);
     }
 }

@@ -132,7 +132,10 @@ class SessionServiceTest extends IntegrationTest {
                 "region",         // 출신 지역 코드 10개 중 하나 (KAN-201) - 광역 단위라 개인을 좁히지 않는다.
                 // 실사용자냐 검증용 스모크냐의 두 값뿐이다 (KAN-138) - 개인을 좁히지 않는다.
                 // 오히려 이 표시가 없으면 스모크가 실사용자 통계에 섞인다.
-                "traffic");
+                "traffic",
+                // 계정 id 하나 (KAN-223, §3.1) - 앱 로그인 세션만 값이 있다. 계정 정보(이메일, 이름, 생년월일)는
+                // app_user에만 있고 세션에는 복사하지 않는다. 웹 세션은 null이라 익명이다.
+                "userId");
 
         Set<String> actual = Stream.of(TestSession.class.getDeclaredFields())
                 // @Transient는 컬럼이 아니다 - 이 검사는 저장소에 남는 것만 본다 (예: Persistable의 isNew 플래그).
