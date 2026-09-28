@@ -96,8 +96,8 @@ class ResultApiTest extends IntegrationTest {
                 .andExpect(jsonPath("$.tier.name").value("명예주민"))
                 .andExpect(jsonPath("$.tier.rank").value(4))
                 .andExpect(jsonPath("$.tier.of").value(5))
-                // 코멘트와 공유 자산은 설정(application.yml) 값 그대로다 - 앱 배포 없이 교체 (§3.7)
-                .andExpect(jsonPath("$.comment").value("억양은 거의 토박이인데 단어에서 들켰습니다."))
+                // 코멘트는 점수 비교로 고른 설정 문구다 (KAN-249) - 억양 75 > 단어 60이고 다음 등급은 경남 토박이.
+                .andExpect(jsonPath("$.comment").value("억양은 좋았어요! 단어만 조금 더 맞히면 경남 토박이까지 한 걸음이에요."))
                 // 이미지 URL = asset-base-url + 등급 code 소문자 + .png (KAN-132). 기본값은 prod 도메인이고
                 // 배포에서는 SSM이 환경 도메인으로 바꾼다.
                 .andExpect(jsonPath("$.share.imageUrl").value("https://accentury.app/share/honorary.png"))
@@ -142,7 +142,9 @@ class ResultApiTest extends IntegrationTest {
                 .andExpect(jsonPath("$.scores.intonation").value(100))
                 .andExpect(jsonPath("$.scores.vocabulary").value(100))
                 .andExpect(jsonPath("$.scores.overall").value(100))
-                .andExpect(jsonPath("$.tier.code").value("NATIVE"));
+                .andExpect(jsonPath("$.tier.code").value("NATIVE"))
+                // 최고 등급은 점수 비교 없이 고정 문구다 (KAN-249).
+                .andExpect(jsonPath("$.comment").value("억양도 단어도 완벽한 경남 토박이예요. 더 배울 게 없어요!"));
     }
 
     // === 미확정 세션의 갈래 (§3.7, /complete와 같은 판정 - 2026-08-14 확정) ===
