@@ -305,8 +305,17 @@ public record AccenturyProperties(Session session,
      *               optional 파라미터). 빈 문자열은 설정 실수로 보고 기동을 세운다 ({@code TrainingConfig}).
      * @param region 그 버킷의 리전. 비우면 SDK 기본 체인(태스크의 {@code AWS_REGION})이다 - 배포 프로파일은
      *               CloudWatch 레지스트리와 같은 값을 명시한다 (application-deploy.yml).
+     * @param testerIds    학습 활용에 동의한 테스터의 {@code app_user.id} 목록 (KAN-239). 이 계정들의 세션만
+     *                     저장한다. staging에서만 SSM StringList {@code ACCENTURY_TRAINING_TESTERIDS}가 넣는다 -
+     *                     Terraform은 자리 표시 값({@link SsmPlaceholder#UNSET})으로 자리만 만들고 운영자가
+     *                     {@code put-parameter}로 채운다. <b>없거나 자리 표시 값이면 빈 목록이고, 그러면 아무것도
+     *                     저장하지 않는다.</b> UUID가 아닌 항목은 설정 실수라 기동을 세운다 ({@code TrainingConfig}).
+     * @param pseudonymKey 세션 ID를 가명으로 바꾸는 HMAC-SHA256 키 (KAN-239). 버킷이 있으면 필수이고 32자
+     *                     이상이어야 한다. staging에서만 SSM SecureString {@code ACCENTURY_TRAINING_PSEUDONYMKEY}가
+     *                     넣는다 (Terraform ephemeral 난수 + write-only라 state에 남지 않는다).
      */
-    public record Training(@Nullable String bucket, @Nullable String region) {
+    public record Training(@Nullable String bucket, @Nullable String region, @Nullable List<String> testerIds,
+                           @Nullable String pseudonymKey) {
     }
 
     /**

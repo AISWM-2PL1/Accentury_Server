@@ -33,6 +33,8 @@ jobs:
               - 'infra/modules/edge/**'
               - 'infra/well-known/**'
               - 'infra/privacy/**'
+              # 환경별 본문을 자르는 규칙(--render)이 이 스크립트에 있고 privacy.test.mjs가 그것을 돌린다 (KAN-239).
+              - 'scripts/publish-privacy.sh'
               - '.github/workflows/test.yml'
 
   backend-test:

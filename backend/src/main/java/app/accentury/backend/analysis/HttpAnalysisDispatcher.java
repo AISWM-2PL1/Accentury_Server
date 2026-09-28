@@ -255,7 +255,7 @@ class HttpAnalysisDispatcher implements AnalysisDispatcher {
             apply(request.analysisJobId(), outcome, acceptedNanos);
             // 상태 전이가 끝난 뒤, 아래 finally의 wipeAudio() 전이다 (KAN-201). 사용자는 이미 종결을 볼 수
             // 있고, 워커 점유 시간만 저장 왕복만큼 늘어난다 (staging 한정 - 그 밖은 NONE이라 즉시 돌아온다).
-            keepTrainingSample(request, outcome, correlationId);
+            keepTrainingSample(request, outcome);
         } catch (RuntimeException e) {
             // 종결을 놓치면 사용자는 타임아웃 스위퍼까지 대기 화면에 묶인다 - 어떤 예외도 종결로 바꾼다.
             log.error("분석 전달 워커 실패 jobId={}", request.analysisJobId(), e);
@@ -410,27 +410,29 @@ class HttpAnalysisDispatcher implements AnalysisDispatcher {
      * 학습에 쓴다). 계약 위반은 원점수도 판정도 없고, null(재전송 예산 소진, 타임아웃, 회로 열림, 종료 중)은
      * AI에 닿지 못했거나 답을 못 받은 것이라 남기지 않는다.
      * <p>
+     * 누구의 샘플인지(동의 테스터 계정인지)는 저장소가 가른다 (KAN-239, {@code TrainingSpeakers}) - 테스터 목록과
+     * 가명 키가 학습 설정에 있어서다. 여기서는 세션 소유 계정을 실어 보내기만 한다.
+     * <p>
      * 저장소가 예외를 삼키기로 되어 있지만 한 번 더 감싼다 - 여기서 새면 바깥 catch가 이미 종결된 작업을
      * INTERNAL_ERROR로 다시 종결하려 들고(조건부 UPDATE 0행이라 무해하지만 ERROR 로그가 남는다), 저장
      * 구현의 실수가 분석 경로의 오류로 보인다.
      */
-    private void keepTrainingSample(AnalysisRequest request, AiAnalysisClient.@Nullable Outcome outcome,
-                                    String correlationId) {
+    private void keepTrainingSample(AnalysisRequest request, AiAnalysisClient.@Nullable Outcome outcome) {
         TrainingSample sample = switch (outcome) {
             case AiAnalysisClient.Completed completed -> new TrainingSample(
-                    request.analysisJobId(), request.sessionId(), request.itemId(),
+                    request.analysisJobId(), request.sessionId(), request.ownerId(), request.itemId(),
                     Region.forStorage(request.region()).name(), request.scriptKey(),
                     request.testVersion(), request.scoreVersion(), request.durationMs(),
                     TrainingSample.Outcome.COMPLETED, completed.intonationScore(), completed.qualityCode(),
-                    completed.modelVersion(), completed.scoreVersion(), null, correlationId, request.audio());
+                    completed.modelVersion(), completed.scoreVersion(), null, request.audio());
             case AiAnalysisClient.Rejected rejected when rejected.cause() == AiAnalysisClient.Rejected.Cause.JUDGED ->
                     new TrainingSample(
-                            request.analysisJobId(), request.sessionId(), request.itemId(),
+                            request.analysisJobId(), request.sessionId(), request.ownerId(), request.itemId(),
                             Region.forStorage(request.region()).name(), request.scriptKey(),
                             request.testVersion(), request.scoreVersion(), request.durationMs(),
                             rejected.retryable() ? TrainingSample.Outcome.RETRYABLE_FAILED
                                     : TrainingSample.Outcome.FAILED,
-                            null, null, null, null, rejected.errorCode(), correlationId, request.audio());
+                            null, null, null, null, rejected.errorCode(), request.audio());
             case AiAnalysisClient.Rejected ignored -> null;   // CONTRACT_VIOLATION
             case null -> null;
         };

@@ -42,7 +42,8 @@ class SsmEnvironmentBindingTest {
      * 프로파일 스위치는 검증 대상이 아니라 검증을 켜는 값이고, 분석 시간 예산 셋(KAN-22)은 없어도
      * 기동이 되는 조정값이다 - 없으면 application.yml의 기본값으로 뜬다. 가드에 넣으면 "없으면
      * 기동을 세운다"가 되어, 값 하나 지웠다고 배포가 멎는다. 학습 데이터 버킷(KAN-201)은 staging에만
-     * 만들어지는 optional 파라미터라 역시 가드 밖이다 - prod에는 이름 자체가 없어야 한다.
+     * 만들어지는 optional 파라미터라 역시 가드 밖이다 - prod에는 이름 자체가 없어야 한다. 같이 생기는 동의 테스터
+     * 목록과 가명 키(KAN-239)도 같다 - 가명 키는 버킷이 있을 때만 TrainingConfig가 요구한다.
      * <p>
      * 후기 슬랙 웹훅 URL(KAN-211)도 가드 밖이다. 카카오 검증 키와 모양은 같지만(콘솔이 발급하는
      * 값, Terraform은 자리만 만든다) 위험이 다르다 - 카카오 키가 없으면 웹훅 경로가 인증 없이
@@ -56,6 +57,8 @@ class SsmEnvironmentBindingTest {
             "ACCENTURY_ANALYSIS_PROCESSINGTIMEOUT",
             "ACCENTURY_ANALYSIS_DISPATCHCONCURRENCY",
             "ACCENTURY_TRAINING_BUCKET",
+            "ACCENTURY_TRAINING_TESTERIDS",
+            "ACCENTURY_TRAINING_PSEUDONYMKEY",
             "ACCENTURY_FEEDBACK_SLACKWEBHOOKURL");
 
     /** 가드 정본에는 있지만 Terraform이 만들지 않는 이름 - 자격 증명은 Secrets Manager에서 온다. */
@@ -109,6 +112,9 @@ class SsmEnvironmentBindingTest {
                         "ACCENTURY_ANALYSIS_PROCESSINGTIMEOUT", "400s",
                         "ACCENTURY_ANALYSIS_DISPATCHCONCURRENCY", "2",
                         "ACCENTURY_TRAINING_BUCKET", "accentury-staging-training-123456789012",
+                        "ACCENTURY_TRAINING_TESTERIDS",
+                        "0f8c2a4e-6d1b-4c3a-9e57-2b1d8f6a4c90,7a1e3c5b-2d4f-4e6a-8b0c-1d3f5a7c9e2b",
+                        "ACCENTURY_TRAINING_PSEUDONYMKEY", "binding-check-pseudonym-key-0123456789abcdef",
                         "ACCENTURY_FEEDBACK_SLACKWEBHOOKURL",
                         "https://hooks.slack.com/services/T000/B000/binding-check")));
         Binder tunedBinder = Binder.get(tuned);
@@ -118,6 +124,12 @@ class SsmEnvironmentBindingTest {
         // 학습 데이터 버킷 (KAN-201) - staging에만 오는 optional 값. 이름이 어긋나면 staging에서 샘플이 조용히 안 쌓인다.
         assertEquals("accentury-staging-training-123456789012",
                 tunedBinder.bind("accentury.training.bucket", String.class).get());
+        // 동의 테스터 목록과 가명 키 (KAN-239). 목록은 SSM StringList가 쉼표 한 줄로 들어와 원소로 갈라져야 한다 -
+        // 이름이 어긋나면 목록이 빈 채로 떠 동의한 테스터의 샘플도 조용히 안 쌓인다.
+        assertEquals(List.of("0f8c2a4e-6d1b-4c3a-9e57-2b1d8f6a4c90", "7a1e3c5b-2d4f-4e6a-8b0c-1d3f5a7c9e2b"),
+                tunedBinder.bind("accentury.training.tester-ids", Bindable.listOf(String.class)).get());
+        assertEquals("binding-check-pseudonym-key-0123456789abcdef",
+                tunedBinder.bind("accentury.training.pseudonym-key", String.class).get());
         // 후기 슬랙 웹훅 URL (KAN-211) - 이름이 어긋나면 값을 넣어도 알림이 조용히 꺼진 채로 뜬다.
         // 대시가 셋이라(slack-web-hook이 아니라 slack-webhook-url) relaxed binding 이름이 특히 헷갈린다.
         assertEquals("https://hooks.slack.com/services/T000/B000/binding-check",
@@ -132,16 +144,16 @@ class SsmEnvironmentBindingTest {
     @Test
     void 자리_표시_값이_Terraform의_두_자원_모두와_같다() throws IOException {
         // 자리 표시 값으로 뜬 backend는 카카오 웹훅을 전부 거부하고(KakaoWebhookAuth) 후기 슬랙 알림을
-        // 끈다(FeedbackSlackNotifier). 어느 쪽이든 리터럴이 어긋나면 그 판정이 통째로 뒤집힌다 -
+        // 끄고(FeedbackSlackNotifier) 학습 샘플을 아무것도 저장하지 않는다(TrainingConfig, KAN-239). 어느 쪽이든 리터럴이 어긋나면 그 판정이 통째로 뒤집힌다 -
         // 카카오는 자리 표시 값이 유효한 키로 통과해 위조 콜백이 카운터를 올리고, 슬랙은 알림이 켜진
         // 줄 알고 매번 자리 표시 URL로 요청을 내보낸다.
         Path main = Path.of("..", "infra", "modules", "config", "main.tf");
         assumeTrue(Files.exists(main), "infra/modules/config/main.tf 없음 - 모노레포 밖 실행");
 
         String literal = "value_wo         = \"" + SsmPlaceholder.UNSET + "\"";
-        assertEquals(2, Files.readString(main).split(Pattern.quote(literal), -1).length - 1,
-                "main.tf에서 자리 표시 값을 쓰는 자원이 둘(kakao_admin_key, feedback_slack_webhook_url)이"
-                        + " 아니다 - backend의 SsmPlaceholder.UNSET와 글자가 같은지 확인한다");
+        assertEquals(3, Files.readString(main).split(Pattern.quote(literal), -1).length - 1,
+                "main.tf에서 자리 표시 값을 쓰는 자원이 셋(kakao_admin_key, feedback_slack_webhook_url,"
+                        + " training_tester_ids)이 아니다 - backend의 SsmPlaceholder.UNSET와 글자가 같은지 확인한다");
         // 카카오 쪽 상수가 같은 리터럴을 가리키는지도 못박는다 - 옮기면서 갈라지면 여기서 드러난다.
         assertEquals(SsmPlaceholder.UNSET, app.accentury.backend.share.KakaoWebhookAuth.PLACEHOLDER);
     }

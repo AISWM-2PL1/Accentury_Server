@@ -41,6 +41,12 @@ scripts/publish-privacy.sh prod
 S3에 올리고 CloudFront를 무효화한 뒤 도메인으로 실제 응답을 받아 상태, content-type, 내용까지
 대조한다. 멱등이라 몇 번 돌려도 된다.
 
+**환경별 본문 (KAN-239).** 파일은 하나이고, `<!-- staging-only:begin -->`와 `<!-- staging-only:end -->`
+두 줄 사이는 staging에만 올라간다. prod에는 스크립트가 두 줄과 그 사이를 잘라낸 본문을 올린다 - staging 학습
+수집 고지가 prod 방침에 섞이면 안 되기 때문이다(prod는 음성을 저장하지 않는다). 표식은 각자 한 줄을 통째로
+차지해야 한다. 올라갈 본문은 AWS 없이 `scripts/publish-privacy.sh --render <env>`로 볼 수 있고, 계약 테스트가
+같은 경로로 prod 본문을 검사한다.
+
 **웹 배포와 무관하게 이 파일만 갈아 끼울 수 있다.** `web-deploy.yml`은 `aws s3 sync`를
 `--delete` 없이 쓰고 배포 역할에는 `s3:DeleteObject` 자체가 없어서
 (`infra/modules/deploy/main.tf`), 여기서 올린 `privacy.html`은 이후의 웹 배포에 지워지지 않는다.

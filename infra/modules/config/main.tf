@@ -278,3 +278,36 @@ resource "aws_ssm_parameter" "training_bucket" {
   type  = "String"
   value = var.training_bucket_name
 }
+
+# 학습 활용에 동의한 테스터 계정 목록 (KAN-239) - app_user.id를 쉼표로 잇는다. backend는 이 계정들의 세션만 저장한다.
+# 동의는 운영 절차로 받으므로 값은 Terraform이 아니라 운영자가 넣는다 (계정 id를 레포에 남기지 않는다):
+#   aws ssm put-parameter --overwrite --type StringList --name /accentury/staging/ACCENTURY_TRAINING_TESTERIDS --value '<id>,<id>'
+# 그 다음 backend 태스크를 새로 띄운다. 자리 표시 값인 동안 backend는 빈 목록으로 보고 아무것도 저장하지 않는다
+# (TrainingConfig) - 켜진 채로 동의 전이어도 안전한 기본값이다. write-only인 이유는 kakao_admin_key 주석과 같다.
+resource "aws_ssm_parameter" "training_tester_ids" {
+  count = var.training_bucket_name == null ? 0 : 1
+
+  name             = "${var.ssm_prefix}/ACCENTURY_TRAINING_TESTERIDS"
+  type             = "StringList"
+  value_wo         = "unset-put-parameter-after-apply"
+  value_wo_version = 1
+}
+
+# 세션 ID 가명화 키 (KAN-239) - HMAC-SHA256(sessionId, 이 키)가 학습 샘플의 speaker다. backend만 읽는다(태스크 정의
+# secrets). ephemeral 난수를 write-only로 넣어 state에 값이 남지 않는다 (KAN-242와 같은 방식). 회전은
+# value_wo_version을 올리고 apply한 뒤 backend를 새로 띄운다 - 이미 쌓인 샘플과 이후 샘플의 speaker가 이어지지 않는다.
+ephemeral "random_password" "training_pseudonym_key" {
+  count = var.training_bucket_name == null ? 0 : 1
+
+  length  = 64
+  special = false
+}
+
+resource "aws_ssm_parameter" "training_pseudonym_key" {
+  count = var.training_bucket_name == null ? 0 : 1
+
+  name             = "${var.ssm_prefix}/ACCENTURY_TRAINING_PSEUDONYMKEY"
+  type             = "SecureString"
+  value_wo         = ephemeral.random_password.training_pseudonym_key[0].result
+  value_wo_version = 1
+}
