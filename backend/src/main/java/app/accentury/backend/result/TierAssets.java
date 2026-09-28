@@ -33,9 +33,10 @@ class TierAssets {
 
     /**
      * 등급 하나의 응답용 자산 - 설정({@link AccenturyProperties.TierAsset})에 기준 URL로 만든
-     * 이미지 URL을 더한 것이다. {@code /result} 응답(§3.7)의 comment, share.imageUrl, share.text.
+     * 이미지 URL을 더한 것이다. {@code /result} 응답(§3.7)의 share.imageUrl, share.text.
+     * comment는 등급이 아니라 점수 비교로 고르므로 {@link ResultComments}의 몫이다 (KAN-249).
      */
-    record Asset(String comment, String imageUrl, String shareText) {
+    record Asset(String imageUrl, String shareText) {
     }
 
     private final Map<String, Asset> byCode = new HashMap<>();
@@ -61,9 +62,8 @@ class TierAssets {
                     "모르는 등급 code의 자산이다: " + entry.getKey()
                             + " (허용: " + ScorePolicyRegistry.TIER_CODES + ")");
             AccenturyProperties.TierAsset asset = entry.getValue();
-            require(hasText(asset.comment()), code + "의 comment가 비어 있다");
             require(hasText(asset.shareText()), code + "의 share-text가 비어 있다");
-            byCode.put(code, new Asset(asset.comment(), imageUrl(base, code), asset.shareText()));
+            byCode.put(code, new Asset(imageUrl(base, code), asset.shareText()));
         }
         for (String code : ScorePolicyRegistry.TIER_CODES) {
             require(byCode.containsKey(code), code + "의 자산 설정(accentury.result.tiers)이 없다");

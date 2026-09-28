@@ -216,9 +216,12 @@ public record AccenturyProperties(Session session,
      *                     업로드만으로 반영되고 설정과 배포는 건드리지 않는다.
      * @param tiers        등급 code(소문자 키) → 자산. 키는 {@code ScorePolicyRegistry.TIER_CODES}와
      *                     대소문자 무시 1:1이어야 한다.
+     * @param comments     결과 코멘트 문구 (KAN-249) - 등급이 아니라 억양과 단어 점수의 비교로 고른다.
+     *                     완결성(빈 값 없음, 자리 표시)은 기동 시 {@code ResultComments}가 강제한다.
      */
     public record Result(@Nullable String webTestUrl, @Nullable String assetBaseUrl,
-                         @DefaultValue Map<String, TierAsset> tiers) {
+                         @DefaultValue Map<String, TierAsset> tiers,
+                         @DefaultValue Comments comments) {
     }
 
     /**
@@ -368,12 +371,27 @@ public record AccenturyProperties(Session session,
     }
 
     /**
-     * 등급 하나의 결과 화면과 공유 문구 (§3.7 - comment, share.text). 공유 이미지 URL은 여기 없다 -
-     * {@link Result#assetBaseUrl()}과 등급 code로 만든다 (KAN-132).
+     * 등급 하나의 공유 문구 (§3.7 - share.text). 공유 이미지 URL은 여기 없다 -
+     * {@link Result#assetBaseUrl()}과 등급 code로 만든다 (KAN-132). 결과 코멘트도 여기 없다 -
+     * 등급이 아니라 점수 비교로 고르므로 {@link Comments}에 있다 (KAN-249).
      *
-     * @param comment   등급별 진단 코멘트 - 결과 화면에 그대로 표시된다 (KAN-29).
      * @param shareText 공유 카드 문구 - 이름 없는 1인칭 (KAN-30)
      */
-    public record TierAsset(@Nullable String comment, @Nullable String shareText) {
+    public record TierAsset(@Nullable String shareText) {
+    }
+
+    /**
+     * 결과 화면 코멘트 (§3.7 comment, KAN-249). 최고 등급이 아니면 억양 점수와 단어 점수를 비교해
+     * 앞의 셋 중 하나를 쓰고, 문구 안의 {@code {nextTier}}에는 한 단계 위 등급의 이름이 들어간다.
+     * 등급 이름 뒤에 조사를 붙이지 않고 "까지"로 잇는 것은 받침 유무(경남 토박이)와 무관하게
+     * 문장이 맞게 하려는 것이다.
+     *
+     * @param intonationAhead 억양 점수 &gt; 단어 점수
+     * @param even            억양 점수 = 단어 점수
+     * @param vocabularyAhead 억양 점수 &lt; 단어 점수
+     * @param top             최고 등급 - 점수와 무관한 고정 문구
+     */
+    public record Comments(@Nullable String intonationAhead, @Nullable String even,
+                           @Nullable String vocabularyAhead, @Nullable String top) {
     }
 }

@@ -3,6 +3,8 @@ package app.accentury.backend.result;
 import app.accentury.backend.common.ApiException;
 import app.accentury.backend.common.ErrorCode;
 import app.accentury.backend.common.ItemsApiException;
+import app.accentury.backend.scoring.ScorePolicy;
+import app.accentury.backend.scoring.ScorePolicyRegistry;
 import app.accentury.backend.session.SessionService;
 import app.accentury.backend.session.TestSession;
 import app.accentury.backend.testdefinition.TestDefinition;
@@ -34,15 +36,20 @@ public class ResultService {
     private final CompletionJudge judge;
     private final TestResultRepository resultRepository;
     private final TierAssets tierAssets;
+    private final ResultComments comments;
+    private final ScorePolicyRegistry scorePolicies;
 
     public ResultService(SessionService sessionService, TestDefinitionRegistry registry,
                          CompletionJudge judge, TestResultRepository resultRepository,
-                         TierAssets tierAssets) {
+                         TierAssets tierAssets, ResultComments comments,
+                         ScorePolicyRegistry scorePolicies) {
         this.sessionService = sessionService;
         this.registry = registry;
         this.judge = judge;
         this.resultRepository = resultRepository;
         this.tierAssets = tierAssets;
+        this.comments = comments;
+        this.scorePolicies = scorePolicies;
     }
 
     /**
@@ -61,7 +68,8 @@ public class ResultService {
             TestResult result = resultRepository.findBySessionId(session.id())
                     .filter(found -> !found.isExpired(Instant.now()))
                     .orElseThrow(() -> new ApiException(ErrorCode.RESULT_EXPIRED));
-            return ResultResponse.of(result, tierAssets.assetFor(result.tierCode()),
+            String comment = comments.commentFor(result.intonation(), result.vocabulary(), nextTierName(result));
+            return ResultResponse.of(result, tierAssets.assetFor(result.tierCode()), comment,
                     tierAssets.webTestUrl());
         }
 
@@ -83,5 +91,18 @@ public class ResultService {
         // 흐름대로 /complete 폴링이 맡는다.
         throw new ItemsApiException(ErrorCode.RESULT_NOT_READY,
                 ItemsApiException.ItemsField.PENDING_ITEMS, judgment.pendingItems());
+    }
+
+    /**
+     * 한 단계 위 등급의 이름 - 최고 등급이면 null이다 (KAN-249). 결과가 판정된 점수 버전의 등급표에서
+     * 찾는다. 발행 검증이 rank를 1부터 연속으로 강제하므로(ScorePolicyRegistry) rank r의 다음 등급은
+     * 목록의 r번째 칸이다.
+     */
+    private @Nullable String nextTierName(TestResult result) {
+        if (result.tierRank() >= result.tierCount()) {
+            return null;
+        }
+        ScorePolicy policy = scorePolicies.get(result.scoreVersion());
+        return policy.tiers().get(result.tierRank()).name();
     }
 }
