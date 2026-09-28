@@ -268,14 +268,14 @@ accentury:
   # staging 전용 학습 데이터 S3 (KAN-201, training 패키지). bucket이 있으면 분석이 종결될 때마다 음성 WAV와
   # 메타 JSON을 그 버킷에 남긴다 - FR-DP-01(원본 음성 미보존)의 staging 예외다. 미설정이 기본값이고, 그러면
   # S3 클라이언트도 저장 빈도 만들어지지 않는다 (로컬, 테스트, prod). staging에서만 SSM
-  # ACCENTURY_TRAINING_BUCKET이 넣는다 (config 모듈의 optional 파라미터, prod 태스크 정의에는 이 변수가 없다).
+  # ACCENTURY_TRAINING_CONSENTEDBUCKET이 넣는다 (config 모듈의 optional 파라미터, prod 태스크 정의에는 이 변수가 없다).
   # region은 그 버킷의 리전 - 배포 프로파일이 CloudWatch 레지스트리와 같은 값을 명시한다 (application-deploy.yml).
   # 버킷이 있어도 저장 대상은 동의 테스터 계정(tester-ids, SSM ACCENTURY_TRAINING_TESTERIDS)의 세션뿐이고, 세션 ID는
   # pseudonym-key(SSM ACCENTURY_TRAINING_PSEUDONYMKEY)로 만든 HMAC 가명으로 바뀐다 (KAN-239). 목록이 없거나 자리 표시
   # 값이면 아무것도 저장하지 않고, 버킷이 있는데 키가 없으면 기동을 세운다.
   # admin과 같은 이유로 블록째 주석이다.
   # training:
-  #   bucket: accentury-staging-training-<계정 ID>
+  #   consented-bucket: accentury-staging-training-<계정 ID>
   #   region: ap-northeast-2
   #   tester-ids: <app_user.id>,<app_user.id>
   #   pseudonym-key: <64자 난수>

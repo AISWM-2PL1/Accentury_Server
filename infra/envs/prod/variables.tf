@@ -56,7 +56,7 @@ variable "ai_max_size" {
 
 variable "training_bucket_enabled" {
   type        = bool
-  description = "staging 전용 학습 데이터 S3 버킷과 그 접근 권한, 버킷 정책, 학습 읽기 역할, SSM ACCENTURY_TRAINING_BUCKET / TESTERIDS / PSEUDONYMKEY를 만들지 (KAN-201, KAN-239). staging true, prod false - prod는 FR-DP-01 그대로라 반드시 false다. 값을 바꾸면 태스크 정의 secrets가 바뀌어 backend 태스크가 새로 뜬다. false로 바꾸는 apply가 곧 수집 중지이자 버킷 파기다(force_destroy)."
+  description = "staging 전용 학습 데이터 S3 버킷과 그 접근 권한, 버킷 정책, 학습 읽기 역할, SSM ACCENTURY_TRAINING_CONSENTEDBUCKET / TESTERIDS / PSEUDONYMKEY를 만들지 (KAN-201, KAN-239). staging true, prod false - prod는 FR-DP-01 그대로라 반드시 false다. 값을 바꾸면 태스크 정의 secrets가 바뀌어 backend 태스크가 새로 뜬다. false로 바꾸는 apply가 곧 수집 중지이자 버킷 파기다(force_destroy)."
   default     = false
 }
 
@@ -66,7 +66,11 @@ variable "training_retention_until" {
   default     = null
 
   validation {
-    condition     = var.training_retention_until == null || can(regex("^\\d{4}-\\d{2}-\\d{2}T00:00:00Z$", var.training_retention_until))
+    # 정규식은 모양만 본다 - 2026-13-45 같은 없는 날짜는 formatdate(RFC3339 파서)가 거른다 (PR #4 리뷰 P3).
+    condition = var.training_retention_until == null || (
+      can(regex("^\\d{4}-\\d{2}-\\d{2}T00:00:00Z$", var.training_retention_until))
+      && can(formatdate("YYYY", var.training_retention_until))
+    )
     error_message = "training_retention_until은 UTC 자정의 RFC3339여야 한다 (예: 2026-12-31T00:00:00Z) - S3 수명주기 만료일 규칙이다."
   }
 }

@@ -42,7 +42,7 @@ class TrainingConfigTest {
     }
 
     private static final String KEY = "accentury.training.pseudonym-key=" + "k".repeat(64);
-    private static final String BUCKET = "accentury.training.bucket=accentury-staging-training-123456789012";
+    private static final String BUCKET = "accentury.training.consented-bucket=accentury-staging-training-123456789012";
     private static final String REGION = "accentury.training.region=ap-northeast-2";
 
     @Test
@@ -57,11 +57,22 @@ class TrainingConfigTest {
     @Test
     void 빈_문자열_버킷은_설정_실수라_기동을_세운다() {
         // 리전을 명시한다 - CI 러너처럼 AWS 리전이 없는 환경에서는 SDK의 리전 오류가 먼저 나와 원인을 가린다.
-        runner.withPropertyValues("accentury.training.bucket=", "accentury.training.region=ap-northeast-2")
+        runner.withPropertyValues("accentury.training.consented-bucket=", "accentury.training.region=ap-northeast-2")
                 .run(context -> {
                     Throwable failure = context.getStartupFailure();
-                    assertTrue(failure != null && rootMessage(failure).contains("accentury.training.bucket"),
+                    assertTrue(failure != null && rootMessage(failure).contains("accentury.training.consented-bucket"),
                             () -> "기동 실패 사유가 다르다: " + failure);
+                });
+    }
+
+    @Test
+    void KAN_201의_옛_스위치_이름으로는_켜지지_않는다() {
+        // 반대 방향의 롤백 대비다 (PR #4 리뷰 P2) - 옛 이미지가 옛 이름을 읽어 한정 없이 수집하지 않도록 이름을 바꿨고,
+        // 새 이미지도 옛 이름에는 반응하지 않아야 설정 두 벌이 섞여도 어느 쪽이 켰는지 헷갈리지 않는다.
+        runner.withPropertyValues("accentury.training.bucket=accentury-staging-training-123456789012", REGION, KEY)
+                .run(context -> {
+                    assertFalse(context.containsBean("trainingS3Client"));
+                    assertEquals(0, context.getBeansOfType(TrainingSampleStore.class).size());
                 });
     }
 

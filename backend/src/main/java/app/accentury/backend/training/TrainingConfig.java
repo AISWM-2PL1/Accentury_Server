@@ -24,18 +24,22 @@ import java.util.Set;
 import java.util.UUID;
 
 /**
- * 학습 샘플 저장의 배선 (KAN-201) - {@code accentury.training.bucket}이 있을 때만 전부 만들어진다.
+ * 학습 샘플 저장의 배선 (KAN-201) - {@code accentury.training.consented-bucket}이 있을 때만 전부 만들어진다.
  * <p>
  * 없으면(로컬, 테스트, prod) 이 클래스의 빈은 하나도 없다. S3 클라이언트도 없다 - 소비자
  * ({@code AnalysisDispatchConfig})가 {@link TrainingSampleStore#NONE}으로 자리를 채운다. 값이 있는데
  * 비어 있는 것("")은 설정 실수라 뜨지 않는다 - 조용히 no-op으로 접으면 staging에서 샘플이 안 쌓이는
  * 원인이 묻힌다.
  * <p>
+ * 스위치 이름이 KAN-201의 {@code bucket}이 아니라 {@code consented-bucket}인 것은 롤백 대비다 (KAN-239 PR #4 리뷰 P2).
+ * 옛 이름이면 KAN-239 이전 이미지(수동 롤백, 반영 실패 시 자동 롤백)가 같은 파라미터로 뜨면서 테스터 한정과 가명 없이
+ * 모든 세션을 원문 ID로 다시 저장한다. 이름을 바꿔 두면 옛 이미지는 이 값을 모르므로 수집이 꺼진 채 뜬다.
+ * <p>
  * 버킷이 있어도 저장 대상은 동의한 테스터 계정의 세션뿐이고, 세션 ID는 가명으로 바뀐다 (KAN-239,
  * {@link TrainingSpeakers}). 그래서 가명 키가 없으면 기동을 세우고, 테스터 목록이 없으면 빈 목록으로 뜬다.
  */
 @Configuration(proxyBeanMethods = false)
-@ConditionalOnProperty(prefix = "accentury.training", name = "bucket")
+@ConditionalOnProperty(prefix = "accentury.training", name = "consented-bucket")
 class TrainingConfig {
 
     /**
@@ -121,7 +125,9 @@ class TrainingConfig {
      */
     private static String requirePseudonymKey(AccenturyProperties properties) {
         String key = properties.training().pseudonymKey();
-        if (key == null || key.strip().length() < MIN_PSEUDONYM_KEY_LENGTH || SsmPlaceholder.UNSET.equals(key)) {
+        // HMAC이 쓰는 원문 그대로 잰다 - 앞뒤 공백을 떼고 재면 공백으로 채운 짧은 키가 통과한다 (PR #4 리뷰 P3).
+        if (key == null || key.isBlank() || key.length() < MIN_PSEUDONYM_KEY_LENGTH
+                || SsmPlaceholder.UNSET.equals(key)) {
             throw new IllegalStateException("accentury.training.pseudonym-key가 없거나 " + MIN_PSEUDONYM_KEY_LENGTH
                     + "자 미만이다 - 학습 샘플을 저장하려면 SSM ACCENTURY_TRAINING_PSEUDONYMKEY가 있어야 한다 (KAN-239)");
         }
@@ -129,10 +135,10 @@ class TrainingConfig {
     }
 
     private static String requireBucket(AccenturyProperties properties) {
-        String bucket = Objects.requireNonNull(properties.training().bucket());
+        String bucket = Objects.requireNonNull(properties.training().consentedBucket());
         if (bucket.isBlank()) {
-            throw new IllegalStateException("accentury.training.bucket이 비어 있다 - 학습 데이터 저장을 끄려면 "
-                    + "값을 지우고(SSM ACCENTURY_TRAINING_BUCKET 없음), 켜려면 버킷 이름을 넣는다 (KAN-201)");
+            throw new IllegalStateException("accentury.training.consented-bucket이 비어 있다 - 학습 데이터 저장을 끄려면 "
+                    + "값을 지우고(SSM ACCENTURY_TRAINING_CONSENTEDBUCKET 없음), 켜려면 버킷 이름을 넣는다 (KAN-201)");
         }
         return bucket;
     }
