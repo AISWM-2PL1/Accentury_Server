@@ -1277,11 +1277,13 @@ aws ecs update-service --cluster accentury-staging --service backend --force-new
 확인 (본문은 학습 읽기 역할로 - 다른 자격 증명의 GetObject는 버킷 정책이 거부한다):
 
 ```
-eval "$(aws sts assume-role --role-arn "$(terraform output -raw training_reader_role_arn)" \
-  --role-session-name training-check --query 'Credentials.[AccessKeyId,SecretAccessKey,SessionToken]' \
-  --output text | awk '{print "export AWS_ACCESS_KEY_ID="$1" AWS_SECRET_ACCESS_KEY="$2" AWS_SESSION_TOKEN="$3}')"
-aws s3 ls "s3://$(terraform output -raw training_bucket)/" --recursive | tail        # 지역/버전/speaker/문항/sampleId.wav|.json
-aws s3 cp "s3://$(terraform output -raw training_bucket)/<키>.json" -                  # AI 원점수, 결과, 버전 (작업 ID와는 조인되지 않는다)
+# terraform output은 역할을 맡기 전에 읽는다 - 학습 읽기 역할은 state 버킷을 못 읽어 맡은 뒤에는 output이 403이다.
+B="$(terraform output -raw training_bucket)"; R="$(terraform output -raw training_reader_role_arn)"
+eval "$(aws sts assume-role --role-arn "$R" --role-session-name training-check \
+  --query 'Credentials.[AccessKeyId,SecretAccessKey,SessionToken]' --output text \
+  | awk '{print "export AWS_ACCESS_KEY_ID="$1" AWS_SECRET_ACCESS_KEY="$2" AWS_SESSION_TOKEN="$3}')"
+aws s3 ls "s3://$B/" --recursive | tail        # 지역/버전/speaker/문항/sampleId.wav|.json
+aws s3 cp "s3://$B/<키>.json" -                  # AI 원점수, 결과, 버전 (작업 ID와는 조인되지 않는다)
 unset AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY AWS_SESSION_TOKEN
 ```
 
