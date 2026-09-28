@@ -27,6 +27,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
+import { execFileSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 
@@ -339,4 +340,44 @@ test('데이터 소재지가 서울 리전이라고 적혀 있다 (infra, AWS ap
   // 이용 통계와 오류 로그뿐이라는 구분이 이 문구에 걸려 있다.
   assert.ok(html.includes('ap-northeast-2'), '리전 표기가 없다');
   assert.ok(html.includes('서울 리전'), '서울 리전 표기가 없다');
+});
+
+// ── 환경별 본문 (KAN-239) ─────────────────────────────────────────────────────
+// staging에는 학습 수집 고지가 붙고 prod에는 없다. 자르는 규칙은 게시 스크립트 하나에 있고
+// (--render), 여기서는 그 스크립트를 그대로 돌려 두 환경에 올라갈 본문을 검사한다.
+const SCRIPT = join(HERE, '..', '..', 'scripts', 'publish-privacy.sh');
+const rendered = (env) => execFileSync('bash', [SCRIPT, '--render', env], { encoding: 'utf8' });
+
+test('staging-only 표식은 짝이 맞고 각자 한 줄을 차지한다 (KAN-239)', () => {
+  // 스크립트는 줄 단위로 자른다. 표식이 다른 내용과 한 줄에 있거나 짝이 안 맞으면 prod 본문의
+  // 뒷부분이 통째로 잘리거나 고지가 prod에 샌다.
+  const lines = html.split('\n');
+  const begins = lines.filter((line) => line.includes('staging-only:begin'));
+  const ends = lines.filter((line) => line.includes('staging-only:end'));
+  assert.equal(begins.length, ends.length, '표식의 짝이 맞지 않는다');
+  assert.ok(begins.length >= 1, 'staging-only 블록이 없다');
+  for (const line of [...begins, ...ends]) {
+    assert.match(line, /^<!-- staging-only:(begin|end) -->$/, `표식이 한 줄을 통째로 차지하지 않는다: ${line}`);
+  }
+});
+
+test('prod 본문에는 학습 수집 고지가 없고 음성 미보존 문구가 그대로다 (KAN-239, FR-DP-01)', () => {
+  const prod = rendered('prod');
+  assert.ok(!prod.includes('staging-only'), 'prod 본문에 표식이 남았다');
+  assert.ok(!prod.includes('내부 테스트 환경'), 'prod 본문에 staging 고지가 새었다');
+  assert.ok(prod.includes('음성은 데이터베이스나 S3 같은 영속 저장소에 저장하지 않습니다'), 'prod 본문의 음성 미보존 문구가 없다');
+  assert.ok(prod.includes('</html>'), 'prod 본문 뒷부분이 잘렸다');
+});
+
+test('staging 본문은 학습 수집의 목적과 대상과 기간을 적는다 (KAN-239)', () => {
+  const staging = rendered('staging');
+  // 본문은 줄바꿈으로 감싸여 있어 낱말 사이 공백을 하나로 접어 대조한다.
+  const notice = staging.slice(staging.indexOf('staging-only:begin'), staging.indexOf('staging-only:end'))
+    .replace(/\s+/g, ' ');
+  assert.ok(notice.includes('학습'), '목적(모델 재학습)이 없다');
+  assert.ok(notice.includes('동의한 테스터 계정'), '대상(동의한 테스터 계정)이 없다');
+  assert.ok(notice.includes('로그인하지 않은 응시'), '익명 응시를 보관하지 않는다는 문구가 없다');
+  assert.ok(notice.includes('보유 기간이 끝나는 날'), '보관 기간이 없다');
+  assert.ok(notice.includes('가명'), '세션 가명화 문구가 없다');
+  assert.ok(notice.includes('철회'), '철회 방법이 없다');
 });

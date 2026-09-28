@@ -121,3 +121,8 @@ output "training_bucket" {
   value       = one(aws_s3_bucket.training[*].bucket)
   description = "staging 전용 학습 데이터 S3 버킷 (KAN-201). prod는 null이다. 샘플 확인: aws s3 ls s3://<이 값>/ --recursive"
 }
+
+output "training_reader_role_arn" {
+  value       = one(aws_iam_role.training_reader[*].arn)
+  description = "학습 데이터를 읽는 유일한 역할 (KAN-239). 학습 담당이 aws sts assume-role로 맡아 읽는다. prod는 null이다."
+}

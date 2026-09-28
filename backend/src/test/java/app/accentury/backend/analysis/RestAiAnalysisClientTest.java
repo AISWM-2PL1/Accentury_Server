@@ -446,6 +446,6 @@ class RestAiAnalysisClientTest {
 
     private static AnalysisDispatcher.AnalysisRequest request(String scriptKey) {
         return new AnalysisDispatcher.AnalysisRequest("a_client-test", "s_client", "v1", scriptKey,
-                "gn-2026.08.1", "sv-0.3", null, 3000, new byte[] {82, 73, 70, 70});
+                "gn-2026.08.1", "sv-0.3", null, null, 3000, new byte[] {82, 73, 70, 70});
     }
 }

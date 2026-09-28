@@ -3,6 +3,7 @@ package app.accentury.backend.analysis;
 import org.jspecify.annotations.Nullable;
 
 import java.util.Arrays;
+import java.util.UUID;
 
 /**
  * 검증이 끝난 업로드를 AI 분석으로 넘기는 경계 (KAN-23 정의, KAN-24 구현).
@@ -100,6 +101,8 @@ public interface AnalysisDispatcher {
      * @param region    세션이 받은 출신 지역 코드 (KAN-201, {@code Region}) - AI에는 가지 않고 staging의
      *                  학습 데이터 저장({@code TrainingSampleStore})만 읽는다. 보내지 않은 세션은 null이고
      *                  저장 쪽이 UNKNOWN으로 쓴다.
+     * @param ownerId   세션 소유 계정 ({@code test_session.user_id}, KAN-223) - AI에는 가지 않고 학습 데이터 저장이
+     *                  동의 테스터인지 가르는 데만 쓴다 (KAN-239). 익명 세션(웹)은 null이다.
      * @param audio     WAV 원본 - 클라이언트 업로드를 그대로 패스스루한다 (§4.1).
      *                  소유권은 {@code dispatch()}로 넘어간다 (위 계약 참조).
      */
@@ -111,6 +114,7 @@ public interface AnalysisDispatcher {
             String testVersion,
             String scoreVersion,
             @Nullable String region,
+            @Nullable UUID ownerId,
             long durationMs,
             byte[] audio) {
 

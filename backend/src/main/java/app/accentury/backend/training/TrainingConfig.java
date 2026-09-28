@@ -1,7 +1,10 @@
 package app.accentury.backend.training;
 
 import app.accentury.backend.common.AccenturyProperties;
+import app.accentury.backend.common.SsmPlaceholder;
 import io.micrometer.core.instrument.MeterRegistry;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
@@ -14,7 +17,11 @@ import tools.jackson.databind.ObjectMapper;
 
 import java.time.Clock;
 import java.time.Duration;
+import java.util.HashSet;
+import java.util.List;
 import java.util.Objects;
+import java.util.Set;
+import java.util.UUID;
 
 /**
  * 학습 샘플 저장의 배선 (KAN-201) - {@code accentury.training.bucket}이 있을 때만 전부 만들어진다.
@@ -23,6 +30,9 @@ import java.util.Objects;
  * ({@code AnalysisDispatchConfig})가 {@link TrainingSampleStore#NONE}으로 자리를 채운다. 값이 있는데
  * 비어 있는 것("")은 설정 실수라 뜨지 않는다 - 조용히 no-op으로 접으면 staging에서 샘플이 안 쌓이는
  * 원인이 묻힌다.
+ * <p>
+ * 버킷이 있어도 저장 대상은 동의한 테스터 계정의 세션뿐이고, 세션 ID는 가명으로 바뀐다 (KAN-239,
+ * {@link TrainingSpeakers}). 그래서 가명 키가 없으면 기동을 세우고, 테스터 목록이 없으면 빈 목록으로 뜬다.
  */
 @Configuration(proxyBeanMethods = false)
 @ConditionalOnProperty(prefix = "accentury.training", name = "bucket")
@@ -38,6 +48,11 @@ class TrainingConfig {
     static final Duration API_CALL_TIMEOUT = Duration.ofSeconds(10);
     static final Duration API_CALL_ATTEMPT_TIMEOUT = Duration.ofSeconds(5);
     static final Duration CONNECTION_TIMEOUT = Duration.ofSeconds(2);
+
+    /** 가명 키의 최소 길이 - Terraform은 64자 영숫자로 만든다 (config 모듈). */
+    static final int MIN_PSEUDONYM_KEY_LENGTH = 32;
+
+    private static final Logger log = LoggerFactory.getLogger(TrainingConfig.class);
 
     /**
      * 자격 증명은 기본 제공자 체인이 태스크 역할에서 받는다 - 버킷 하나에 PutObject만 허용된 역할이다
@@ -67,8 +82,50 @@ class TrainingConfig {
     @Bean
     TrainingSampleStore trainingSampleStore(S3Client trainingS3Client, AccenturyProperties properties,
                                             ObjectMapper objectMapper, MeterRegistry meterRegistry) {
-        return new S3TrainingSampleStore(trainingS3Client, requireBucket(properties), objectMapper,
+        TrainingSpeakers speakers = new TrainingSpeakers(testerIds(properties), requirePseudonymKey(properties));
+        // 켜진 채로 목록이 비어 있는 것은 정상 상태다(동의 받기 전) - 샘플이 안 쌓이는 이유를 기동 로그에 한 줄 남긴다.
+        log.info("학습 샘플 저장 켜짐 - 동의 테스터 {}명의 세션만 저장한다 (KAN-239)", speakers.testerCount());
+        return new S3TrainingSampleStore(trainingS3Client, requireBucket(properties), speakers, objectMapper,
                 Clock.systemUTC(), meterRegistry);
+    }
+
+    /**
+     * 동의 테스터 목록 (KAN-239). 없거나 자리 표시 값이면 빈 집합이다 - 저장하지 않는 쪽이 안전한 기본값이다.
+     * UUID가 아닌 항목은 기동을 세운다 - 조용히 건너뛰면 동의한 테스터의 샘플이 빠지는 원인이 묻힌다.
+     */
+    static Set<UUID> testerIds(AccenturyProperties properties) {
+        List<String> raw = properties.training().testerIds();
+        if (raw == null) {
+            return Set.of();
+        }
+        Set<UUID> ids = new HashSet<>();
+        for (String entry : raw) {
+            String value = entry.strip();
+            if (value.isEmpty() || SsmPlaceholder.UNSET.equals(value)) {
+                continue;
+            }
+            try {
+                ids.add(UUID.fromString(value));
+            } catch (IllegalArgumentException e) {
+                // 원인은 잇지 않는다 - UUID 파서의 메시지가 맨 아래 원인이 되면 어느 설정이 틀렸는지가 가려진다.
+                throw new IllegalStateException("accentury.training.tester-ids에 UUID가 아닌 항목이 있다 ('" + value
+                        + "') - SSM ACCENTURY_TRAINING_TESTERIDS는 app_user.id를 쉼표로 이은 값이다 (KAN-239)");
+            }
+        }
+        return ids;
+    }
+
+    /**
+     * 가명 키는 버킷이 있으면 필수다 (KAN-239) - 없으면 세션 ID 원문을 쓸 수밖에 없는데, 그 원문이 계정과
+     * 이어지는 고리다. 자리 표시 값과 짧은 키도 같이 거부한다(레포를 읽은 누구나 아는 값이거나 추측 가능한 값).
+     */
+    private static String requirePseudonymKey(AccenturyProperties properties) {
+        String key = properties.training().pseudonymKey();
+        if (key == null || key.strip().length() < MIN_PSEUDONYM_KEY_LENGTH || SsmPlaceholder.UNSET.equals(key)) {
+            throw new IllegalStateException("accentury.training.pseudonym-key가 없거나 " + MIN_PSEUDONYM_KEY_LENGTH
+                    + "자 미만이다 - 학습 샘플을 저장하려면 SSM ACCENTURY_TRAINING_PSEUDONYMKEY가 있어야 한다 (KAN-239)");
+        }
+        return key;
     }
 
     private static String requireBucket(AccenturyProperties properties) {

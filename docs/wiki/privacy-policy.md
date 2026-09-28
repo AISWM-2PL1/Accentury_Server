@@ -11,7 +11,7 @@
 
 - 티켓: **KAN-176** (방침 본문 작성)
 - 본문 정본: [`infra/privacy/privacy.html`](../../infra/privacy/privacy.html) — 14개 절
-- 계약 테스트: [`infra/privacy/privacy.test.mjs`](../../infra/privacy/privacy.test.mjs) 21건 (1항 표 검사는 행 목록으로 확장한다 — KAN-164 행 포함. KAN-196 1단계에서 사업자 확정 3건, KAN-197 1단계에서 웹 사업자 1건, KAN-211 4단계에서 이용 후기 2건 추가), CI `edge-test` 잡에 결선 (`.github/workflows/test.yml`)
+- 계약 테스트: [`infra/privacy/privacy.test.mjs`](../../infra/privacy/privacy.test.mjs) 24건 (KAN-239에서 환경별 본문 3건 추가. 1항 표 검사는 행 목록으로 확장한다 — KAN-164 행 포함. KAN-196 1단계에서 사업자 확정 3건, KAN-197 1단계에서 웹 사업자 1건, KAN-211 4단계에서 이용 후기 2건 추가), CI `edge-test` 잡에 결선 (`.github/workflows/test.yml`)
 - 이용 후기: **KAN-211** (2026-09-15) — 회신 이메일이 이 서비스가 받는 유일한 개인 식별 정보다. 구현 정본은 [`feedback.md`](feedback.md)
 - 호스팅과 게시 경로: **KAN-133** — `infra/privacy/README.md`, `scripts/publish-privacy.sh`
 - 앱 안 링크: **KAN-177** — 인트로 하단 한 줄, 구현 완료. 계약과 여는 방법은 [`webview-bridge.md` §4](webview-bridge.md), URL 정본은 `web/src/legal/privacyPolicy.ts` · 스토어 등록: **KAN-174**(Play) **KAN-175**(App Store)
@@ -30,6 +30,7 @@
 | 표의 행 | 핵심 주장 | 근거 | 계약 테스트 |
 |---|---|---|---|
 | 음성 녹음 | 분석이 끝나면 즉시 삭제 | `ai/app/tempstore.py:10-14` (컨텍스트 매니저가 성공·실패·예외·취소 모두 `finally`에서 삭제), KAN-27 | `음성은 분석 직후 즉시 삭제라고 적혀 있다`·`1항 표의 보유 기간이 행마다 코드와 맞는다` |
+| 음성 녹음 (staging 게시본만) | 내부 테스트 환경의 예외: 동의한 테스터 계정의 음성만 학습용으로 보관, 계정 정보 없이 가명 세션으로, 동의서의 보유 기간 끝날까지 | `backend` `training` 패키지(`TrainingSpeakers`가 동의 테스터 한정과 HMAC 가명화), `infra/envs/*/main.tf` 학습 버킷의 수명주기 만료일(`training_retention_until`)과 버킷 정책. 본문은 `<!-- staging-only -->` 블록이라 prod 게시본에는 없다(`scripts/publish-privacy.sh --render`). KAN-239 | `prod 본문에는 학습 수집 고지가 없고 음성 미보존 문구가 그대로다`, `staging 본문은 학습 수집의 목적과 대상과 기간을 적는다` |
 | 음성 녹음 | 임시 파일 청소 기준 30분 | `ai/app/config.py:18`, `backend/src/main/resources/application.yml:167` (`upload.temp-retention: 30m`), `ai/app/tempstore.py:13,169-177` | `임시 파일 청소 기준 30분이 적혀 있다` |
 | 음성 녹음 | 기기에도 파일로 남기지 않음 | `app/src/main/java/com/accentury/app/audio/WavWriter.kt:14-15` (업로드는 `toWavBytes`만 쓴다), `ios/AccenturyTests/RecordingFileLifecycleTests.swift:20` (`testAFullRecordEnqueueDiscardCycleLeavesNoWavOnDisk`) | — |
 | 음성 녹음 | DB·S3에 저장 안 함 | 2026-09-01 팀 회의 결정 (`infra/privacy/README.md`에 기록), 엔티티에 오디오 컬럼 없음 (`backend/src/main/java/app/accentury/backend/session/TestSession.java`, `backend/src/main/java/app/accentury/backend/result/TestResult.java`, `backend/src/main/java/app/accentury/backend/vocab/VocabAnswer.java`) | — |
@@ -83,7 +84,7 @@
 | 6. 정보주체 권리 | 특정 이용자의 정보를 지목할 수단이 없음 | 계정 없음, 세션은 익명 (`backend/src/main/java/app/accentury/backend/session/TestSession.java` — 사람을 가리키는 컬럼 없음) | — |
 | 6. 정보주체 권리 | 탭을 닫으면 세션 토큰·응시 키는 사라지고, 진행 기록은 결과 화면 진입에서 지워진다 | `web/src/session/webSession.ts`·`web/src/analytics/testId.ts:21-23` (`sessionStorage`) 대 `web/src/progress/progressSnapshot.ts` (`localStorage`, 키 `accentury:progress:<sessionId>`). 삭제 배선은 `web/src/App.tsx`의 `ResultRoute`(`clearSnapshot`)와 `IntroRoute`(`sweepSnapshots` — 결과까지 못 간 응시의 잔여 키) 두 자리다 (KAN-198) | `진행 기록의 삭제 시점이 적혀 있다` |
 | 6. 정보주체 권리 | **후기에 이메일을 적은 경우에는 그 주소로 13항 문의처에 열람·삭제를 요청할 수 있다** | 첫 문단의 전제(「개인을 알아볼 수 있는 값이 없습니다」)를 이 티켓이 부분적으로 깬다 — 회신 이메일이 계정 없는 서비스에서 이용자를 **지목할 수 있는 유일한 값**이다. 전제를 지우지 않고 예외를 목록 뒤에 더한 것은 나머지 데이터(세션·결과·통계)에는 여전히 지목 수단이 없기 때문이다. **처리 절차는 운영자 수작업이다**: 요청받은 주소로 `session_feedback.contact_email`을 조회해 해당 행을 삭제한다. 관리자 조회 API가 없어 DB 직접 조회이고, 자동화는 이월했다 ([`feedback.md`](feedback.md) §10). 2026-09-15 결정, KAN-211 | `이용 후기 절이 있고 이메일이 선택·회신 전용이라고 적혀 있다` (6항 「삭제」·「13항」 조각) |
-| 7. 만 14세 미만 | 아동 대상 아님, 마켓에도 그렇게 등록 | `docs/wiki/play-store-listing.md` §6 (타겟 연령 13세 이상) — **KAN-174 브랜치에만 있는 파일** | — |
+| 7. 만 14세 미만 | 아동 대상 아님, 마켓에도 그렇게 등록 | `Accentury_App` 레포 `docs/wiki/play-store-listing.md` §6 (타겟 연령 18세 이상, 2026-09-22 등록. KAN-174는 App PR #5로 2026-09-24 병합) | — |
 | 7. 만 14세 미만 | 아동에게 맞춤형 광고 미표시 | 2026-09-07 팀 결정. 아동 대상 아님을 유지하고 AdMob SDK의 아동 대상 플래그는 off — KAN-196 3단계(Android `AdsController.initialize`, `TAG_FOR_CHILD_DIRECTED_TREATMENT_FALSE`)·4단계(iOS `AdsController.start`, `tagForChildDirectedTreatment = false`)에서 완료, `docs/wiki/ads-admob.md` §6·§7.1 | — |
 | 8. 자동 수집 장치 | 웹에는 GA4 태그가 쿠키를 저장 | `web/src/analytics/ga4.ts:75-81` — `config`에 쿠키를 끄는 옵션이 없다(기본 동작이 쿠키 설정) | — |
 | 8. 자동 수집 장치 | 앱 WebView에는 웹 태그(GA4·AdSense)를 깔지 않음 | `web/src/main.tsx:28` — `isStandaloneWeb`일 때만 `installGa4Tag()`. 광고 태그도 **같은 게이트**를 쓰되 자리가 다르다 (KAN-197 3단계, 2026-09-13): `web/src/ads/AdSlot.tsx`가 슬롯을 마운트할 때 판정한다 (근거는 `docs/wiki/ads-web-adsense.md` §2.1). GA4는 이중 계측 때문이고 AdSense는 앱 WebView 내 웹 광고 태그가 정책상 허용되지 않기 때문이다 (같은 문서 §2). 그래서 WebView allowlist에 광고 도메인을 넣지 않는다 | `AnalysisWaitingScreen.test.tsx`의 `앱 WebView 안에서는 웹 광고 태그가 설치되지 않는다 (KAN-197 AC)` |
@@ -115,9 +116,9 @@
 
 ## 2. 스토어 신고 대조표
 
-Play 데이터 안전 답안의 정본은 `docs/wiki/play-store-listing.md` §5·§6이지만 그 파일은 **로컬
-브랜치 `feature/KAN-174-play-console-listing`에만 있고 Dev에는 없다.** 그래서 KAN-196 브랜치에서
-직접 고치지 않는다 — 아래 「확정 답안」 열을 KAN-174 브랜치가 §5·§6에 옮겨 적어야 한다.
+Play 데이터 안전 답안의 정본은 `Accentury_App` 레포의 `docs/wiki/play-store-listing.md` §5, §6이다
+(KAN-174, App PR #5로 2026-09-24 병합). 레포 분리(KAN-221) 뒤라 그 문서는 이 레포에서 고치지 않는다.
+아래 「확정 답안」 열이 그 문서 §5, §6과 같은지는 App 레포에서 대조한다.
 App Store(KAN-175) 문서는 아직 없으므로 **이 표가 App Store 라벨 답안의 정본이다.**
 
 답안은 2026-09-11 사업자 확정(Google AdMob)으로 굳었다. KAN-174 문서는 광고 도입 결정 이전에
@@ -172,7 +173,7 @@ prod 게시(`scripts/publish-privacy.sh prod`) 전에는 아래를 전부 닫는
 1. **계약 테스트가 깨진다** — `node --test 'infra/privacy/*.test.mjs'`. 깨지지 않는 사실이면 2번부터 사람이 시작한다.
 2. **본문을 고친다** — `infra/privacy/privacy.html`.
 3. **이 문서의 매핑을 갱신한다** — 1절의 해당 행. 근거 경로와 행 번호까지.
-4. **스토어 답안을 갱신한다** — `docs/wiki/play-store-listing.md` §5·§6 (KAN-174), App Store 라벨 (KAN-175). 신고와 실제 동작이 어긋나는 것이 정책 위반이다.
+4. **스토어 답안을 갱신한다** — `Accentury_App` 레포 `docs/wiki/play-store-listing.md` §5, §6 (KAN-174), App Store 라벨 (KAN-175). 신고와 실제 동작이 어긋나는 것이 정책 위반이다.
 5. **게시한다** — `scripts/publish-privacy.sh staging` → 확인 → `scripts/publish-privacy.sh prod` (3절 게이트를 먼저 닫는다).
 
 예를 들어 `infra/modules/fargate/variables.tf`의 `log_retention_days`를 14에서 30으로 올리면
@@ -188,6 +189,7 @@ prod 게시(`scripts/publish-privacy.sh prod`) 전에는 아래를 전부 닫는
 | 날짜 | 결정 | 본문에 남은 자리 |
 |---|---|---|
 | 2026-09-01 | 사용자 음성을 S3에 저장하지 않는다 | 1항 「음성은 데이터베이스나 S3 같은 영속 저장소에 저장하지 않습니다」 |
+| 2026-09-28 | **staging 게시본에만 학습 수집 예외를 적는다 (KAN-239).** staging 학습 버킷(KAN-201)이 고지와 달리 누구의 음성이든 모으고 있어, 수집 대상을 동의한 테스터 계정으로 한정하고 세션을 가명화한 뒤 그 사실을 staging 본문에 적었다. prod 게시본은 무변경이고(위 행의 문구 그대로) 파일은 하나로 두되 `staging-only` 주석 블록을 게시 스크립트가 prod에서 잘라낸다. 그 전까지 쌓인 382개 객체는 동의 여부를 확인할 수 없어 전량 파기했다 | 1항 음성 산문 뒤 staging-only 블록 |
 | 2026-09-01 | 방침 URL은 `/privacy.html` (확장자 없는 경로는 SPA 재작성에 먹힌다) | 14항 URL, `infra/privacy/README.md` |
 | 2026-09-07 | 개인정보 보호책임자 이성주, 문의처 team2pl1@gmail.com | 13항 |
 | 2026-09-07 | 시행일은 초안 날짜가 아니라 정식 게시일에 기재한다 | 102·571행 (prod 게이트) |
@@ -203,7 +205,8 @@ prod 게시(`scripts/publish-privacy.sh prod`) 전에는 아래를 전부 닫는
 
 - **Crashlytics 90일, GA4 2개월** — 둘 다 콘솔 기본값으로 적었고 레포에는 근거가 없다. 콘솔에서 실제 설정을 확인해 다르면 1항 표와 4항을 고친다.
 - **운영 주체 표기** — 지금은 「Accentury 팀(이박이일)」이다. 사업자 등록이 없어 상호·대표자·주소를 적지 않았다. 광고 수익이 생기면 사업자 표기가 필요한지 확인해야 한다.
-- **App Store 연령 등급** — Play는 13세 이상으로 정했으나(`docs/wiki/play-store-listing.md` §6) App Store 쪽 등급은 아직 정하지 않았다. 7항의 「만 14세 미만 대상 아님」과 어긋나지 않게 맞춘다.
+- **학습 수집 동의 철회 뒤 이미 보관된 음성** (KAN-239) - staging 본문은 「철회한 뒤로는 보관하지 않습니다」까지만 약속한다. 보관된 음성은 세션 가명으로만 묶여 있고 세션과 계정의 연결은 24시간 뒤 사라지므로, 철회한 사람의 지난 음성을 골라 지울 수단이 지금은 없다. 동의서 문안을 검토할 때 이 점을 어떻게 고지할지(보유 기간 만료 시 일괄 파기로 갈음할지, 가명과 계정의 대응표를 따로 둘지) 개인정보 담당이 정한다.
+- **App Store 연령 등급** — Play는 18세 이상으로 정했으나(`Accentury_App` 레포 `docs/wiki/play-store-listing.md` §6) App Store 쪽 등급은 아직 정하지 않았다. 7항의 「만 14세 미만 대상 아님」과 어긋나지 않게 맞춘다.
 - **광고 사업자** — 2026-09-11 앱은 Google AdMob, 2026-09-13 브라우저 웹은 Google AdSense로 확정돼 3절의 자리표시자 1~5를 닫았다. 남은 게이트는 시행일(6), 스토어 답안 일치(7), 웹 광고 배선 일치(8)다.
 - **Slack을 국외 이전으로 분류한 것이 맞는지 최종 확인** (KAN-211) — 후기 본문에 개인정보가 섞일 **가능성**을 근거로 4항에 적었다. 위탁(3항)으로 보는 해석도 성립하고, 그 경우 4항 `<dl>`을 3항 표의 한 행으로 옮긴다. 둘 다 적는 길(Firebase처럼)도 있다. 고지가 빠지는 쪽이 아니라 **어느 절에 적는가**의 문제라 게시 전까지 바꿀 수 있다.
 - **prod 게시 전 시행일** (KAN-211과 무관하게 열려 있는 3절 게이트 6번) — 본문 머리와 14항 두 자리를 게시 당일 날짜로 바꾼다. 이 티켓이 본문을 늘렸어도 그 게이트는 그대로다.
