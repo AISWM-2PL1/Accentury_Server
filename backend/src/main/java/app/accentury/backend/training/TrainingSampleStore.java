@@ -13,7 +13,7 @@ package app.accentury.backend.training;
 @FunctionalInterface
 public interface TrainingSampleStore {
 
-    /** 아무것도 저장하지 않는다 - {@code accentury.training.bucket}이 없는 배포의 자리. */
+    /** 아무것도 저장하지 않는다 - {@code accentury.training.consented-bucket}이 없는 배포의 자리. */
     TrainingSampleStore NONE = sample -> {
     };
 

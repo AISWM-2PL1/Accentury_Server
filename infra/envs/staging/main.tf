@@ -227,7 +227,7 @@ module "config" {
   auth_google_client_id = var.auth_google_client_id
   auth_apple_bundle_id  = var.auth_apple_bundle_id
   auth_kakao_app_id     = var.auth_kakao_app_id
-  # 학습 데이터 버킷이 있는 환경(staging)에만 ACCENTURY_TRAINING_BUCKET 파라미터가 생긴다 (KAN-201).
+  # 학습 데이터 버킷이 있는 환경(staging)에만 ACCENTURY_TRAINING_CONSENTEDBUCKET 파라미터가 생긴다 (KAN-201).
   training_bucket_name = one(aws_s3_bucket.training[*].bucket)
 }
 

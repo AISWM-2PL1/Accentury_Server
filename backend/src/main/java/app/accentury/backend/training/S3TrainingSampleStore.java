@@ -101,7 +101,9 @@ public class S3TrainingSampleStore implements TrainingSampleStore {
                             .build(),
                     RequestBody.fromString(objectMapper.writeValueAsString(metadata(sample, speaker, sampleId))));
             saved.increment();
-            log.info("학습 샘플 저장 jobId={} bytes={}", sample.analysisJobId(), audio.length);
+            // 식별자와 크기를 싣지 않는다 - 작업 ID와 바이트 수는 S3 목록의 크기, 시각과 맞춰 가명과 원문 ID를 다시
+            // 잇는 단서가 된다 (PR #4 리뷰 P3). 저장 건수는 카운터가 센다.
+            log.info("학습 샘플 저장");
         } catch (RuntimeException e) {
             failed.increment();
             // 사유는 한 줄로 충분하다 - 권한, 네트워크, 직렬화 어느 쪽이든 메시지에 드러난다.

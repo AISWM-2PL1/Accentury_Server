@@ -56,7 +56,7 @@ class SsmEnvironmentBindingTest {
             "ACCENTURY_ANALYSIS_AITIMEOUT",
             "ACCENTURY_ANALYSIS_PROCESSINGTIMEOUT",
             "ACCENTURY_ANALYSIS_DISPATCHCONCURRENCY",
-            "ACCENTURY_TRAINING_BUCKET",
+            "ACCENTURY_TRAINING_CONSENTEDBUCKET",
             "ACCENTURY_TRAINING_TESTERIDS",
             "ACCENTURY_TRAINING_PSEUDONYMKEY",
             "ACCENTURY_FEEDBACK_SLACKWEBHOOKURL");
@@ -111,7 +111,7 @@ class SsmEnvironmentBindingTest {
                 Map.of("ACCENTURY_ANALYSIS_AITIMEOUT", "100s",
                         "ACCENTURY_ANALYSIS_PROCESSINGTIMEOUT", "400s",
                         "ACCENTURY_ANALYSIS_DISPATCHCONCURRENCY", "2",
-                        "ACCENTURY_TRAINING_BUCKET", "accentury-staging-training-123456789012",
+                        "ACCENTURY_TRAINING_CONSENTEDBUCKET", "accentury-staging-training-123456789012",
                         "ACCENTURY_TRAINING_TESTERIDS",
                         "0f8c2a4e-6d1b-4c3a-9e57-2b1d8f6a4c90,7a1e3c5b-2d4f-4e6a-8b0c-1d3f5a7c9e2b",
                         "ACCENTURY_TRAINING_PSEUDONYMKEY", "binding-check-pseudonym-key-0123456789abcdef",
@@ -123,7 +123,7 @@ class SsmEnvironmentBindingTest {
         assertEquals(2, tunedBinder.bind("accentury.analysis.dispatch-concurrency", Integer.class).get());
         // 학습 데이터 버킷 (KAN-201) - staging에만 오는 optional 값. 이름이 어긋나면 staging에서 샘플이 조용히 안 쌓인다.
         assertEquals("accentury-staging-training-123456789012",
-                tunedBinder.bind("accentury.training.bucket", String.class).get());
+                tunedBinder.bind("accentury.training.consented-bucket", String.class).get());
         // 동의 테스터 목록과 가명 키 (KAN-239). 목록은 SSM StringList가 쉼표 한 줄로 들어와 원소로 갈라져야 한다 -
         // 이름이 어긋나면 목록이 빈 채로 떠 동의한 테스터의 샘플도 조용히 안 쌓인다.
         assertEquals(List.of("0f8c2a4e-6d1b-4c3a-9e57-2b1d8f6a4c90", "7a1e3c5b-2d4f-4e6a-8b0c-1d3f5a7c9e2b"),

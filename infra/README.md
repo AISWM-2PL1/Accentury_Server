@@ -268,7 +268,7 @@ terraform apply
   ```
 - 학습 데이터 S3 (KAN-201, KAN-239, staging만): 버킷이 있고 퍼블릭 액세스가 차단됐는지, 수명주기 만료일이
   tfvars `training_retention_until`과 같은지, 버킷 정책이 붙었는지. **이 apply가 backend 코드 배포보다 먼저다** -
-  태스크 정의 secrets에 `ACCENTURY_TRAINING_BUCKET`, `ACCENTURY_TRAINING_TESTERIDS`,
+  태스크 정의 secrets에 `ACCENTURY_TRAINING_CONSENTEDBUCKET`, `ACCENTURY_TRAINING_TESTERIDS`,
   `ACCENTURY_TRAINING_PSEUDONYMKEY`가 늘어 apply가 태스크 정의를 새 리비전으로 갈고, 그 파라미터가 없으면
   파이프라인의 리비전 등록이 실패한다 (KAN-132 교훈, "staging 전용 학습 데이터 S3" 절).
 
@@ -968,7 +968,7 @@ fargate 모듈이 config의 파라미터 이름 목록을 그대로 태스크 �
 | `ACCENTURY_SHARE_KAKAOADMINKEY` | 카카오디벨로퍼스 콘솔의 앱 Admin 키 (KAN-164). Terraform은 자리 표시 값으로 만들고(write-only `value_wo`라 state에 값이 남지 않는다) apply 뒤 `put-parameter --overwrite`로 넣는다 (아래 "카카오 공유 웹훅" 절). 두 환경 같은 값 | SecureString |
 | `ACCENTURY_FEEDBACK_SLACKWEBHOOKURL` | 이용 후기 알림이 나가는 슬랙 채널(`#feedback`)의 Incoming Webhook URL (KAN-211). 카카오 키와 같이 자리 표시 값으로 만들고 apply 뒤 `put-parameter`로 넣는다 (아래 "이용 후기 슬랙 알림" 절). **선택 값이다 - 없거나 자리 표시 값이면 backend가 알림만 끄고 그대로 기동한다** (`DeploymentConfigGuard` 밖이라 apply와 배포의 순서 제약이 없다). 채널이 하나라 두 환경 같은 값 | SecureString |
 | `ai/ACCENTURY_AI_INTERNAL_TOKEN` | `ACCENTURY_ANALYSIS_AITOKEN`과 같은 난수. ai 서버가 health를 뺀 모든 요청에서 대조한다 (KAN-36). ai 호스트 역할만 읽는다 | SecureString |
-| `ACCENTURY_TRAINING_BUCKET` | **staging에만 있다** (KAN-201). 학습 데이터 버킷 이름(`accentury-staging-training-<계정>`). tfvars `training_bucket_enabled`가 true인 환경에만 파라미터가 생기고, 그래서 prod 태스크 정의에는 이 변수가 없어 backend가 S3 클라이언트를 만들지 않는다 (아래 "staging 전용 학습 데이터 S3" 절) | String |
+| `ACCENTURY_TRAINING_CONSENTEDBUCKET` | **staging에만 있다** (KAN-201). 학습 데이터 버킷 이름(`accentury-staging-training-<계정>`). tfvars `training_bucket_enabled`가 true인 환경에만 파라미터가 생기고, 그래서 prod 태스크 정의에는 이 변수가 없어 backend가 S3 클라이언트를 만들지 않는다 (아래 "staging 전용 학습 데이터 S3" 절) | String |
 | `ACCENTURY_TRAINING_TESTERIDS` | **staging에만 있다** (KAN-239). 학습 활용에 동의한 테스터의 `app_user.id`를 쉼표로 이은 값. backend는 이 계정들의 세션만 저장한다. Terraform은 자리 표시 값(write-only `value_wo`)으로 자리만 만들고 운영자가 `put-parameter`로 채운다 - 자리 표시 값인 동안은 아무것도 저장하지 않는다 | StringList |
 | `ACCENTURY_TRAINING_PSEUDONYMKEY` | **staging에만 있다** (KAN-239). 학습 샘플의 세션 ID를 가명(HMAC-SHA256)으로 바꾸는 키. ephemeral 난수를 write-only로 넣어 state에 값이 없다. 버킷이 있는데 이 값이 없으면 backend가 기동하지 않는다 | SecureString |
 
@@ -1246,7 +1246,7 @@ KAN-57의 c7i.xlarge 실측(bf16 + MFA `align_one`, 1건 P50 10.1초, P95 11.1�
 | 보유 기간 | 수명주기 만료일 = tfvars `training_retention_until`(UTC 자정 RFC3339, 동의서의 보유 기간 끝날). 켜져 있는데 값이 없으면 plan이 precondition으로 실패한다. 만료는 비동기라 그날 즉시 삭제를 보장하지 않으므로, 그날이 오면 아래 "환경 teardown 파기 런북"대로 버킷을 비운다 |
 | 버킷 정책 | `aws:SecureTransport = false` 요청 전부 거부. 객체 본문(`GetObject`)은 학습 읽기 역할(`accentury-staging-training-reader`, 출력 `training_reader_role_arn`) 외에는 거부 - 관리자 자격 증명도 거부된다. `ListBucket`은 거부하지 않는다 - `HeadBucket`이 그 권한으로 판정돼 거부하면 Terraform refresh와 파기 apply가 잠긴다. 키에는 가명과 지역, 문항 ID뿐이다 |
 | 권한 | backend 태스크 역할에 이 버킷 한 개로 한정한 `s3:PutObject`만 (fargate 모듈 `training_bucket_arn`). Get, List, Delete 없음. 읽기는 학습 읽기 역할만(신뢰 대상 tfvars `training_reader_principals`, 비우면 계정 루트) |
-| 스위치 | SSM `ACCENTURY_TRAINING_BUCKET` -> `accentury.training.bucket`. 없으면 backend는 S3 클라이언트도 저장 빈도 만들지 않는다 (`TrainingConfig`) |
+| 스위치 | SSM `ACCENTURY_TRAINING_CONSENTEDBUCKET` -> `accentury.training.consented-bucket`. 없으면 backend는 S3 클라이언트도 저장 빈도 만들지 않는다 (`TrainingConfig`). KAN-201의 이름(`ACCENTURY_TRAINING_BUCKET`)에서 KAN-239가 바꿨다 - KAN-239 이전 SHA로 롤백(`deploy.yml` 수동 실행이나 반영 실패 시 자동 롤백)돼도 옛 이미지는 이 이름을 모르므로 수집이 꺼진 채 뜬다. 한정 없는 옛 코드가 다시 수집하는 길이 이름으로 막혀 있으니 이 이름을 옛 이름으로 되돌리지 않는다 |
 | 대상 | SSM `ACCENTURY_TRAINING_TESTERIDS` -> `accentury.training.tester-ids`. 세션 소유 계정(`test_session.user_id`)이 이 목록에 있을 때만 저장한다. 익명 세션(웹)과 목록 밖 계정은 저장하지 않고 지표 `result=skipped`만 오른다. 목록이 비거나 자리 표시 값이면 아무것도 저장하지 않는다 (`TrainingSpeakers`) |
 | 가명 | SSM `ACCENTURY_TRAINING_PSEUDONYMKEY` -> `accentury.training.pseudonym-key`. `speaker = HMAC-SHA256(sessionId, 키)`, `sampleId = HMAC-SHA256(analysisJobId, 키)`의 hex. 같은 세션의 문항은 한 접두에 모이고 DB와 로그의 세션 ID, 작업 ID와는 이어지지 않는다(작업 ID 원문은 `analysis_job.session_id`로 계정까지 조인되므로 함께 가린다). 로그에는 작업 ID와 객체 키를 한 줄에 남기지 않는다. 키 회전은 config 모듈 `value_wo_version` 증가 + apply + backend 재배포이고, 회전 전후의 speaker는 이어지지 않는다 |
 | 저장 시점 | 분석 상태 전이가 끝난 뒤, 오디오 버퍼 파기 전 (`HttpAnalysisDispatcher`). 성공과 판정 실패 모두, 계약 위반과 AI 불가는 제외 |
@@ -2084,7 +2084,7 @@ Terraform 입력의 차이는 `diff -r infra/envs/staging infra/envs/prod`가 �
 | 내부 호출 토큰 (KAN-36) | 환경별 난수 | 환경별 난수 | `ACCENTURY_ANALYSIS_AITOKEN`, `ai/ACCENTURY_AI_INTERNAL_TOKEN` |
 | AI 호스트 (KAN-36) | c7i.xlarge, 루트 40GiB | 같은 값 | `ai_instance_type`, `ai_root_volume_size` (B단계 2026-09-10에 20에서 40으로) |
 | AI 호스트 오토스케일링 (KAN-201) | max 3 | 같은 값 | `ai_max_size` - ai-host 모듈 ASG `max_size`. min 1은 모듈 기본값 |
-| 학습 데이터 S3 (KAN-201, KAN-239) | 켬, 만료일 있음 | 끔 | `training_bucket_enabled` - 버킷, 수명주기 만료(`training_retention_until`), 버킷 정책, 학습 읽기 역할, 태스크 역할 PutObject, SSM `ACCENTURY_TRAINING_BUCKET`, `ACCENTURY_TRAINING_TESTERIDS`, `ACCENTURY_TRAINING_PSEUDONYMKEY` |
+| 학습 데이터 S3 (KAN-201, KAN-239) | 켬, 만료일 있음 | 끔 | `training_bucket_enabled` - 버킷, 수명주기 만료(`training_retention_until`), 버킷 정책, 학습 읽기 역할, 태스크 역할 PutObject, SSM `ACCENTURY_TRAINING_CONSENTEDBUCKET`, `ACCENTURY_TRAINING_TESTERIDS`, `ACCENTURY_TRAINING_PSEUDONYMKEY` |
 | RDS 삭제 보호, 최종 스냅샷 | 없음, 생략 | 켬, 남김 | RDS |
 | 배포 역할 ECR push | 허용 | 불가 | `modules/deploy` image-deploy 정책 (KAN-128 승격 모델) |
 
