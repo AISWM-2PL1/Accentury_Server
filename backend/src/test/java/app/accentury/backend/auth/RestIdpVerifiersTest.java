@@ -52,7 +52,7 @@ class RestIdpVerifiersTest {
         String url = server.url("").toString().replaceAll("/$", "");
         return new AccenturyProperties.Auth(base.jwtSecret(), base.issuer(), base.accessTokenTtl(), base.refreshTokenTtl(),
                 base.rateLimitPerMinute(), false, null, null, kakaoAppId,
-                base.googleJwksUrl(), base.appleJwksUrl(), url, url, timeout);
+                base.googleJwksUrl(), base.appleJwksUrl(), url, url, timeout, base.privacyPolicyVersion());
     }
 
     private KakaoIdpVerifier kakao() {

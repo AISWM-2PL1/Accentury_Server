@@ -353,6 +353,12 @@ public record AccenturyProperties(Session session,
      * @param kakaoApiBaseUrl    카카오 API 기준 주소 ({@code kapi.kakao.com}). 테스트가 MockWebServer로 바꾼다.
      * @param naverApiBaseUrl    네이버 API 기준 주소 ({@code openapi.naver.com}). 위와 같다.
      * @param idpTimeout         IdP 호출(JWKS 조회 포함)의 연결과 읽기 타임아웃. 넘으면 502 {@code AUTH_IDP_UNAVAILABLE}이다.
+     * @param privacyPolicyVersion 게시 중인 개인정보처리방침 버전 (KAN-240). 가입 요청의 {@code privacyPolicyVersion}이
+     *                           이 값과 정확히 같아야 동의로 기록한다. 다르면 400 {@code AUTH_CONSENT_REQUIRED}다 -
+     *                           옛 앱 빌드나 조작된 요청이 계정 고지가 없는 옛 방침에 "동의"한 것으로 남지 않게 한다.
+     *                           기본값 {@link #PRIVACY_POLICY_VERSION}은 {@code infra/privacy/privacy.html}의
+     *                           {@code accentury-policy-version} 메타와 같아야 하고 {@code privacy.test.mjs}가 둘을
+     *                           대조한다. 방침을 개정하면 이 상수, privacy.html, 앱 두 곳(Android, iOS)의 상수를 함께 올린다.
      */
     public record Auth(@Nullable String jwtSecret,
                        @DefaultValue("accentury") String issuer,
@@ -367,7 +373,11 @@ public record AccenturyProperties(Session session,
                        @DefaultValue("https://appleid.apple.com/auth/keys") String appleJwksUrl,
                        @DefaultValue("https://kapi.kakao.com") String kakaoApiBaseUrl,
                        @DefaultValue("https://openapi.naver.com") String naverApiBaseUrl,
-                       @DefaultValue("5s") Duration idpTimeout) {
+                       @DefaultValue("5s") Duration idpTimeout,
+                       @DefaultValue(Auth.PRIVACY_POLICY_VERSION) String privacyPolicyVersion) {
+
+        /** 게시 중인 개인정보처리방침 버전 - privacy.html의 {@code accentury-policy-version} 메타와 같은 값이다 (KAN-240). */
+        public static final String PRIVACY_POLICY_VERSION = "2026-09-29";
     }
 
     /**

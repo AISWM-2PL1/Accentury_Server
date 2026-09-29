@@ -1,5 +1,6 @@
 package app.accentury.backend.auth;
 
+import app.accentury.backend.common.AccenturyProperties;
 import app.accentury.backend.common.ApiException;
 import app.accentury.backend.common.ErrorCode;
 import app.accentury.backend.common.RateLimits;
@@ -12,7 +13,6 @@ import org.springframework.transaction.support.TransactionTemplate;
 
 import java.time.Instant;
 import java.time.LocalDate;
-import java.util.regex.Pattern;
 
 /**
  * 로그인, refresh, 로그아웃 (KAN-223, 명세서 §3.9, §3.12, §3.13).
@@ -34,9 +34,6 @@ public class AuthService {
     /** 애플 이름 입력 상한 - 저장 전에 {@link IdpProfile}이 50자로 자르지만, 그보다 훨씬 긴 본문은 거절한다. */
     static final int APPLE_NAME_MAX = 200;
 
-    /** 동의한 방침 버전 형식 - {@code app_user.privacy_policy_version} varchar(32). */
-    private static final Pattern POLICY_VERSION = Pattern.compile("[A-Za-z0-9._-]{1,32}");
-
     private final IdpVerifiers idpVerifiers;
     private final AppUserRepository users;
     private final AccessTokens accessTokens;
@@ -44,14 +41,19 @@ public class AuthService {
     private final RateLimits rateLimits;
     private final TransactionTemplate transactionTemplate;
 
+    /** 게시 중인 방침 버전 (KAN-240) - 가입 요청의 버전이 이 값과 정확히 같아야 동의로 기록한다. */
+    private final String privacyPolicyVersion;
+
     AuthService(IdpVerifiers idpVerifiers, AppUserRepository users, AccessTokens accessTokens,
-                RefreshTokens refreshTokens, RateLimits rateLimits, TransactionTemplate transactionTemplate) {
+                RefreshTokens refreshTokens, RateLimits rateLimits, TransactionTemplate transactionTemplate,
+                AccenturyProperties properties) {
         this.idpVerifiers = idpVerifiers;
         this.users = users;
         this.accessTokens = accessTokens;
         this.refreshTokens = refreshTokens;
         this.rateLimits = rateLimits;
         this.transactionTemplate = transactionTemplate;
+        this.privacyPolicyVersion = properties.auth().privacyPolicyVersion();
     }
 
     /**
@@ -122,12 +124,13 @@ public class AuthService {
                 existing.fillBlanksFrom(profile, now);
                 return new Account(existing, false);
             }
-            String policyVersion = request.privacyPolicyVersion();
+            // 형식이 아니라 게시 중인 버전과의 일치를 본다 (KAN-240) - 옛 앱 빌드나 조작된 요청이 계정 고지가 없는
+            // 옛 방침에 동의한 것으로 남지 않게 한다. 저장하는 값도 요청 원문이 아니라 서버의 값이다(둘은 같다).
             if (!Boolean.TRUE.equals(request.privacyConsent())
-                    || policyVersion == null || !POLICY_VERSION.matcher(policyVersion).matches()) {
+                    || !privacyPolicyVersion.equals(request.privacyPolicyVersion())) {
                 throw new ApiException(ErrorCode.AUTH_CONSENT_REQUIRED);
             }
-            AppUser created = new AppUser(profile, policyVersion, now);
+            AppUser created = new AppUser(profile, privacyPolicyVersion, now);
             users.saveAndFlush(created);
             return new Account(created, true);
         });
