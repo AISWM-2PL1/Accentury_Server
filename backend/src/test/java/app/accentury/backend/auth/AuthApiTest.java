@@ -26,6 +26,8 @@ import tools.jackson.databind.ObjectMapper;
 
 import java.time.LocalDate;
 import java.time.ZoneId;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.UUID;
@@ -443,8 +445,19 @@ class AuthApiTest extends IntegrationTest {
         String deviceB = body(login("KAKAO", sub, false)).get("refreshToken").asString();
         String access = deviceA.get("accessToken").asString();
         String userId = deviceA.get("user").get("id").asString();
+        // 두 기기의 토큰 키와 패밀리 키 - 탈퇴 계정의 refresh는 Redis와 무관하게 계정 확인에서 401이 되므로, 401만 보면
+        // 폐기 스크립트가 키를 빠뜨려도 통과한다 (PR #9 리뷰). 키가 실제로 사라졌는지를 따로 본다.
+        List<String> keys = new ArrayList<>();
+        for (String refreshToken : List.of(deviceA.get("refreshToken").asString(), deviceB)) {
+            String tokenKey = RefreshTokens.TOKEN_KEY + RefreshTokens.hash(refreshToken);
+            keys.add(tokenKey);
+            keys.add(RefreshTokens.FAMILY_KEY + redis.opsForHash().get(tokenKey, "f"));
+        }
+        assertEquals(4L, redis.countExistingKeys(keys), "탈퇴 전에는 두 기기의 토큰과 패밀리가 있다");
 
         withdraw(access, null).andExpect(status().isNoContent());
+
+        assertEquals(0L, redis.countExistingKeys(keys), "두 기기의 토큰 키와 패밀리 키를 모두 지운다");
 
         me(access)
                 .andExpect(status().isUnauthorized())

@@ -31,6 +31,7 @@ import java.security.spec.ECGenParameterSpec;
 import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
+import java.time.ZoneId;
 import java.time.ZoneOffset;
 import java.util.Base64;
 import java.util.LinkedHashMap;
@@ -208,6 +209,39 @@ class AppleTokenRevokerTest {
         assertEquals(2, server.getRequestCount());
         assertTrue(output.getOut().contains("애플 토큰 revoke 실패"));
         assertFalse(output.getOut().contains("apple-refresh"), "토큰은 로그에 남기지 않는다");
+    }
+
+    @Test
+    void 예상_밖_런타임_예외도_밖으로_새지_않는다(CapturedOutput output) {
+        // client_secret을 만들 때 시계가 터지는 경우 - 탈퇴는 이미 커밋된 뒤라 500이 되면 안 된다 (PR #9 리뷰).
+        Clock broken = new Clock() {
+            @Override
+            public ZoneId getZone() {
+                return ZoneOffset.UTC;
+            }
+
+            @Override
+            public Clock withZone(ZoneId zone) {
+                return this;
+            }
+
+            @Override
+            public Instant instant() {
+                throw new IllegalStateException("시계 고장");
+            }
+        };
+        AccenturyProperties.Auth base = PropertiesFixture.auth();
+        AccenturyProperties.Auth auth = new AccenturyProperties.Auth(base.jwtSecret(), base.issuer(),
+                base.accessTokenTtl(), base.refreshTokenTtl(), base.rateLimitPerMinute(), false, null, BUNDLE_ID, null,
+                null, null, TEAM_ID, KEY_ID, pem(), base.googleJwksUrl(), base.appleJwksUrl(),
+                base.kakaoApiBaseUrl(), base.naverApiBaseUrl(), base.naverAuthBaseUrl(),
+                server.url("").toString().replaceAll("/$", ""), Duration.ofSeconds(2), base.privacyPolicyVersion());
+
+        new AppleTokenRevoker(auth, JsonMapper.builder().build(), broken).revoke("apple-code", SUBJECT, USER_ID);
+
+        assertEquals(0, server.getRequestCount());
+        assertTrue(output.getOut().contains("애플 토큰 revoke 실패 - 예상 밖 오류 userId=" + USER_ID
+                + " (IllegalStateException)"));
     }
 
     @Test
