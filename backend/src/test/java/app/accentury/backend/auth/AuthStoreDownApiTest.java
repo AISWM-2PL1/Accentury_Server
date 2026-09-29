@@ -1,6 +1,7 @@
 package app.accentury.backend.auth;
 
 import app.accentury.backend.IntegrationTest;
+import app.accentury.backend.common.AccenturyProperties;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
@@ -36,7 +37,8 @@ class AuthStoreDownApiTest extends IntegrationTest {
     void 로그인은_503이다() throws Exception {
         mockMvc.perform(post("/v0/auth/login").contentType(MediaType.APPLICATION_JSON)
                         .content("{\"provider\": \"KAKAO\", \"accessToken\": \"fake:store-down\","
-                                + " \"privacyConsent\": true, \"privacyPolicyVersion\": \"2026-09-24\"}"))
+                                + " \"privacyConsent\": true, \"privacyPolicyVersion\": \""
+                                + AccenturyProperties.Auth.PRIVACY_POLICY_VERSION + "\"}"))
                 .andExpect(status().isServiceUnavailable())
                 .andExpect(jsonPath("$.code").value("AUTH_STORE_UNAVAILABLE"))
                 .andExpect(jsonPath("$.retryable").value(true));

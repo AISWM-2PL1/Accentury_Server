@@ -2,6 +2,7 @@ package app.accentury.backend.auth;
 
 import app.accentury.backend.IntegrationTest;
 import app.accentury.backend.RedisTestcontainer;
+import app.accentury.backend.common.AccenturyProperties;
 import app.accentury.backend.session.TestSession;
 import app.accentury.backend.session.TestSessionRepository;
 import org.junit.jupiter.api.Test;
@@ -55,7 +56,8 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 @ExtendWith(OutputCaptureExtension.class)
 class AuthApiTest extends IntegrationTest {
 
-    private static final String POLICY_VERSION = "2026-09-24";
+    /** 게시 중인 방침 버전 - 설정 기본값을 그대로 쓴다 (KAN-240). */
+    private static final String POLICY_VERSION = AccenturyProperties.Auth.PRIVACY_POLICY_VERSION;
 
     @Autowired
     private MockMvc mockMvc;
@@ -103,6 +105,33 @@ class AuthApiTest extends IntegrationTest {
         String sub = uniqueSub();
 
         login("GOOGLE", sub, false)
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("AUTH_CONSENT_REQUIRED"));
+
+        assertTrue(users.findByProviderAndProviderUserId(Provider.GOOGLE, sub).isEmpty());
+    }
+
+    /**
+     * 동의한 방침 버전은 게시 중인 버전과 정확히 같아야 한다 (KAN-240) - 옛 앱 빌드가 보내던 값, 조작된 옛 날짜,
+     * 형식만 맞는 값, 대소문자나 공백만 다른 값 모두 400이고 계정이 생기지 않는다.
+     */
+    @ParameterizedTest
+    @ValueSource(strings = {"2026-09-15", "2020-01-01", "latest", " " + POLICY_VERSION, POLICY_VERSION + "-rc"})
+    void 방침_버전이_게시_중인_버전과_다르면_400이고_계정이_생기지_않는다(String version) throws Exception {
+        String sub = uniqueSub();
+
+        login("KAKAO", sub, true, version)
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("AUTH_CONSENT_REQUIRED"));
+
+        assertTrue(users.findByProviderAndProviderUserId(Provider.KAKAO, sub).isEmpty());
+    }
+
+    @Test
+    void 동의는_했어도_방침_버전이_없으면_400이다() throws Exception {
+        String sub = uniqueSub();
+
+        login("GOOGLE", sub, true, null)
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.code").value("AUTH_CONSENT_REQUIRED"));
 
@@ -488,13 +517,39 @@ class AuthApiTest extends IntegrationTest {
         }
     }
 
+    @Test
+    void 세션_생성_로그에_계정_id가_없고_계정_세션_여부만_남는다(CapturedOutput output) throws Exception {
+        // KAN-240 - 한 줄에 sessionId와 userId가 같이 있으면 로그 보존 14일 동안 세션과 계정의 대응표가 된다.
+        JsonNode login = body(login("KAKAO", uniqueSub(), true));
+        String access = login.get("accessToken").asString();
+        String userId = login.get("user").get("id").asString();
+        putProfile(access, profile()).andExpect(status().isOk());
+        String accountSession = body(createSession(access, null)).get("sessionId").asString();
+        String anonymousSession = body(createSession(null, null)).get("sessionId").asString();
+
+        String accountLine = logLine(output.getAll(), "세션 생성 sessionId=" + accountSession);
+        assertTrue(accountLine.contains("account=true"), accountLine);
+        assertFalse(accountLine.contains(userId), "세션 생성 로그에 계정 id가 있다: " + accountLine);
+        assertFalse(accountLine.contains("userId"), accountLine);
+        assertTrue(logLine(output.getAll(), "세션 생성 sessionId=" + anonymousSession).contains("account=false"));
+    }
+
     // === 도우미 ===
+
+    private static String logLine(String logs, String marker) {
+        return logs.lines().filter(line -> line.contains(marker)).findFirst()
+                .orElseThrow(() -> new AssertionError("로그 줄이 없다: " + marker));
+    }
 
     private static String uniqueSub() {
         return "sub-" + UUID.randomUUID();
     }
 
     private ResultActions login(String provider, String sub, boolean consent) throws Exception {
+        return login(provider, sub, consent, consent ? POLICY_VERSION : null);
+    }
+
+    private ResultActions login(String provider, String sub, boolean consent, String policyVersion) throws Exception {
         Map<String, Object> request = new LinkedHashMap<>();
         request.put("provider", provider);
         if ("GOOGLE".equals(provider) || "APPLE".equals(provider)) {
@@ -507,7 +562,9 @@ class AuthApiTest extends IntegrationTest {
         }
         if (consent) {
             request.put("privacyConsent", true);
-            request.put("privacyPolicyVersion", POLICY_VERSION);
+        }
+        if (policyVersion != null) {
+            request.put("privacyPolicyVersion", policyVersion);
         }
         return mockMvc.perform(post("/v0/auth/login").contentType(MediaType.APPLICATION_JSON)
                 .content(objectMapper.writeValueAsString(request)));
