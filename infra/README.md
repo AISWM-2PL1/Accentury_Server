@@ -1113,7 +1113,8 @@ Terraform이 만드는 것은 셋이다.
 | --- | --- | --- |
 | Refresh 토큰 저장소 ElastiCache Redis 7.1 (`cache.t4g.micro` 1노드, TLS, 저장 암호화, AUTH 토큰) | `modules/data`, SG는 `modules/network`의 redis-sg(backend-sg의 6379만) | Terraform |
 | `SPRING_DATA_REDIS_HOST`, `SPRING_DATA_REDIS_PASSWORD`(SecureString), `ACCENTURY_AUTH_JWTSECRET`(SecureString) | `modules/config` | Terraform (data 모듈 출력, 난수) |
-| `ACCENTURY_AUTH_GOOGLECLIENTID`, `ACCENTURY_AUTH_APPLEBUNDLEID`, `ACCENTURY_AUTH_KAKAOAPPID`(String) | `modules/config` | tfvars (IdP 콘솔, KAN-224) |
+| `ACCENTURY_AUTH_GOOGLECLIENTID`, `ACCENTURY_AUTH_APPLEBUNDLEID`, `ACCENTURY_AUTH_KAKAOAPPID`, `ACCENTURY_AUTH_NAVERCLIENTID`(String) | `modules/config` | tfvars (IdP 콘솔, KAN-224, KAN-243) |
+| `ACCENTURY_AUTH_NAVERCLIENTSECRET`(SecureString, write-only) | `modules/config` | apply 뒤 `put-parameter` (네이버 개발자 센터, KAN-243) |
 
 **필수 SSM 파라미터가 여섯 늘었으므로 apply가 코드 배포보다 먼저다** (KAN-132와 같은 규칙). 여섯 모두
 `DeploymentConfigGuard`의 필수 목록이라, 파라미터 없이 새 이미지가 뜨면 태스크가 기동하지 못하고 롤링 배포가
@@ -1136,13 +1137,23 @@ Terraform이 만드는 것은 셋이다.
 auth_google_client_id = "<서버용(웹) OAuth 클라이언트 ID>.apps.googleusercontent.com"
 auth_apple_bundle_id  = "<iOS 번들 ID>"
 auth_kakao_app_id     = "<카카오 앱 ID(숫자)>"
+auth_naver_client_id  = "<네이버 로그인 Client ID>"
 ```
 
 ```
 aws ecs update-service --cluster accentury-staging --service backend --force-new-deployment
 ```
 
-네이버는 서버가 보관할 값이 없다 - 토큰 확인이 사용자 조회 API 호출 하나다.
+**네이버는 Client ID와 Secret 둘이다 (KAN-243).** 네이버 사용자 조회 API는 토큰의 발급 앱을 알려 주지 않아서,
+backend가 앱이 보낸 SDK refresh token을 이 두 값으로 교환해 성공해야 우리 앱의 토큰으로 본다. 두 파라미터도
+`DeploymentConfigGuard`의 필수 목록이라 **apply가 코드 배포보다 먼저다.** 값은 네이버 개발자 센터 앱 설정의 것이고
+앱의 `NAVER_CLIENT_ID`, `NAVER_CLIENT_SECRET`과 같다. Client ID는 위 tfvars에 적고, Secret은 시크릿이라 apply 뒤에
+한 번 넣는다. 둘 중 하나라도 자리 표시 값인 동안 네이버 로그인만 401이다.
+
+```
+aws ssm put-parameter --overwrite --type SecureString --name /accentury/staging/ACCENTURY_AUTH_NAVERCLIENTSECRET --value '<Client Secret>'
+aws ecs update-service --cluster accentury-staging --service backend --force-new-deployment
+```
 
 **키 재발급.**
 

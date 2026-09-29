@@ -12,6 +12,8 @@ import org.jspecify.annotations.Nullable;
  * @param provider             {@code GOOGLE | KAKAO | NAVER | APPLE}
  * @param idToken              구글과 애플 - IdP가 준 ID 토큰(JWT)
  * @param accessToken          카카오와 네이버 - SDK가 준 access token
+ * @param refreshToken         네이버만 - SDK가 준 refresh token. 서버가 우리 client_id와 client_secret으로 교환해 발급 앱을
+ *                             확인한다 (KAN-243). 우리 서버의 refresh token({@code rt_...})이 아니다.
  * @param nonce                애플만 - 원문 nonce (애플 요청에는 SHA-256을 실었다)
  * @param user                 애플 최초 로그인만 - 애플이 한 번만 주는 이름
  * @param privacyConsent       가입이면 true 필수
@@ -20,6 +22,7 @@ import org.jspecify.annotations.Nullable;
 record LoginRequest(@Nullable String provider,
                     @Nullable String idToken,
                     @Nullable String accessToken,
+                    @Nullable String refreshToken,
                     @Nullable String nonce,
                     @Nullable User user,
                     @Nullable Boolean privacyConsent,

@@ -81,7 +81,7 @@ class IdTokenVerifiersTest {
         String token = sign(signingKey, googleClaims(b -> b.claim("email", "user@example.com")
                 .claim("email_verified", true).claim("name", "홍길동").claim("picture", "https://lh3.example/p.jpg")));
 
-        IdpProfile profile = google(GOOGLE_CLIENT_ID).verify(new IdpCredential(Provider.GOOGLE, token, null, null));
+        IdpProfile profile = google(GOOGLE_CLIENT_ID).verify(new IdpCredential(Provider.GOOGLE, token, null, null, null));
 
         assertEquals("google-sub-1", profile.subject());
         assertEquals("user@example.com", profile.email());
@@ -93,7 +93,7 @@ class IdTokenVerifiersTest {
     void 구글_이메일이_확인되지_않았으면_이메일을_받지_않는다() throws Exception {
         String token = sign(signingKey, googleClaims(b -> b.claim("email", "user@example.com").claim("email_verified", false)));
 
-        assertNull(google(GOOGLE_CLIENT_ID).verify(new IdpCredential(Provider.GOOGLE, token, null, null)).email());
+        assertNull(google(GOOGLE_CLIENT_ID).verify(new IdpCredential(Provider.GOOGLE, token, null, null, null)).email());
     }
 
     @Test
@@ -101,21 +101,21 @@ class IdTokenVerifiersTest {
         RSAKey attacker = new RSAKeyGenerator(2048).keyID("test-key").generate();
 
         assertIdpInvalid(() -> google(GOOGLE_CLIENT_ID).verify(
-                new IdpCredential(Provider.GOOGLE, sign(attacker, googleClaims(b -> { })), null, null)));
+                new IdpCredential(Provider.GOOGLE, sign(attacker, googleClaims(b -> { })), null, null, null)));
     }
 
     @Test
     void 구글_다른_앱의_aud는_401이다() throws Exception {
         String token = sign(signingKey, googleClaims(b -> b.audience("someone-elses-client-id")));
 
-        assertIdpInvalid(() -> google(GOOGLE_CLIENT_ID).verify(new IdpCredential(Provider.GOOGLE, token, null, null)));
+        assertIdpInvalid(() -> google(GOOGLE_CLIENT_ID).verify(new IdpCredential(Provider.GOOGLE, token, null, null, null)));
     }
 
     @Test
     void 구글_iss가_다르면_401이다() throws Exception {
         String token = sign(signingKey, googleClaims(b -> b.issuer("https://evil.example")));
 
-        assertIdpInvalid(() -> google(GOOGLE_CLIENT_ID).verify(new IdpCredential(Provider.GOOGLE, token, null, null)));
+        assertIdpInvalid(() -> google(GOOGLE_CLIENT_ID).verify(new IdpCredential(Provider.GOOGLE, token, null, null, null)));
     }
 
     @Test
@@ -123,7 +123,7 @@ class IdTokenVerifiersTest {
         String token = sign(signingKey, googleClaims(b -> b.issuer("accounts.google.com")));
 
         assertEquals("google-sub-1",
-                google(GOOGLE_CLIENT_ID).verify(new IdpCredential(Provider.GOOGLE, token, null, null)).subject());
+                google(GOOGLE_CLIENT_ID).verify(new IdpCredential(Provider.GOOGLE, token, null, null, null)).subject());
     }
 
     @Test
@@ -132,12 +132,12 @@ class IdTokenVerifiersTest {
         String token = sign(signingKey, googleClaims(b -> b.issueTime(Date.from(past))
                 .expirationTime(Date.from(past.plus(Duration.ofHours(1))))));
 
-        assertIdpInvalid(() -> google(GOOGLE_CLIENT_ID).verify(new IdpCredential(Provider.GOOGLE, token, null, null)));
+        assertIdpInvalid(() -> google(GOOGLE_CLIENT_ID).verify(new IdpCredential(Provider.GOOGLE, token, null, null, null)));
     }
 
     @Test
     void 구글_형식이_JWT가_아니면_401이다() {
-        assertIdpInvalid(() -> google(GOOGLE_CLIENT_ID).verify(new IdpCredential(Provider.GOOGLE, "not-a-jwt", null, null)));
+        assertIdpInvalid(() -> google(GOOGLE_CLIENT_ID).verify(new IdpCredential(Provider.GOOGLE, "not-a-jwt", null, null, null)));
     }
 
     @Test
@@ -145,7 +145,7 @@ class IdTokenVerifiersTest {
         String token = sign(signingKey, googleClaims(b -> { }));
 
         assertIdpInvalid(() -> google("unset-put-parameter-after-apply")
-                .verify(new IdpCredential(Provider.GOOGLE, token, null, null)));
+                .verify(new IdpCredential(Provider.GOOGLE, token, null, null, null)));
     }
 
     @Test
@@ -154,7 +154,7 @@ class IdTokenVerifiersTest {
         String token = sign(signingKey, googleClaims(b -> { }));
 
         ApiException e = assertThrows(ApiException.class,
-                () -> google(GOOGLE_CLIENT_ID).verify(new IdpCredential(Provider.GOOGLE, token, null, null)));
+                () -> google(GOOGLE_CLIENT_ID).verify(new IdpCredential(Provider.GOOGLE, token, null, null, null)));
         assertEquals(ErrorCode.AUTH_IDP_UNAVAILABLE, e.code());
     }
 
@@ -165,7 +165,7 @@ class IdTokenVerifiersTest {
         String token = sign(signingKey, appleClaims(AppleIdpVerifier.sha256Hex(RAW_NONCE),
                 b -> b.claim("email", "abc@privaterelay.appleid.com").claim("email_verified", "true")));
 
-        IdpProfile profile = apple().verify(new IdpCredential(Provider.APPLE, token, RAW_NONCE, "김애플"));
+        IdpProfile profile = apple().verify(new IdpCredential(Provider.APPLE, token, RAW_NONCE, "김애플", null));
 
         assertEquals("apple-sub-1", profile.subject());
         assertEquals("abc@privaterelay.appleid.com", profile.email());
@@ -176,14 +176,14 @@ class IdTokenVerifiersTest {
     void 애플_nonce가_다르면_401이다() throws Exception {
         String token = sign(signingKey, appleClaims(AppleIdpVerifier.sha256Hex("another-nonce"), b -> { }));
 
-        assertIdpInvalid(() -> apple().verify(new IdpCredential(Provider.APPLE, token, RAW_NONCE, null)));
+        assertIdpInvalid(() -> apple().verify(new IdpCredential(Provider.APPLE, token, RAW_NONCE, null, null)));
     }
 
     @Test
     void 애플_토큰에_nonce가_없으면_401이다() throws Exception {
         String token = sign(signingKey, appleClaims(null, b -> { }));
 
-        assertIdpInvalid(() -> apple().verify(new IdpCredential(Provider.APPLE, token, RAW_NONCE, null)));
+        assertIdpInvalid(() -> apple().verify(new IdpCredential(Provider.APPLE, token, RAW_NONCE, null, null)));
     }
 
     @Test
@@ -191,14 +191,14 @@ class IdTokenVerifiersTest {
         // 해시가 아니라 원문이 토큰에 들어 있으면 클라이언트가 SHA-256을 빠뜨린 것이다 - 재생 방어가 무너지므로 받지 않는다.
         String token = sign(signingKey, appleClaims(RAW_NONCE, b -> { }));
 
-        assertIdpInvalid(() -> apple().verify(new IdpCredential(Provider.APPLE, token, RAW_NONCE, null)));
+        assertIdpInvalid(() -> apple().verify(new IdpCredential(Provider.APPLE, token, RAW_NONCE, null, null)));
     }
 
     @Test
     void 애플_다른_앱의_aud는_401이다() throws Exception {
         String token = sign(signingKey, appleClaims(AppleIdpVerifier.sha256Hex(RAW_NONCE), b -> b.audience("com.other.app")));
 
-        assertIdpInvalid(() -> apple().verify(new IdpCredential(Provider.APPLE, token, RAW_NONCE, null)));
+        assertIdpInvalid(() -> apple().verify(new IdpCredential(Provider.APPLE, token, RAW_NONCE, null, null)));
     }
 
     @Test
@@ -206,7 +206,7 @@ class IdTokenVerifiersTest {
         String token = sign(signingKey, appleClaims(AppleIdpVerifier.sha256Hex(RAW_NONCE),
                 b -> b.issuer("https://accounts.google.com")));
 
-        assertIdpInvalid(() -> apple().verify(new IdpCredential(Provider.APPLE, token, RAW_NONCE, null)));
+        assertIdpInvalid(() -> apple().verify(new IdpCredential(Provider.APPLE, token, RAW_NONCE, null, null)));
     }
 
     private static JWTClaimsSet googleClaims(Consumer<JWTClaimsSet.Builder> customize) {

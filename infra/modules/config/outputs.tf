@@ -21,6 +21,8 @@ output "parameter_names" {
     aws_ssm_parameter.google_client_id.name,
     aws_ssm_parameter.apple_bundle_id.name,
     aws_ssm_parameter.kakao_app_id.name,
+    aws_ssm_parameter.naver_client_id.name,
+    aws_ssm_parameter.naver_client_secret.name,
     ],
     aws_ssm_parameter.training_bucket[*].name,
     aws_ssm_parameter.training_tester_ids[*].name,

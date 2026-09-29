@@ -103,9 +103,9 @@ public final class PropertiesFixture {
      */
     public static AccenturyProperties.Auth auth() {
         return new AccenturyProperties.Auth(null, "accentury", Duration.ofMinutes(30), Duration.ofDays(30), 30,
-                false, null, null, null,
+                false, null, null, null, null, null,
                 "https://www.googleapis.com/oauth2/v3/certs", "https://appleid.apple.com/auth/keys",
-                "https://kapi.kakao.com", "https://openapi.naver.com", Duration.ofSeconds(5),
+                "https://kapi.kakao.com", "https://openapi.naver.com", "https://nid.naver.com", Duration.ofSeconds(5),
                 AccenturyProperties.Auth.PRIVACY_POLICY_VERSION);
     }
 

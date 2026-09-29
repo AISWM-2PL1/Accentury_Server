@@ -151,6 +151,15 @@ public class AuthService {
             throw new ApiException(ErrorCode.VALIDATION_FAILED,
                     (provider.usesIdToken() ? "idToken" : "accessToken") + "이 필요합니다.");
         }
+        // 네이버는 access token만으로 발급 앱을 가릴 수 없어 refresh token을 교환해 본다 (KAN-243, NaverIdpVerifier).
+        // 가짜 IdP 판정보다 먼저 확인한다 - 다른 필수 필드와 같은 규칙이다.
+        String idpRefreshToken = null;
+        if (provider == Provider.NAVER) {
+            idpRefreshToken = request.refreshToken();
+            if (idpRefreshToken == null || idpRefreshToken.isBlank() || idpRefreshToken.length() > TOKEN_MAX) {
+                throw new ApiException(ErrorCode.VALIDATION_FAILED, "네이버 로그인에는 refreshToken이 필요합니다.");
+            }
+        }
         String nonce = null;
         String appleName = null;
         if (provider == Provider.APPLE) {
@@ -163,7 +172,7 @@ public class AuthService {
                 throw new ApiException(ErrorCode.VALIDATION_FAILED, "user.name이 너무 깁니다.");
             }
         }
-        return new IdpCredential(provider, token, nonce, appleName);
+        return new IdpCredential(provider, token, nonce, appleName, idpRefreshToken);
     }
 
     private static Provider provider(@Nullable String value) {

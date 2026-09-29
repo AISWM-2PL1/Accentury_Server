@@ -27,7 +27,7 @@ class AuthServiceUnderAgeTest {
                 new RateLimits(PropertiesFixture.defaults(), new SimpleMeterRegistry()), null, PropertiesFixture.defaults());
 
         ApiException e = assertThrows(ApiException.class, () -> service.login(
-                new LoginRequest("KAKAO", null, "kakao-token", null, null, true,
+                new LoginRequest("KAKAO", null, "kakao-token", null, null, null, true,
                         AccenturyProperties.Auth.PRIVACY_POLICY_VERSION), "1.2.3.4"));
 
         assertEquals(ErrorCode.AUTH_UNDER_AGE, e.code());

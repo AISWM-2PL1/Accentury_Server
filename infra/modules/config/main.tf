@@ -266,6 +266,27 @@ resource "aws_ssm_parameter" "kakao_app_id" {
   value = var.auth_kakao_app_id
 }
 
+# 네이버 로그인 Client ID와 Secret (KAN-243). 네이버 사용자 조회 API는 토큰의 발급 앱을 알려 주지 않아서, backend가
+# SDK refresh token을 이 두 값으로 교환해 성공해야 우리 앱의 토큰으로 본다 (NaverIdpVerifier). 네이버 개발자 센터의
+# 앱 설정에 있는 값이고 앱(Android, iOS)의 NAVER_CLIENT_ID, NAVER_CLIENT_SECRET과 같다.
+# Client ID는 위 셋과 같이 tfvars로 넣는 String이다. Secret은 시크릿이라 tfvars에 두지 않고 카카오 Admin 키처럼
+# 자리만 만든 뒤 apply 뒤에 한 번 넣는다 (README "소셜 로그인" 절):
+#   aws ssm put-parameter --overwrite --type SecureString --name /accentury/{env}/ACCENTURY_AUTH_NAVERCLIENTSECRET --value '<Client Secret>'
+# 그 다음 backend 태스크를 새로 띄운다. 둘 중 하나라도 자리 표시 값인 동안 네이버 로그인만 401이다.
+# write-only인 이유는 kakao_admin_key 주석과 같다.
+resource "aws_ssm_parameter" "naver_client_id" {
+  name  = "${var.ssm_prefix}/ACCENTURY_AUTH_NAVERCLIENTID"
+  type  = "String"
+  value = var.auth_naver_client_id
+}
+
+resource "aws_ssm_parameter" "naver_client_secret" {
+  name             = "${var.ssm_prefix}/ACCENTURY_AUTH_NAVERCLIENTSECRET"
+  type             = "SecureString"
+  value_wo         = "unset-put-parameter-after-apply"
+  value_wo_version = 1
+}
+
 # ---- staging 전용 학습 데이터 S3 (KAN-201) ----
 
 # 값이 있는 환경에만 파라미터가 생긴다 - prod 태스크 정의에는 이 환경 변수가 아예 없어 backend가 S3 클라이언트도
