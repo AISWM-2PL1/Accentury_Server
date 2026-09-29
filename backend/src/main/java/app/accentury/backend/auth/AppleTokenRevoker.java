@@ -44,6 +44,10 @@ import java.util.UUID;
  * 돌아간다 - 탈퇴와 개인 정보 파기는 우리 쪽에서 이미 끝났고, 애플 연결은 사용자가 iOS 설정에서도 끊을 수 있다
  * (2026-09-29 확정). 로그에는 코드와 토큰을 남기지 않는다.
  * <p>
+ * 애플 호출 둘(교환, revoke)은 탈퇴 요청 스레드에서 동기로 돈다. 호출마다 연결과 읽기가 각각 {@code idp-timeout}(5초)까지라
+ * 애플이 응답하지 않으면 탈퇴 응답이 최대 약 20초 늦어진다 - 앱은 이 요청의 타임아웃을 20초보다 길게 잡는다 (명세서 §3.14,
+ * KAN-224 전달).
+ * <p>
  * client_secret은 애플 키(.p8)로 서명한 ES256 JWT다 ({@code iss} 팀 ID, {@code sub} 번들 ID, {@code aud}
  * {@code https://appleid.apple.com}, 헤더 {@code kid} 키 ID). 수명은 애플 상한(6개월)보다 훨씬 짧은 5분으로 요청마다
  * 새로 만든다.
@@ -141,6 +145,10 @@ final class AppleTokenRevoker {
             log.warn("애플 토큰 revoke 실패 - 탈퇴는 계속한다 userId={} code={}", userId, e.code());
         } catch (JOSEException e) {
             log.warn("애플 토큰 revoke 실패 - client_secret 서명 오류 userId={}", userId);
+        } catch (RuntimeException e) {
+            // 탈퇴는 이미 커밋됐다 - 여기서 새면 앱은 500을 받고, 재시도는 401이라 탈퇴 결과를 알 수 없다 (PR #9 리뷰).
+            // 예외 메시지는 남기지 않는다 - 응답 조각이 들어 있을 수 있다.
+            log.warn("애플 토큰 revoke 실패 - 예상 밖 오류 userId={} ({})", userId, e.getClass().getSimpleName());
         }
     }
 

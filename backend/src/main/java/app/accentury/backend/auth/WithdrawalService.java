@@ -76,6 +76,9 @@ public class WithdrawalService {
         } catch (ApiException e) {
             log.warn("탈퇴 Refresh 폐기 실패 - 계정 확인이 막으므로 탈퇴는 성공으로 둔다 userId={} code={}",
                     user.id(), e.code());
+        } catch (RuntimeException e) {
+            // 예상 밖 오류도 같다 - 커밋 뒤의 단계가 500을 내면 앱은 탈퇴 결과를 알 수 없다 (PR #9 리뷰).
+            log.warn("탈퇴 Refresh 폐기 실패 - 예상 밖 오류 userId={} ({})", user.id(), e.getClass().getSimpleName());
         }
 
         if (withdrawn.provider() == Provider.APPLE) {
