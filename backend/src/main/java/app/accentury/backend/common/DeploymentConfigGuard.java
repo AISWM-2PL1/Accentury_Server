@@ -77,11 +77,16 @@ class DeploymentConfigGuard {
     static final SsmName GOOGLE_CLIENT_ID = new SsmName("accentury.auth.google-client-id", "ACCENTURY_AUTH_GOOGLECLIENTID");
     static final SsmName APPLE_BUNDLE_ID = new SsmName("accentury.auth.apple-bundle-id", "ACCENTURY_AUTH_APPLEBUNDLEID");
     static final SsmName KAKAO_APP_ID = new SsmName("accentury.auth.kakao-app-id", "ACCENTURY_AUTH_KAKAOAPPID");
+    // 네이버 토큰 교환(KAN-243) - Client ID는 시크릿이 아니고 Secret은 시크릿이다.
+    static final SsmName NAVER_CLIENT_ID = new SsmName("accentury.auth.naver-client-id", "ACCENTURY_AUTH_NAVERCLIENTID");
+    static final SsmName NAVER_CLIENT_SECRET = new SsmName("accentury.auth.naver-client-secret",
+            "ACCENTURY_AUTH_NAVERCLIENTSECRET");
 
     /** 배포에서 값이 와야 하는 프로퍼티 전부 (자격 증명 둘은 Secrets Manager URL이면 비어 있어도 된다). */
     static final List<SsmName> SSM_NAMES = List.of(DATASOURCE_URL, DATASOURCE_USERNAME, DATASOURCE_PASSWORD,
             AI_BASE_URL, AI_TOKEN, TRUSTED_PROXIES, ADMIN_TOKEN, WEB_TEST_URL, ASSET_BASE_URL, KAKAO_ADMIN_KEY,
-            JWT_SECRET, REDIS_HOST, REDIS_PASSWORD, GOOGLE_CLIENT_ID, APPLE_BUNDLE_ID, KAKAO_APP_ID);
+            JWT_SECRET, REDIS_HOST, REDIS_PASSWORD, GOOGLE_CLIENT_ID, APPLE_BUNDLE_ID, KAKAO_APP_ID,
+            NAVER_CLIENT_ID, NAVER_CLIENT_SECRET);
 
     /**
      * JDBC URL에 이 파라미터가 <b>값과 함께</b> 있으면 자격 증명은 AWS Advanced JDBC Wrapper의
@@ -175,6 +180,13 @@ class DeploymentConfigGuard {
         }
         if (isBlank(binder, KAKAO_APP_ID.property())) {
             missing.add(KAKAO_APP_ID.label());
+        }
+        // 네이버 값 둘도 같은 규칙이다 (KAN-243) - 자리 표시 값이면 네이버 로그인만 401이다 (NaverIdpVerifier).
+        if (isBlank(binder, NAVER_CLIENT_ID.property())) {
+            missing.add(NAVER_CLIENT_ID.label());
+        }
+        if (isBlank(binder, NAVER_CLIENT_SECRET.property())) {
+            missing.add(NAVER_CLIENT_SECRET.label());
         }
         return missing;
     }

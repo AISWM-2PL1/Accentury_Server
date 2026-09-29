@@ -50,3 +50,7 @@ db_skip_final_snapshot = true
 # prod에 그대로 적용되어야 관찰의 의미가 있다 (2026-08-28 확정).
 waf_enforce    = true
 waf_rate_limit = 300
+
+# 네이버 로그인 Client ID (KAN-243). 시크릿이 아니고 앱의 NAVER_CLIENT_ID와 같은 값이다. 두 환경이 같은 네이버
+# 앱을 쓴다. 짝인 Client Secret은 시크릿이라 여기 두지 않고 apply 뒤 put-parameter로 넣는다 (README "소셜 로그인" 절).
+auth_naver_client_id = "2nlTdPK4RqeqQcLtb6xH"

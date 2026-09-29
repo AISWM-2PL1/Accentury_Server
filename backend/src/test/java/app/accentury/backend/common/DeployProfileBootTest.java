@@ -66,6 +66,8 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
         "accentury.auth.google-client-id=unset-put-parameter-after-apply",
         "accentury.auth.apple-bundle-id=unset-put-parameter-after-apply",
         "accentury.auth.kakao-app-id=unset-put-parameter-after-apply",
+        "accentury.auth.naver-client-id=unset-put-parameter-after-apply",
+        "accentury.auth.naver-client-secret=unset-put-parameter-after-apply",
         // 테스트 DB는 RDS가 아니라 순정 PostgreSQL이다.
         "spring.datasource.hikari.data-source-properties.wrapperDialect=pg"})
 @ActiveProfiles({"test", DeploymentConfigGuard.PROFILE})

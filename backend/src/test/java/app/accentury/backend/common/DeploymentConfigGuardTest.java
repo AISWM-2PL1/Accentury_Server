@@ -22,11 +22,11 @@ class DeploymentConfigGuardTest {
             "jdbc:aws-wrapper:postgresql://db.internal:5432/accentury?secretsManagerSecretId=arn:aws:secretsmanager:ap-northeast-2:123456789012:secret:rds!db-x";
 
     @Test
-    void 아무것도_없으면_필수값_열네_가지를_SSM_이름과_함께_전부_나열한다() {
+    void 아무것도_없으면_필수값_열여섯_가지를_SSM_이름과_함께_전부_나열한다() {
         // 한 번에 다 나와야 한다 - 하나씩 고치고 다시 띄우는 왕복이 배포마다 반복되면 안 된다.
         List<String> missing = DeploymentConfigGuard.missing(new MockEnvironment());
 
-        assertEquals(14, missing.size(), missing.toString());
+        assertEquals(16, missing.size(), missing.toString());
         assertTrue(missing.get(0).contains("SPRING_DATASOURCE_URL"));
         assertTrue(missing.get(1).contains("ACCENTURY_ANALYSIS_AIBASEURL"));
         assertTrue(missing.get(2).contains("ACCENTURY_ANALYSIS_AITOKEN"));
@@ -42,6 +42,9 @@ class DeploymentConfigGuardTest {
         assertTrue(missing.get(11).contains("ACCENTURY_AUTH_GOOGLECLIENTID"));
         assertTrue(missing.get(12).contains("ACCENTURY_AUTH_APPLEBUNDLEID"));
         assertTrue(missing.get(13).contains("ACCENTURY_AUTH_KAKAOAPPID"));
+        // 네이버 토큰 교환 (KAN-243)
+        assertTrue(missing.get(14).contains("ACCENTURY_AUTH_NAVERCLIENTID"));
+        assertTrue(missing.get(15).contains("ACCENTURY_AUTH_NAVERCLIENTSECRET"));
     }
 
     @Test
@@ -121,6 +124,8 @@ class DeploymentConfigGuardTest {
                 // IdP 값은 자리 표시 값이어도 통과다 - 콘솔에서 받기 전의 정상 상태다 (KAN-223).
                 .withProperty("accentury.auth.google-client-id", "unset-put-parameter-after-apply")
                 .withProperty("accentury.auth.apple-bundle-id", "app.accentury.ios")
-                .withProperty("accentury.auth.kakao-app-id", "1234567");
+                .withProperty("accentury.auth.kakao-app-id", "1234567")
+                .withProperty("accentury.auth.naver-client-id", "naverClientId01")
+                .withProperty("accentury.auth.naver-client-secret", "unset-put-parameter-after-apply");
     }
 }

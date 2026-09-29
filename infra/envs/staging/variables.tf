@@ -177,3 +177,9 @@ variable "auth_kakao_app_id" {
   description = "카카오 앱 ID(숫자) - access_token_info의 app_id (KAN-223)"
   default     = "unset-put-parameter-after-apply"
 }
+
+variable "auth_naver_client_id" {
+  type        = string
+  description = "네이버 로그인 Client ID - SDK refresh token 교환용 (KAN-243). Secret은 apply 뒤 put-parameter로 넣는다"
+  default     = "unset-put-parameter-after-apply"
+}

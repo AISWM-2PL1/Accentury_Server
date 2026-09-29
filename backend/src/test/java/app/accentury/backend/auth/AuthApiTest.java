@@ -186,6 +186,20 @@ class AuthApiTest extends IntegrationTest {
                         .content("{\"provider\": \"APPLE\", \"idToken\": \"fake:x\"}"))
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.code").value("VALIDATION_FAILED"));
+        // 네이버는 refresh token이 필수다 (KAN-243) - 가짜 IdP 판정보다 먼저 끊는다.
+        mockMvc.perform(post("/v0/auth/login").contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"provider\": \"NAVER\", \"accessToken\": \"fake:x\"}"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("VALIDATION_FAILED"));
+        mockMvc.perform(post("/v0/auth/login").contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"provider\": \"NAVER\", \"accessToken\": \"fake:x\", \"refreshToken\": \" \"}"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("VALIDATION_FAILED"));
+        mockMvc.perform(post("/v0/auth/login").contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"provider\": \"NAVER\", \"accessToken\": \"fake:x\", \"refreshToken\": \""
+                                + "r".repeat(AuthService.TOKEN_MAX + 1) + "\"}"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("VALIDATION_FAILED"));
         mockMvc.perform(post("/v0/auth/login"))
                 .andExpect(status().isBadRequest());
     }
@@ -559,6 +573,9 @@ class AuthApiTest extends IntegrationTest {
         }
         if ("APPLE".equals(provider)) {
             request.put("nonce", "raw-nonce");
+        }
+        if ("NAVER".equals(provider)) {
+            request.put("refreshToken", "fake:" + sub);
         }
         if (consent) {
             request.put("privacyConsent", true);

@@ -103,3 +103,9 @@ variable "auth_kakao_app_id" {
   description = "카카오 앱 ID(숫자, KAN-223). access_token_info의 app_id와 일치해야 한다 - 다른 앱의 토큰을 막는 유일한 검사다."
   default     = "unset-put-parameter-after-apply"
 }
+
+variable "auth_naver_client_id" {
+  type        = string
+  description = "네이버 로그인 Client ID (KAN-243). backend가 SDK refresh token을 교환할 때 쓴다 - Secret은 SSM에 따로 넣는다."
+  default     = "unset-put-parameter-after-apply"
+}

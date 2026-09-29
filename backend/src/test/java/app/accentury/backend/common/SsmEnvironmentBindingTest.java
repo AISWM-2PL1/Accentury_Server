@@ -86,6 +86,8 @@ class SsmEnvironmentBindingTest {
         ssm.put(DeploymentConfigGuard.GOOGLE_CLIENT_ID.ssmName(), "1234-abc.apps.googleusercontent.com");
         ssm.put(DeploymentConfigGuard.APPLE_BUNDLE_ID.ssmName(), "app.accentury.ios");
         ssm.put(DeploymentConfigGuard.KAKAO_APP_ID.ssmName(), "1234567");
+        ssm.put(DeploymentConfigGuard.NAVER_CLIENT_ID.ssmName(), "naverClientId01");
+        ssm.put(DeploymentConfigGuard.NAVER_CLIENT_SECRET.ssmName(), "naverClientSecret01");
 
         // OS 환경 변수와 같은 종류의 소스다 - 진짜 셸 값보다 앞에 둔다. 이름이 "-systemEnvironment"로
         // 끝나야 Boot가 환경 변수용 이름 규칙(대시 제거)을 적용한다 - 타입만 맞고 이름이 다르면 일반
@@ -151,9 +153,9 @@ class SsmEnvironmentBindingTest {
         assumeTrue(Files.exists(main), "infra/modules/config/main.tf 없음 - 모노레포 밖 실행");
 
         String literal = "value_wo         = \"" + SsmPlaceholder.UNSET + "\"";
-        assertEquals(3, Files.readString(main).split(Pattern.quote(literal), -1).length - 1,
-                "main.tf에서 자리 표시 값을 쓰는 자원이 셋(kakao_admin_key, feedback_slack_webhook_url,"
-                        + " training_tester_ids)이 아니다 - backend의 SsmPlaceholder.UNSET와 글자가 같은지 확인한다");
+        assertEquals(4, Files.readString(main).split(Pattern.quote(literal), -1).length - 1,
+                "main.tf에서 자리 표시 값을 쓰는 자원이 넷(kakao_admin_key, feedback_slack_webhook_url,"
+                        + " naver_client_secret, training_tester_ids)이 아니다 - backend의 SsmPlaceholder.UNSET와 글자가 같은지 확인한다");
         // 카카오 쪽 상수가 같은 리터럴을 가리키는지도 못박는다 - 옮기면서 갈라지면 여기서 드러난다.
         assertEquals(SsmPlaceholder.UNSET, app.accentury.backend.share.KakaoWebhookAuth.PLACEHOLDER);
     }
