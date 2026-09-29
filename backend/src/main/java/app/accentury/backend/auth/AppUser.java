@@ -92,7 +92,7 @@ public class AppUser implements Persistable<UUID> {
     @Column(name = "updated_at", nullable = false)
     private Instant updatedAt;
 
-    /** 탈퇴 표시 자리 (FR-AC-09, 별도 티켓). 값이 있는 계정은 없는 사용자로 본다 - 지금은 아무도 쓰지 않는다. */
+    /** 탈퇴 시각 (FR-AC-09, KAN-241). 값이 있는 계정은 없는 사용자로 본다 - {@link #withdraw} 참고. */
     @Column(name = "deleted_at")
     private @Nullable Instant deletedAt;
 
@@ -177,6 +177,33 @@ public class AppUser implements Persistable<UUID> {
         markCompletionIfReady(now);
     }
 
+    /** 탈퇴 행의 {@code provider_user_id} 접두사 (KAN-241). IdP 사용자 id는 이 문자로 시작하지 않는다. */
+    static final String WITHDRAWN_SUBJECT_PREFIX = "deleted:";
+
+    /**
+     * 탈퇴 (FR-AC-09, KAN-241, 명세서 §3.14) - 행은 남기고 개인 정보는 지금 지운다.
+     * <p>
+     * 이메일, 이름, 생년월일, 성별, 출신지역, 닉네임, 프로필 이미지를 null로 덮는다. {@code provider_user_id}는
+     * {@code deleted:<계정 id>}로 바꿔 유일 제약 (provider, provider_user_id)의 자리를 비운다 - 같은 IdP 계정으로
+     * 다시 로그인하면 새 계정으로 가입된다. IdP 사용자 id의 해시가 아니라 계정 id인 이유는 둘이다: 같은 IdP 계정이
+     * 두 번 탈퇴해도 값이 겹치지 않고, 탈퇴 행에서 IdP 계정으로 되짚어 갈 길이 남지 않는다.
+     * <p>
+     * 동의 시각과 방침 버전, 프로필 완료 시각, 생성 시각은 개인 식별 정보가 아니라 남긴다. 탈퇴 행은 이력 용도이고
+     * 물리 삭제는 별도 배치다.
+     */
+    void withdraw(Instant now) {
+        this.providerUserId = WITHDRAWN_SUBJECT_PREFIX + id;
+        this.email = null;
+        this.name = null;
+        this.birthDate = null;
+        this.gender = null;
+        this.region = null;
+        this.nickname = null;
+        this.profileImageUrl = null;
+        this.updatedAt = now;
+        this.deletedAt = now;
+    }
+
     private void markCompletionIfReady(Instant now) {
         if (profileCompletedAt == null && hasAllProfileFields()) {
             profileCompletedAt = now;
@@ -256,7 +283,12 @@ public class AppUser implements Persistable<UUID> {
         return privacyPolicyVersion;
     }
 
-    /** 탈퇴 표시 - 지금은 항상 null이다 (FR-AC-09 별도 티켓). */
+    /** IdP의 사용자 id - 탈퇴한 계정은 {@code deleted:<계정 id>}다. */
+    public String providerUserId() {
+        return providerUserId;
+    }
+
+    /** 탈퇴 시각 - 살아 있는 계정은 null이다 (KAN-241). */
     public @Nullable Instant deletedAt() {
         return deletedAt;
     }

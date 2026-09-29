@@ -61,7 +61,8 @@ class RestIdpVerifiersTest {
         String url = server.url("").toString().replaceAll("/$", "");
         return new AccenturyProperties.Auth(base.jwtSecret(), base.issuer(), base.accessTokenTtl(), base.refreshTokenTtl(),
                 base.rateLimitPerMinute(), false, null, null, kakaoAppId, naverClientId, naverClientSecret,
-                base.googleJwksUrl(), base.appleJwksUrl(), url, url, url, timeout, base.privacyPolicyVersion());
+                null, null, null, base.googleJwksUrl(), base.appleJwksUrl(), url, url, url, url, timeout,
+                base.privacyPolicyVersion());
     }
 
     private KakaoIdpVerifier kakao() {

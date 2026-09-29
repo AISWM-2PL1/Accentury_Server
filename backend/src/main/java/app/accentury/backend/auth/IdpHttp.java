@@ -22,7 +22,7 @@ import java.util.function.Supplier;
 
 /**
  * 카카오와 네이버의 사용자 조회 API 호출 (명세서 §3.9). SDK access token을 {@code Authorization: Bearer}로 싣고
- * JSON을 받는다. 네이버 토큰 교환(KAN-243)은 form POST로 부른다.
+ * JSON을 받는다. 네이버 토큰 교환(KAN-243)과 애플 토큰 교환과 revoke(KAN-241)는 form POST로 부른다.
  * <p>
  * 실패 분류가 이 클래스의 일이다: IdP가 4xx로 답하면 토큰이 틀린 것(401 {@code AUTH_IDP_TOKEN_INVALID})이고,
  * 429(호출 한도 초과)이거나 5xx이거나 닿지 못했거나 시간이 넘었거나 본문이 JSON이 아니면 IdP 장애(502 {@code AUTH_IDP_UNAVAILABLE})다.
@@ -73,10 +73,41 @@ final class IdpHttp {
                 .body(String.class));
     }
 
+    /**
+     * 응답 본문이 없는 form POST - 애플 토큰 revoke(KAN-241)가 쓴다. 애플은 성공을 빈 본문의 200으로 답한다.
+     * 실패 분류는 {@link #get}과 같다.
+     *
+     * @throws ApiException 401 {@code AUTH_IDP_TOKEN_INVALID} 또는 502 {@code AUTH_IDP_UNAVAILABLE}
+     */
+    void postFormWithoutBody(String path, MultiValueMap<String, String> form) {
+        send(path, () -> {
+            restClient.post()
+                    .uri(path)
+                    .contentType(MediaType.APPLICATION_FORM_URLENCODED)
+                    .body(form)
+                    .retrieve()
+                    .toBodilessEntity();
+            return null;
+        });
+    }
+
     private JsonNode exchange(String path, Supplier<@Nullable String> call) {
-        String body;
+        String body = send(path, call);
+        if (body == null) {
+            log.warn("{} {} 빈 응답", idpName, path);
+            throw new ApiException(ErrorCode.AUTH_IDP_UNAVAILABLE);
+        }
         try {
-            body = call.get();
+            return objectMapper.readTree(body);
+        } catch (JacksonException e) {
+            log.warn("{} {} 응답이 JSON이 아니다", idpName, path);
+            throw new ApiException(ErrorCode.AUTH_IDP_UNAVAILABLE);
+        }
+    }
+
+    private @Nullable String send(String path, Supplier<@Nullable String> call) {
+        try {
+            return call.get();
         } catch (HttpClientErrorException.TooManyRequests e) {
             // 429는 토큰이 틀린 것이 아니라 우리 앱의 IdP 호출 쿼터가 찬 것이다 - 401로 내면 앱이 멀쩡한 토큰을 버리고
             // 사용자를 다시 로그인시킨다. 잠시 뒤 재시도할 상류 장애로 낸다 (PR #2 리뷰).
@@ -88,16 +119,6 @@ final class IdpHttp {
             throw new ApiException(ErrorCode.AUTH_IDP_TOKEN_INVALID);
         } catch (RestClientException e) {
             log.warn("{} {} 호출 실패 - {}", idpName, path, e.getClass().getSimpleName());
-            throw new ApiException(ErrorCode.AUTH_IDP_UNAVAILABLE);
-        }
-        if (body == null) {
-            log.warn("{} {} 빈 응답", idpName, path);
-            throw new ApiException(ErrorCode.AUTH_IDP_UNAVAILABLE);
-        }
-        try {
-            return objectMapper.readTree(body);
-        } catch (JacksonException e) {
-            log.warn("{} {} 응답이 JSON이 아니다", idpName, path);
             throw new ApiException(ErrorCode.AUTH_IDP_UNAVAILABLE);
         }
     }

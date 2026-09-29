@@ -183,3 +183,15 @@ variable "auth_naver_client_id" {
   description = "네이버 로그인 Client ID - SDK refresh token 교환용 (KAN-243). Secret은 apply 뒤 put-parameter로 넣는다"
   default     = "unset-put-parameter-after-apply"
 }
+
+variable "auth_apple_team_id" {
+  type        = string
+  description = "애플 개발자 팀 ID - 탈퇴 때 애플 토큰 revoke용 (KAN-241). 키 원문은 apply 뒤 put-parameter로 넣는다"
+  default     = "unset-put-parameter-after-apply"
+}
+
+variable "auth_apple_key_id" {
+  type        = string
+  description = "Sign in with Apple 키의 Key ID - 탈퇴 때 애플 토큰 revoke용 (KAN-241)"
+  default     = "unset-put-parameter-after-apply"
+}
