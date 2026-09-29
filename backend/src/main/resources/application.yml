@@ -220,6 +220,10 @@ accentury:
     # naver-client-id, naver-client-secret은 네이버 SDK refresh token을 교환해 발급 앱을 확인하는 값이다 (KAN-243).
     # 배포에서는 SSM String ACCENTURY_AUTH_NAVERCLIENTID와 SecureString ACCENTURY_AUTH_NAVERCLIENTSECRET이 넣는다.
     # 둘 중 하나라도 없거나 자리 표시 값이면 네이버 로그인만 401이다. 로컬은 fake-idp로 돈다.
+    # apple-team-id, apple-key-id, apple-private-key는 탈퇴한 애플 계정의 토큰 revoke용이다 (KAN-241, 명세서 §3.14).
+    # 애플 키(.p8)로 client_secret JWT를 서명한다. 배포에서는 SSM String ACCENTURY_AUTH_APPLETEAMID, ACCENTURY_AUTH_APPLEKEYID와
+    # SecureString ACCENTURY_AUTH_APPLEPRIVATEKEY가 넣는다. 필수 설정이 아니다 - 하나라도 없거나 자리 표시 값이면 revoke만
+    # 건너뛰고 WARN을 남기며 탈퇴는 성공한다 (AppleTokenRevoker).
   # 요청 제한의 기준 IP를 정할 때 신뢰할 프록시 대역 (명세서 §2.5, KAN-28).
   # 비어 있으면 X-Forwarded-For를 아예 읽지 않는다 - 프록시 없이 뜬 서버에서 헤더 위조로
   # IP 제한을 우회하지 못하게 하는 기본값이다. ALB 뒤에 배포하면 반드시 그 서브넷을 넣어야

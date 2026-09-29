@@ -287,6 +287,34 @@ resource "aws_ssm_parameter" "naver_client_secret" {
   value_wo_version = 1
 }
 
+# 탈퇴한 애플 계정의 토큰 revoke (KAN-241, 애플 심사 지침 5.1.1(v)). backend가 애플 키(.p8)로 client_secret JWT를
+# 서명해 앱이 보낸 authorization code를 교환하고 revoke한다 (AppleTokenRevoker). 팀 ID와 키 ID는 시크릿이 아니라
+# tfvars로 넣는 String이고, 키 원문은 네이버 Secret처럼 자리만 만든 뒤 apply 뒤에 한 번 넣는다 (README "소셜 로그인" 절):
+#   aws ssm put-parameter --overwrite --type SecureString --name /accentury/{env}/ACCENTURY_AUTH_APPLEPRIVATEKEY --value file://AuthKey_XXXXXXXXXX.p8
+# 그 다음 backend 태스크를 새로 띄운다.
+#
+# 네이버 값과 다른 점은 하나다: 셋 다 backend의 필수 설정이 아니다(DeploymentConfigGuard 밖이다). 하나라도 없거나
+# 자리 표시 값이면 backend가 revoke만 건너뛰고 탈퇴는 성공시키므로(feedback_slack_webhook_url과 같은 사정), apply와
+# 이미지 배포의 순서 제약이 없다. write-only인 이유는 kakao_admin_key 주석과 같다.
+resource "aws_ssm_parameter" "apple_team_id" {
+  name  = "${var.ssm_prefix}/ACCENTURY_AUTH_APPLETEAMID"
+  type  = "String"
+  value = var.auth_apple_team_id
+}
+
+resource "aws_ssm_parameter" "apple_key_id" {
+  name  = "${var.ssm_prefix}/ACCENTURY_AUTH_APPLEKEYID"
+  type  = "String"
+  value = var.auth_apple_key_id
+}
+
+resource "aws_ssm_parameter" "apple_private_key" {
+  name             = "${var.ssm_prefix}/ACCENTURY_AUTH_APPLEPRIVATEKEY"
+  type             = "SecureString"
+  value_wo         = "unset-put-parameter-after-apply"
+  value_wo_version = 1
+}
+
 # ---- staging 전용 학습 데이터 S3 (KAN-201) ----
 
 # 값이 있는 환경에만 파라미터가 생긴다 - prod 태스크 정의에는 이 환경 변수가 아예 없어 backend가 S3 클라이언트도

@@ -35,4 +35,10 @@ class AuthConfig {
                 new KakaoIdpVerifier(auth, objectMapper),
                 new NaverIdpVerifier(auth, objectMapper)), auth.fakeIdp());
     }
+
+    /** 탈퇴한 애플 계정의 토큰 revoke (KAN-241). 설정이 없으면 기동 때 WARN 한 번이고, 탈퇴는 revoke 없이 성공한다. */
+    @Bean
+    AppleTokenRevoker appleTokenRevoker(AccenturyProperties properties, ObjectMapper objectMapper) {
+        return new AppleTokenRevoker(properties.auth(), objectMapper);
+    }
 }

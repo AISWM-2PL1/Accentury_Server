@@ -355,11 +355,17 @@ public record AccenturyProperties(Session session,
      *                           로그인만 전부 401이다.
      * @param naverClientSecret  네이버 로그인 Client Secret - 위 교환의 짝이다. SSM SecureString이고, 비었거나 자리 표시
      *                           값이면 위와 같다.
+     * @param appleTeamId        애플 개발자 팀 ID - 탈퇴 때 애플 토큰 revoke(KAN-241)의 client_secret JWT {@code iss}다.
+     *                           시크릿이 아니다. 아래 둘과 번들 ID 중 하나라도 비었거나 자리 표시 값이면 revoke를 건너뛰고
+     *                           WARN만 남긴다 - 탈퇴 자체는 성공한다.
+     * @param appleKeyId         Sign in with Apple 키의 Key ID - client_secret JWT 헤더의 {@code kid}다.
+     * @param applePrivateKey    그 키의 .p8 원문(PKCS#8 PEM) - client_secret JWT를 ES256으로 서명한다. SSM SecureString이다.
      * @param googleJwksUrl      구글 JWKS 주소. 테스트가 가짜 JWKS로 바꾸는 자리다.
      * @param appleJwksUrl       애플 JWKS 주소. 위와 같다.
      * @param kakaoApiBaseUrl    카카오 API 기준 주소 ({@code kapi.kakao.com}). 테스트가 MockWebServer로 바꾼다.
      * @param naverApiBaseUrl    네이버 API 기준 주소 ({@code openapi.naver.com}). 위와 같다.
      * @param naverAuthBaseUrl   네이버 인증 서버 기준 주소 ({@code nid.naver.com}) - 토큰 교환(KAN-243)이 부른다. 위와 같다.
+     * @param appleAuthBaseUrl   애플 인증 서버 기준 주소 ({@code appleid.apple.com}) - 탈퇴의 토큰 교환과 revoke가 부른다. 위와 같다.
      * @param idpTimeout         IdP 호출(JWKS 조회 포함)의 연결과 읽기 타임아웃. 넘으면 502 {@code AUTH_IDP_UNAVAILABLE}이다.
      * @param privacyPolicyVersion 게시 중인 개인정보처리방침 버전 (KAN-240). 가입 요청의 {@code privacyPolicyVersion}이
      *                           이 값과 정확히 같아야 동의로 기록한다. 다르면 400 {@code AUTH_CONSENT_REQUIRED}다 -
@@ -379,11 +385,15 @@ public record AccenturyProperties(Session session,
                        @Nullable String kakaoAppId,
                        @Nullable String naverClientId,
                        @Nullable String naverClientSecret,
+                       @Nullable String appleTeamId,
+                       @Nullable String appleKeyId,
+                       @Nullable String applePrivateKey,
                        @DefaultValue("https://www.googleapis.com/oauth2/v3/certs") String googleJwksUrl,
                        @DefaultValue("https://appleid.apple.com/auth/keys") String appleJwksUrl,
                        @DefaultValue("https://kapi.kakao.com") String kakaoApiBaseUrl,
                        @DefaultValue("https://openapi.naver.com") String naverApiBaseUrl,
                        @DefaultValue("https://nid.naver.com") String naverAuthBaseUrl,
+                       @DefaultValue("https://appleid.apple.com") String appleAuthBaseUrl,
                        @DefaultValue("5s") Duration idpTimeout,
                        @DefaultValue(Auth.PRIVACY_POLICY_VERSION) String privacyPolicyVersion) {
 

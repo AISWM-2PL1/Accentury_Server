@@ -9,6 +9,7 @@ import org.springframework.data.repository.query.Param;
 
 import java.time.Instant;
 import java.util.Optional;
+import java.util.UUID;
 
 public interface TestSessionRepository extends JpaRepository<TestSession, String> {
 
@@ -55,4 +56,14 @@ public interface TestSessionRepository extends JpaRepository<TestSession, String
     @Modifying
     @Query("delete from TestSession s where s.expiresAt < :cutoff")
     long deleteByExpiresAtBefore(@Param("cutoff") Instant cutoff);
+
+    /**
+     * 탈퇴한 계정의 세션 귀속을 끊는다 (KAN-241, 명세서 §3.14) - 세션은 남기고 {@code user_id}만 null로 바꾼다.
+     * 세션 자체는 위 주기 삭제가 24시간 뒤 지운다. 호출부에 트랜잭션 필요.
+     *
+     * @return 귀속을 끊은 세션 수
+     */
+    @Modifying
+    @Query("update TestSession s set s.userId = null where s.userId = :userId")
+    int detachUser(@Param("userId") UUID userId);
 }

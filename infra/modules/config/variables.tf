@@ -109,3 +109,15 @@ variable "auth_naver_client_id" {
   description = "네이버 로그인 Client ID (KAN-243). backend가 SDK refresh token을 교환할 때 쓴다 - Secret은 SSM에 따로 넣는다."
   default     = "unset-put-parameter-after-apply"
 }
+
+variable "auth_apple_team_id" {
+  type        = string
+  description = "애플 개발자 팀 ID (KAN-241). 탈퇴 때 애플 토큰 revoke의 client_secret JWT iss다 - 키 원문은 SSM에 따로 넣는다."
+  default     = "unset-put-parameter-after-apply"
+}
+
+variable "auth_apple_key_id" {
+  type        = string
+  description = "Sign in with Apple 키의 Key ID (KAN-241). client_secret JWT 헤더의 kid다."
+  default     = "unset-put-parameter-after-apply"
+}

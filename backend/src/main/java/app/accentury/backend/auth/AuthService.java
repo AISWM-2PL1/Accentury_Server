@@ -118,7 +118,9 @@ public class AuthService {
                     .orElse(null);
             if (existing != null) {
                 if (existing.deletedAt() != null) {
-                    // 탈퇴(FR-AC-09)가 아직 없어 이 분기는 닿지 않는다. 탈퇴 티켓이 재가입 규칙을 정할 때까지 막아 둔다.
+                    // 탈퇴(KAN-241)는 provider_user_id를 deleted:<계정 id>로 바꿔 자리를 비우므로 IdP 사용자 id로는 탈퇴 행이
+                    // 찾아지지 않는다 - 재로그인은 아래에서 새 계정이 된다. 이 분기는 치환 없이 deleted_at만 찍힌 행(손으로 고친
+                    // 데이터)이 되살아나지 않게 막는 방어선이다.
                     throw new ApiException(ErrorCode.AUTH_IDP_TOKEN_INVALID);
                 }
                 existing.fillBlanksFrom(profile, now);

@@ -1115,6 +1115,8 @@ Terraform이 만드는 것은 셋이다.
 | `SPRING_DATA_REDIS_HOST`, `SPRING_DATA_REDIS_PASSWORD`(SecureString), `ACCENTURY_AUTH_JWTSECRET`(SecureString) | `modules/config` | Terraform (data 모듈 출력, 난수) |
 | `ACCENTURY_AUTH_GOOGLECLIENTID`, `ACCENTURY_AUTH_APPLEBUNDLEID`, `ACCENTURY_AUTH_KAKAOAPPID`, `ACCENTURY_AUTH_NAVERCLIENTID`(String) | `modules/config` | tfvars (IdP 콘솔, KAN-224, KAN-243) |
 | `ACCENTURY_AUTH_NAVERCLIENTSECRET`(SecureString, write-only) | `modules/config` | apply 뒤 `put-parameter` (네이버 개발자 센터, KAN-243) |
+| `ACCENTURY_AUTH_APPLETEAMID`, `ACCENTURY_AUTH_APPLEKEYID`(String) | `modules/config` | tfvars (애플 개발자 계정, KAN-241) |
+| `ACCENTURY_AUTH_APPLEPRIVATEKEY`(SecureString, write-only) | `modules/config` | apply 뒤 `put-parameter` (애플 키 .p8, KAN-241) |
 
 **필수 SSM 파라미터가 여섯 늘었으므로 apply가 코드 배포보다 먼저다** (KAN-132와 같은 규칙). 여섯 모두
 `DeploymentConfigGuard`의 필수 목록이라, 파라미터 없이 새 이미지가 뜨면 태스크가 기동하지 못하고 롤링 배포가
@@ -1154,6 +1156,25 @@ backend가 앱이 보낸 SDK refresh token을 이 두 값으로 교환해 성공
 aws ssm put-parameter --overwrite --type SecureString --name /accentury/staging/ACCENTURY_AUTH_NAVERCLIENTSECRET --value '<Client Secret>'
 aws ecs update-service --cluster accentury-staging --service backend --force-new-deployment
 ```
+
+**애플 탈퇴 revoke는 팀 ID, 키 ID, 키(.p8) 셋이다 (KAN-241).** 회원 탈퇴(명세서 §3.14) 때 backend가 앱이 보낸 애플
+authorization code를 교환해 애플 토큰을 revoke한다(애플 심사 지침 5.1.1(v)). client_secret이 애플 키로 서명한 JWT라
+키 원문이 서버에 있어야 한다. 키는 애플 개발자 계정의 Keys에서 Sign in with Apple을 켜고 만든 것이고, .p8은 만들 때
+한 번만 내려받을 수 있다. 팀 ID와 키 ID는 시크릿이 아니라 tfvars에 적고, 키 원문은 apply 뒤에 파일째 넣는다.
+
+```
+auth_apple_team_id = "<팀 ID 10자>"
+auth_apple_key_id  = "<Key ID 10자>"
+```
+
+```
+aws ssm put-parameter --overwrite --type SecureString --name /accentury/staging/ACCENTURY_AUTH_APPLEPRIVATEKEY --value file://AuthKey_<Key ID>.p8
+aws ecs update-service --cluster accentury-staging --service backend --force-new-deployment
+```
+
+**세 파라미터는 필수 설정이 아니다** - 네이버와 달리 `DeploymentConfigGuard` 밖이라 apply와 이미지 배포의 순서 제약이
+없다. 하나라도 자리 표시 값인 동안 backend는 기동 때 `애플 토큰 revoke 미설정` WARN을 한 번 남기고, 애플 계정의 탈퇴는
+revoke 없이 성공한다(탈퇴 때마다 `애플 토큰 revoke 건너뜀` WARN). 값을 넣은 뒤 기동 로그에서 그 WARN이 사라졌는지 본다.
 
 **키 재발급.**
 

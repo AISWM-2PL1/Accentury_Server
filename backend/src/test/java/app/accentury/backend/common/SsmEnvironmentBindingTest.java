@@ -50,6 +50,9 @@ class SsmEnvironmentBindingTest {
      * 조용히 사라져 전송 완료가 통째로 새므로 없으면 기동을 세워야 하지만, 슬랙 URL이 없으면
      * 알림만 조용해질 뿐 후기는 그대로 저장된다 ({@code FeedbackSlackNotifier}). 그래서 값을 넣는
      * 순서에 배포 제약이 없다.
+     * <p>
+     * 애플 토큰 revoke 값 셋(KAN-241)도 같은 이유로 가드 밖이다 - 없으면 탈퇴 때 revoke만 건너뛰고 탈퇴는 성공한다
+     * ({@code AppleTokenRevoker}).
      */
     private static final Set<String> TERRAFORM_ONLY = Set.of(
             "SPRING_PROFILES_ACTIVE",
@@ -59,7 +62,10 @@ class SsmEnvironmentBindingTest {
             "ACCENTURY_TRAINING_CONSENTEDBUCKET",
             "ACCENTURY_TRAINING_TESTERIDS",
             "ACCENTURY_TRAINING_PSEUDONYMKEY",
-            "ACCENTURY_FEEDBACK_SLACKWEBHOOKURL");
+            "ACCENTURY_FEEDBACK_SLACKWEBHOOKURL",
+            "ACCENTURY_AUTH_APPLETEAMID",
+            "ACCENTURY_AUTH_APPLEKEYID",
+            "ACCENTURY_AUTH_APPLEPRIVATEKEY");
 
     /** 가드 정본에는 있지만 Terraform이 만들지 않는 이름 - 자격 증명은 Secrets Manager에서 온다. */
     private static final Set<String> GUARD_ONLY = Set.of(
@@ -118,7 +124,10 @@ class SsmEnvironmentBindingTest {
                         "0f8c2a4e-6d1b-4c3a-9e57-2b1d8f6a4c90,7a1e3c5b-2d4f-4e6a-8b0c-1d3f5a7c9e2b",
                         "ACCENTURY_TRAINING_PSEUDONYMKEY", "binding-check-pseudonym-key-0123456789abcdef",
                         "ACCENTURY_FEEDBACK_SLACKWEBHOOKURL",
-                        "https://hooks.slack.com/services/T000/B000/binding-check")));
+                        "https://hooks.slack.com/services/T000/B000/binding-check",
+                        "ACCENTURY_AUTH_APPLETEAMID", "TEAM012345",
+                        "ACCENTURY_AUTH_APPLEKEYID", "KEY0123456",
+                        "ACCENTURY_AUTH_APPLEPRIVATEKEY", "binding-check-apple-key")));
         Binder tunedBinder = Binder.get(tuned);
         assertEquals("100s", tunedBinder.bind("accentury.analysis.ai-timeout", String.class).get());
         assertEquals("400s", tunedBinder.bind("accentury.analysis.processing-timeout", String.class).get());
@@ -136,6 +145,10 @@ class SsmEnvironmentBindingTest {
         // 대시가 셋이라(slack-web-hook이 아니라 slack-webhook-url) relaxed binding 이름이 특히 헷갈린다.
         assertEquals("https://hooks.slack.com/services/T000/B000/binding-check",
                 tunedBinder.bind("accentury.feedback.slack-webhook-url", String.class).get());
+        // 애플 토큰 revoke 값 셋 (KAN-241) - 이름이 어긋나면 값을 넣어도 탈퇴 때 revoke가 조용히 건너뛰어진다.
+        assertEquals("TEAM012345", tunedBinder.bind("accentury.auth.apple-team-id", String.class).get());
+        assertEquals("KEY0123456", tunedBinder.bind("accentury.auth.apple-key-id", String.class).get());
+        assertEquals("binding-check-apple-key", tunedBinder.bind("accentury.auth.apple-private-key", String.class).get());
 
         // 목록 프로퍼티는 쉼표 한 줄이 원소로 갈라져야 한다 (ClientIps가 List<String>으로 받는다).
         assertEquals(List.of("10.1.0.0/16"),
@@ -153,9 +166,9 @@ class SsmEnvironmentBindingTest {
         assumeTrue(Files.exists(main), "infra/modules/config/main.tf 없음 - 모노레포 밖 실행");
 
         String literal = "value_wo         = \"" + SsmPlaceholder.UNSET + "\"";
-        assertEquals(4, Files.readString(main).split(Pattern.quote(literal), -1).length - 1,
-                "main.tf에서 자리 표시 값을 쓰는 자원이 넷(kakao_admin_key, feedback_slack_webhook_url,"
-                        + " naver_client_secret, training_tester_ids)이 아니다 - backend의 SsmPlaceholder.UNSET와 글자가 같은지 확인한다");
+        assertEquals(5, Files.readString(main).split(Pattern.quote(literal), -1).length - 1,
+                "main.tf에서 자리 표시 값을 쓰는 자원이 다섯(kakao_admin_key, feedback_slack_webhook_url,"
+                        + " naver_client_secret, apple_private_key, training_tester_ids)이 아니다 - backend의 SsmPlaceholder.UNSET와 글자가 같은지 확인한다");
         // 카카오 쪽 상수가 같은 리터럴을 가리키는지도 못박는다 - 옮기면서 갈라지면 여기서 드러난다.
         assertEquals(SsmPlaceholder.UNSET, app.accentury.backend.share.KakaoWebhookAuth.PLACEHOLDER);
     }

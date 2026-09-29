@@ -35,6 +35,10 @@ import java.util.regex.Pattern;
  *       {@code U} 회전됨). TTL은 토큰 수명(30일)이다.</li>
  *   <li>{@code rtfam:{패밀리 id}} - 한 로그인에서 이어진 토큰 해시의 집합. 재사용 감지와 로그아웃이 패밀리를 통째로
  *       지울 때 쓴다. TTL은 마지막 회전에서 다시 30일이다.</li>
+ *   <li>{@code rtuser:{사용자 id}} - 그 사용자의 패밀리 id 집합 (KAN-241). 탈퇴가 모든 기기의 로그인을 한 번에 지울 때
+ *       쓴다. TTL은 발급이나 회전 때마다 다시 30일이라 그 사용자의 어느 패밀리보다 늦게 끝난다. 발급 때 이미 사라진
+ *       패밀리를 걷어 내고, 로그아웃과 재사용 폐기는 자기 패밀리를 뺀다. 이 색인이 생기기 전에 발급된 로그인은 색인에
+ *       없지만, 탈퇴한 계정의 refresh는 {@code AuthService}가 계정을 다시 확인해 거절하므로 새지 않는다.</li>
  * </ul>
  * 회전된 토큰은 지우지 않고 {@code U}로 남긴다 - 남겨야 같은 토큰이 다시 왔을 때 "모르는 토큰"(만료)과 "이미 쓴
  * 토큰"(복사본이 있다)을 가를 수 있다. {@code U} 표시는 원래 TTL이 끝나면 저절로 사라진다.
@@ -67,15 +71,27 @@ public class RefreshTokens {
 
     static final String TOKEN_KEY = "rt:";
     static final String FAMILY_KEY = "rtfam:";
+    static final String USER_KEY = "rtuser:";
 
     /**
-     * 새 패밀리의 첫 토큰. KEYS[1] = rt:{해시}, KEYS[2] = rtfam:{패밀리}. ARGV = 사용자 id, 패밀리 id, TTL(ms), 해시.
+     * 새 패밀리의 첫 토큰. KEYS[1] = rt:{해시}, KEYS[2] = rtfam:{패밀리}, KEYS[3] = rtuser:{사용자}.
+     * ARGV = 사용자 id, 패밀리 id, TTL(ms), 해시.
+     * <p>
+     * 사용자 색인에 새 패밀리를 넣기 전에 이미 사라진(TTL이 끝났거나 폐기된) 패밀리를 걷어 낸다 - 로그인을 자주
+     * 하는 사용자의 색인이 끝없이 커지지 않게 한다. 걷어 낸 뒤의 크기는 살아 있는 로그인 수다.
      */
     private static final RedisScript<Long> ISSUE = RedisScript.of("""
             redis.call('HSET', KEYS[1], 'u', ARGV[1], 'f', ARGV[2], 's', 'A')
             redis.call('PEXPIRE', KEYS[1], ARGV[3])
             redis.call('SADD', KEYS[2], ARGV[4])
             redis.call('PEXPIRE', KEYS[2], ARGV[3])
+            for _, family in ipairs(redis.call('SMEMBERS', KEYS[3])) do
+              if redis.call('EXISTS', 'rtfam:' .. family) == 0 then
+                redis.call('SREM', KEYS[3], family)
+              end
+            end
+            redis.call('SADD', KEYS[3], ARGV[2])
+            redis.call('PEXPIRE', KEYS[3], ARGV[3])
             return 1
             """, Long.class);
 
@@ -85,6 +101,9 @@ public class RefreshTokens {
      * <p>
      * 토큰이 패밀리 집합에 없으면 무효다 - 패밀리가 폐기됐는데 토큰 키만 남은 상태(부분 삭제, 메모리 축출)에서
      * 그 토큰으로 패밀리를 되살리지 않는다 (Codex 리뷰 P1). 운영 Redis는 축출 자체를 끈다 (noeviction, infra data 모듈).
+     * <p>
+     * 회전은 사용자 색인({@code rtuser:*}, KAN-241)의 TTL도 다시 30일로 늘린다 - 색인이 그 사용자의 패밀리보다 먼저
+     * 사라지면 탈퇴가 살아 있는 로그인을 놓친다. 색인이 없으면(색인 도입 전 로그인) PEXPIRE는 아무것도 하지 않는다.
      * <p>
      * 회전할 때 TTL이 끝나 키가 사라진 멤버를 집합에서 걷어 낸다 (Codex 2차 리뷰 P2). 계속 쓰는 로그인은 패밀리 TTL이
      * 회전마다 늘어나므로, 걷어 내지 않으면 집합이 30일보다 오래된 해시까지 끝없이 쌓인다. 걷어 낸 뒤의 크기는 30일 안에
@@ -106,6 +125,7 @@ public class RefreshTokens {
                 redis.call('DEL', 'rt:' .. member)
               end
               redis.call('DEL', family)
+              redis.call('SREM', 'rtuser:' .. v[1], v[2])
               return {'REUSED', v[1]}
             end
             redis.call('HSET', KEYS[1], 's', 'U')
@@ -119,6 +139,7 @@ public class RefreshTokens {
             redis.call('PEXPIRE', fresh, ARGV[2])
             redis.call('SADD', family, ARGV[1])
             redis.call('PEXPIRE', family, ARGV[2])
+            redis.call('PEXPIRE', 'rtuser:' .. v[1], ARGV[2])
             return {'OK', v[1]}
             """, List.class);
 
@@ -140,7 +161,24 @@ public class RefreshTokens {
             end
             redis.call('DEL', family)
             redis.call('DEL', KEYS[1])
+            redis.call('SREM', 'rtuser:' .. v[1], v[2])
             return 1
+            """, Long.class);
+
+    /**
+     * 한 사용자의 패밀리 전부 폐기 (KAN-241 탈퇴). KEYS[1] = rtuser:{사용자}. 결과 = 폐기한 패밀리 수.
+     */
+    private static final RedisScript<Long> REVOKE_USER = RedisScript.of("""
+            local count = 0
+            for _, family in ipairs(redis.call('SMEMBERS', KEYS[1])) do
+              local key = 'rtfam:' .. family
+              for _, member in ipairs(redis.call('SMEMBERS', key)) do
+                redis.call('DEL', 'rt:' .. member)
+              end
+              count = count + redis.call('DEL', key)
+            end
+            redis.call('DEL', KEYS[1])
+            return count
             """, Long.class);
 
     private final StringRedisTemplate redis;
@@ -156,7 +194,7 @@ public class RefreshTokens {
         String token = newToken();
         String hash = hash(token);
         String family = UUID.randomUUID().toString();
-        call(() -> redis.execute(ISSUE, List.of(TOKEN_KEY + hash, FAMILY_KEY + family),
+        call(() -> redis.execute(ISSUE, List.of(TOKEN_KEY + hash, FAMILY_KEY + family, USER_KEY + userId),
                 userId.toString(), family, String.valueOf(ttl.toMillis()), hash));
         return token;
     }
@@ -212,6 +250,17 @@ public class RefreshTokens {
         Long revoked = call(() -> redis.execute(REVOKE_FAMILY, List.of(TOKEN_KEY + hash(presented)),
                 ownerId != null ? ownerId.toString() : ""));
         return revoked != null && revoked == 1L;
+    }
+
+    /**
+     * 그 사용자의 모든 기기의 로그인을 폐기한다 - 탈퇴(§3.14)가 쓴다.
+     *
+     * @return 폐기한 패밀리 수
+     * @throws ApiException 503 {@code AUTH_STORE_UNAVAILABLE} - Redis 장애
+     */
+    public long revokeAll(UUID userId) {
+        Long revoked = call(() -> redis.execute(REVOKE_USER, List.of(USER_KEY + userId)));
+        return revoked != null ? revoked : 0L;
     }
 
     private static <T> T call(Supplier<T> redisCall) {

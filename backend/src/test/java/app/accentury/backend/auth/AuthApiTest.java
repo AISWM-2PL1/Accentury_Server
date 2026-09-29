@@ -434,6 +434,150 @@ class AuthApiTest extends IntegrationTest {
         refresh(refreshToken).andExpect(status().isOk());
     }
 
+    // === 회원 탈퇴 (§3.14, KAN-241) ===
+
+    @Test
+    void 탈퇴하면_204이고_그_뒤_같은_Access와_모든_기기의_Refresh가_401이다() throws Exception {
+        String sub = uniqueSub();
+        JsonNode deviceA = body(login("KAKAO", sub, true));
+        String deviceB = body(login("KAKAO", sub, false)).get("refreshToken").asString();
+        String access = deviceA.get("accessToken").asString();
+        String userId = deviceA.get("user").get("id").asString();
+
+        withdraw(access, null).andExpect(status().isNoContent());
+
+        me(access)
+                .andExpect(status().isUnauthorized())
+                .andExpect(jsonPath("$.code").value("AUTH_TOKEN_INVALID"));
+        refresh(deviceA.get("refreshToken").asString())
+                .andExpect(status().isUnauthorized())
+                .andExpect(jsonPath("$.code").value("AUTH_REFRESH_INVALID"));
+        refresh(deviceB)
+                .andExpect(status().isUnauthorized())
+                .andExpect(jsonPath("$.code").value("AUTH_REFRESH_INVALID"));
+        assertFalse(Boolean.TRUE.equals(redis.hasKey(RefreshTokens.USER_KEY + userId)), "사용자 색인도 지운다");
+    }
+
+    @Test
+    void 탈퇴하면_개인_정보가_비고_deleted_at이_찍히며_세션은_남되_귀속이_끊긴다() throws Exception {
+        JsonNode login = body(login("KAKAO", uniqueSub(), true));
+        String access = login.get("accessToken").asString();
+        UUID userId = UUID.fromString(login.get("user").get("id").asString());
+        putProfile(access, profile()).andExpect(status().isOk());
+        String sessionId = body(createSession(access, null)).get("sessionId").asString();
+
+        withdraw(access, null).andExpect(status().isNoContent());
+
+        Map<String, Object> row = jdbc.queryForMap("select * from app_user where id = ?", userId);
+        for (String column : new String[]{"email", "name", "birth_date", "gender", "region", "nickname",
+                "profile_image_url"}) {
+            assertNull(row.get(column), column);
+        }
+        assertNotNull(row.get("deleted_at"));
+        assertEquals("deleted:" + userId, row.get("provider_user_id"));
+        assertEquals("KAKAO", row.get("provider"));
+        TestSession session = sessions.findById(sessionId).orElseThrow();
+        assertNull(session.userId());
+        assertTrue(users.findActive(userId).isEmpty());
+    }
+
+    @Test
+    void 탈퇴한_IdP_계정으로_다시_로그인하면_동의부터_받는_새_계정이다() throws Exception {
+        String sub = uniqueSub();
+        JsonNode first = body(login("GOOGLE", sub, true));
+        withdraw(first.get("accessToken").asString(), null).andExpect(status().isNoContent());
+
+        // 재로그인이 아니라 가입이다 - 동의 없이는 계정이 생기지 않는다.
+        login("GOOGLE", sub, false)
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("AUTH_CONSENT_REQUIRED"));
+        JsonNode second = body(login("GOOGLE", sub, true)
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.isNewUser").value(true))
+                .andExpect(jsonPath("$.profileStatus").value("INCOMPLETE")));
+
+        assertNotEquals(first.get("user").get("id").asString(), second.get("user").get("id").asString());
+        assertEquals(UUID.fromString(second.get("user").get("id").asString()),
+                users.findByProviderAndProviderUserId(Provider.GOOGLE, sub).orElseThrow().id());
+    }
+
+    @Test
+    void 같은_IdP_계정이_두_번_탈퇴해도_된다() throws Exception {
+        // 탈퇴 행의 provider_user_id가 IdP id의 해시였다면 두 번째 탈퇴가 유일 제약에 걸린다 - 계정 id라 겹치지 않는다.
+        String sub = uniqueSub();
+        for (int i = 0; i < 2; i++) {
+            JsonNode login = body(login("NAVER", sub, true).andExpect(jsonPath("$.isNewUser").value(true)));
+            String userId = login.get("user").get("id").asString();
+
+            withdraw(login.get("accessToken").asString(), null).andExpect(status().isNoContent());
+
+            assertEquals("deleted:" + userId, jdbc.queryForObject(
+                    "select provider_user_id from app_user where id = ?", String.class, UUID.fromString(userId)));
+        }
+    }
+
+    @Test
+    void 탈퇴는_Access_토큰이_필요하고_이미_탈퇴했으면_401이다() throws Exception {
+        String access = body(login("KAKAO", uniqueSub(), true)).get("accessToken").asString();
+
+        mockMvc.perform(post("/v0/users/me/withdrawal"))
+                .andExpect(status().isUnauthorized())
+                .andExpect(jsonPath("$.code").value("AUTH_TOKEN_INVALID"));
+        me(access).andExpect(status().isOk());
+
+        withdraw(access, null).andExpect(status().isNoContent());
+        withdraw(access, null)
+                .andExpect(status().isUnauthorized())
+                .andExpect(jsonPath("$.code").value("AUTH_TOKEN_INVALID"));
+    }
+
+    @Test
+    void 사용자_색인이_없는_옛_로그인도_탈퇴_뒤_refresh가_401이다() throws Exception {
+        // 색인(KAN-241) 도입 전에 발급된 로그인과 같다 - 폐기가 닿지 않아도 refresh가 계정을 다시 확인해 막는다.
+        JsonNode login = body(login("KAKAO", uniqueSub(), true));
+        String refreshToken = login.get("refreshToken").asString();
+        redis.delete(RefreshTokens.USER_KEY + login.get("user").get("id").asString());
+
+        withdraw(login.get("accessToken").asString(), null).andExpect(status().isNoContent());
+
+        refresh(refreshToken)
+                .andExpect(status().isUnauthorized())
+                .andExpect(jsonPath("$.code").value("AUTH_REFRESH_INVALID"));
+    }
+
+    @Test
+    void 애플_계정은_revoke가_미설정이면_WARN만_남기고_탈퇴한다(CapturedOutput output) throws Exception {
+        JsonNode login = body(login("APPLE", uniqueSub(), true));
+        String userId = login.get("user").get("id").asString();
+
+        withdraw(login.get("accessToken").asString(), Map.of("appleAuthorizationCode", "apple-code-value"))
+                .andExpect(status().isNoContent());
+
+        assertTrue(output.getOut().contains("애플 토큰 revoke 건너뜀 - 미설정 userId=" + userId));
+        assertTrue(output.getOut().contains("탈퇴 userId=" + userId + " provider=APPLE"));
+        assertFalse(output.getOut().contains("apple-code-value"), "authorization code는 로그에 남기지 않는다");
+        me(login.get("accessToken").asString()).andExpect(status().isUnauthorized());
+    }
+
+    @Test
+    void 로그아웃과_새_로그인은_사용자_색인을_정리한다() throws Exception {
+        String sub = uniqueSub();
+        JsonNode first = body(login("KAKAO", sub, true));
+        String userKey = RefreshTokens.USER_KEY + first.get("user").get("id").asString();
+        String second = body(login("KAKAO", sub, false)).get("refreshToken").asString();
+        assertEquals(2L, redis.opsForSet().size(userKey));
+
+        logout(first.get("accessToken").asString(), first.get("refreshToken").asString())
+                .andExpect(status().isNoContent());
+        assertEquals(1L, redis.opsForSet().size(userKey), "로그아웃한 패밀리는 색인에서 빠진다");
+
+        // TTL이 끝난 패밀리와 같다 - 다음 로그인이 걷어 낸다.
+        Object family = redis.opsForHash().get(RefreshTokens.TOKEN_KEY + RefreshTokens.hash(second), "f");
+        redis.delete(RefreshTokens.FAMILY_KEY + family);
+        body(login("KAKAO", sub, false));
+        assertEquals(1L, redis.opsForSet().size(userKey), "사라진 패밀리를 걷어 내고 새 것만 남는다");
+    }
+
     // === 세션 생성의 계정 귀속 (§3.1, FR-AC-11) ===
 
     @Test
@@ -618,6 +762,14 @@ class AuthApiTest extends IntegrationTest {
                 .header(HttpHeaders.AUTHORIZATION, "Bearer " + access)
                 .contentType(MediaType.APPLICATION_JSON)
                 .content(objectMapper.writeValueAsString(Map.of("refreshToken", refreshToken))));
+    }
+
+    private ResultActions withdraw(String access, Map<String, Object> request) throws Exception {
+        var builder = post("/v0/users/me/withdrawal").header(HttpHeaders.AUTHORIZATION, "Bearer " + access);
+        if (request != null) {
+            builder.contentType(MediaType.APPLICATION_JSON).content(objectMapper.writeValueAsString(request));
+        }
+        return mockMvc.perform(builder);
     }
 
     private ResultActions createSession(String access, String previousSessionToken) throws Exception {

@@ -4,22 +4,25 @@ import org.jspecify.annotations.Nullable;
 import org.springframework.http.CacheControl;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
 /**
- * 내 계정 (KAN-223, 명세서 §3.10, §3.11) - 둘 다 Access 토큰 필수다. 개인 정보가 든 응답이라 캐시하지 않는다.
+ * 내 계정 (KAN-223, KAN-241, 명세서 §3.10, §3.11, §3.14) - 전부 Access 토큰 필수다. 개인 정보가 든 응답이라 캐시하지 않는다.
  */
 @RestController
 @RequestMapping("/v0/users/me")
 class UserController {
 
     private final UserService userService;
+    private final WithdrawalService withdrawalService;
 
-    UserController(UserService userService) {
+    UserController(UserService userService, WithdrawalService withdrawalService) {
         this.userService = userService;
+        this.withdrawalService = withdrawalService;
     }
 
     /**
@@ -42,5 +45,18 @@ class UserController {
                                              @RequestBody(required = false) @Nullable ProfileRequest request) {
         return ResponseEntity.ok().cacheControl(CacheControl.noStore())
                 .body(userService.updateProfile(user, request));
+    }
+
+    /**
+     * 회원 탈퇴 (§3.14). 계정의 개인 정보를 즉시 파기하고 모든 기기의 로그인을 끊는다. 본문은 선택이고 애플 계정만
+     * {@code appleAuthorizationCode}를 싣는다.
+     * <p>
+     * 204 / 401 {@code AUTH_TOKEN_INVALID}. 애플 revoke와 Refresh 폐기의 실패는 응답을 바꾸지 않는다 ({@link WithdrawalService}).
+     */
+    @PostMapping("/withdrawal")
+    ResponseEntity<Void> withdraw(@AuthenticatedUser AppUser user,
+                                  @RequestBody(required = false) @Nullable WithdrawalRequest request) {
+        withdrawalService.withdraw(user, request);
+        return ResponseEntity.noContent().build();
     }
 }
