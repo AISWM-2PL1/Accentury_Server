@@ -9,6 +9,7 @@ import java.time.LocalDate;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
@@ -56,5 +57,27 @@ class AppUserTest {
         assertFalse(user.fillBlanksFrom(new IdpProfile(Provider.GOOGLE, "sub", "other@example.com", "다른이름",
                 null, null, null, null), NOW));
         assertNotNull(user.email());
+    }
+
+    @Test
+    void 탈퇴는_개인_정보를_지우고_IdP_사용자_id를_계정_id로_바꾼다() {
+        AppUser user = new AppUser(new IdpProfile(Provider.KAKAO, "4242", "k@kakao.com", "이름",
+                LocalDate.of(1999, 3, 2), Gender.MALE, "닉네임", "https://k.kakaocdn.net/p.jpg"), "2026-09-24", NOW);
+        user.updateProfile("k@kakao.com", "이름", LocalDate.of(1999, 3, 2), Gender.MALE, Region.GYEONGNAM, NOW);
+
+        user.withdraw(NOW.plusSeconds(60));
+
+        assertEquals("deleted:" + user.id(), user.providerUserId());
+        assertNull(user.email());
+        assertNull(user.name());
+        assertNull(user.birthDate());
+        assertNull(user.gender());
+        assertNull(user.region());
+        assertNull(user.nickname());
+        assertNull(user.profileImageUrl());
+        assertEquals(NOW.plusSeconds(60), user.deletedAt());
+        assertFalse(user.isProfileComplete());
+        assertEquals(Provider.KAKAO, user.provider());
+        assertEquals(NOW, user.privacyConsentAt(), "동의 기록은 개인 식별 정보가 아니라 남긴다");
     }
 }

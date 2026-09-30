@@ -26,7 +26,8 @@
 // CI는 node 22, 로컬은 26이라 양쪽에서 도는 표준 API만 쓴다.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
+import { readFileSync, readdirSync } from 'node:fs';
+import { execFileSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 
@@ -149,7 +150,12 @@ test('1항 표의 보유 기간이 행마다 코드와 맞는다', () => {
     ['음성 녹음', ['즉시 삭제'], 'KAN-27, ai/app/tempstore.py'],
     // 미완주 세션은 생성 30분 뒤 만료 정리(SessionService.java:133), 완주 세션은 완료 시점부터
     // 24시간(TestSession.java:140-157, CompletionService.java:169-175). 기준점이 둘이라 셋을 함께 본다.
-    ['익명 테스트 세션', ['30분', '완료', '24시간'], 'session/SessionService.java, TestSession.java'],
+    // 앱 세션이 계정에 붙으면서(KAN-223) 행 이름에서 「익명」을 뺐다 (KAN-240).
+    ['테스트 세션', ['30분', '완료', '24시간'], 'session/SessionService.java, TestSession.java'],
+    // 계정은 탈퇴까지 (KAN-223 V2__app_user.sql, 탈퇴는 KAN-241). 정리 잡이 없으므로 기간이 아니라 사건이 기준이다.
+    ['계정 (앱)', ['탈퇴'], 'auth/AppUser.java, V2__app_user.sql'],
+    // Refresh 토큰 수명 (application.yml auth.refresh-token-ttl: 30d, RefreshTokens의 Redis TTL).
+    ['로그인 토큰', ['30일', '로그아웃'], 'application.yml auth.refresh-token-ttl, auth/RefreshTokens.java'],
     ['테스트 결과와 어휘 답안', ['24시간'], 'application.yml analysis.retention: 24h'],
     // 카카오 공유 웹훅의 중복 판별용 수신 기록 (KAN-164). 기본값 7일은
     // AccenturyProperties.Share.receiptRetention의 @DefaultValue이고, 정리 잡이 그 값으로 지운다.
@@ -339,4 +345,148 @@ test('데이터 소재지가 서울 리전이라고 적혀 있다 (infra, AWS ap
   // 이용 통계와 오류 로그뿐이라는 구분이 이 문구에 걸려 있다.
   assert.ok(html.includes('ap-northeast-2'), '리전 표기가 없다');
   assert.ok(html.includes('서울 리전'), '서울 리전 표기가 없다');
+});
+
+// ── 환경별 본문 (KAN-239) ─────────────────────────────────────────────────────
+// staging에는 학습 수집 고지가 붙고 prod에는 없다. 자르는 규칙은 게시 스크립트 하나에 있고
+// (--render), 여기서는 그 스크립트를 그대로 돌려 두 환경에 올라갈 본문을 검사한다.
+const SCRIPT = join(HERE, '..', '..', 'scripts', 'publish-privacy.sh');
+const rendered = (env) => execFileSync('bash', [SCRIPT, '--render', env], { encoding: 'utf8' });
+
+test('staging-only 표식은 짝이 맞고 각자 한 줄을 차지한다 (KAN-239)', () => {
+  // 스크립트는 줄 단위로 자른다. 표식이 다른 내용과 한 줄에 있거나 짝이 안 맞으면 prod 본문의
+  // 뒷부분이 통째로 잘리거나 고지가 prod에 샌다.
+  const lines = html.split('\n');
+  const begins = lines.filter((line) => line.includes('staging-only:begin'));
+  const ends = lines.filter((line) => line.includes('staging-only:end'));
+  assert.equal(begins.length, ends.length, '표식의 짝이 맞지 않는다');
+  assert.ok(begins.length >= 1, 'staging-only 블록이 없다');
+  for (const line of [...begins, ...ends]) {
+    assert.match(line, /^<!-- staging-only:(begin|end) -->$/, `표식이 한 줄을 통째로 차지하지 않는다: ${line}`);
+  }
+});
+
+test('prod 본문에는 학습 수집 고지가 없고 음성 미보존 문구가 그대로다 (KAN-239, FR-DP-01)', () => {
+  const prod = rendered('prod');
+  assert.ok(!prod.includes('staging-only'), 'prod 본문에 표식이 남았다');
+  assert.ok(!prod.includes('내부 테스트 환경'), 'prod 본문에 staging 고지가 새었다');
+  assert.ok(prod.includes('음성은 데이터베이스나 S3 같은 영속 저장소에 저장하지 않습니다'), 'prod 본문의 음성 미보존 문구가 없다');
+  assert.ok(prod.includes('</html>'), 'prod 본문 뒷부분이 잘렸다');
+});
+
+test('staging 본문은 학습 수집의 목적과 대상과 기간을 적는다 (KAN-239)', () => {
+  const staging = rendered('staging');
+  // 본문은 줄바꿈으로 감싸여 있어 낱말 사이 공백을 하나로 접어 대조한다.
+  const notice = staging.slice(staging.indexOf('staging-only:begin'), staging.indexOf('staging-only:end'))
+    .replace(/\s+/g, ' ');
+  assert.ok(notice.includes('학습'), '목적(모델 재학습)이 없다');
+  assert.ok(notice.includes('동의한 테스터 계정'), '대상(동의한 테스터 계정)이 없다');
+  assert.ok(notice.includes('로그인하지 않은 응시'), '익명 응시를 보관하지 않는다는 문구가 없다');
+  assert.ok(notice.includes('보유 기간이 끝나는 날'), '보관 기간이 없다');
+  assert.ok(notice.includes('가명'), '세션 가명화 문구가 없다');
+  assert.ok(notice.includes('철회'), '철회 방법이 없다');
+});
+
+// ── 계정 PII (KAN-240) ───────────────────────────────────────────────────────
+// 앱 소셜 로그인(KAN-223)이 이메일, 이름, 생년월일 같은 개인 식별 정보를 받기 시작했다. 방침이 계정을
+// 모르던 시절의 문장(「계정이 없습니다」)이 남으면 고지와 실제가 정반대가 되므로, 계정 고지가 서야 하는
+// 자리(1, 3, 5, 6, 7, 12항)를 각각 붙든다.
+
+test('「계정이 없다」 계열 문장이 남아 있지 않다 (KAN-240)', () => {
+  const flat = html.replace(/\s+/g, ' ');
+  for (const sentence of [
+    '서비스에는 회원가입과 로그인, 계정이 없습니다',
+    '서비스에는 계정과 개인을 알아볼 수 있는 값이 없습니다',
+    '계정이 없어 나이를 확인하지 않',
+    '이름, 연락처, 생년월일 같은 이용자를 직접 알아볼 수 있는 정보를 수집하지 않',
+  ]) {
+    assert.ok(!flat.includes(sentence), `계정이 없던 시절의 문장이 남아 있다: ${sentence}`);
+  }
+});
+
+test('1항에 계정 절이 있고 수집 항목과 목적과 보유 기간을 적는다 (KAN-240, V2__app_user.sql)', () => {
+  assert.ok(html.includes('<h3>계정 (앱 소셜 로그인)</h3>'), '1항 아래 「계정」 절이 없다');
+  const account = section('<h3>계정 (앱 소셜 로그인)</h3>', '<h3>익명 통계</h3>').replace(/\s+/g, ' ');
+  // app_user의 열 전부다. 열이 늘면 여기와 본문을 함께 늘린다.
+  for (const item of ['이메일', '이름', '생년월일', '성별', '출신 지역', '닉네임', '프로필 이미지', '식별값', '동의하신 시각과 방침 버전']) {
+    assert.ok(account.includes(item), `계정 절에 「${item}」이 없다`);
+  }
+  assert.ok(account.includes('탈퇴하실 때까지'), '계정 절에 보유 기간(탈퇴까지)이 없다');
+  assert.ok(account.includes('만 14세 미만 가입 제한'), '생년월일의 목적(만 14세 미만 가입 제한)이 없다');
+  // 앱 세션은 계정에 붙지만 24시간 규칙은 같다. 로그에 세션과 계정의 대응을 남기지 않는 것은
+  // SessionService의 「세션 생성」 로그가 지킨다 (AuthApiTest의 세션 생성 로그 검사).
+  assert.ok(account.includes('계정에 지난 결과가 쌓이지 않습니다'), '계정 세션의 보유 기간 서술이 없다');
+  assert.ok(account.includes('어느 세션이 어느 계정의 것인지를 남기지 않습니다'), '로그의 세션-계정 대응 미기록 문구가 없다');
+});
+
+test('3항에 로그인 제공자 넷과 받는 정보, 애플 전달용 이메일이 있다 (KAN-240, auth/*IdpVerifier.java)', () => {
+  const idp = section('<h3>소셜 로그인 제공자로부터 받는 정보</h3>', '<h2>4. 개인정보의 국외 이전');
+  for (const provider of ['구글', '카카오', '네이버', '애플']) {
+    assert.ok(idp.includes(provider), `3항 제공자 표에 ${provider}가 없다`);
+  }
+  assert.ok(idp.includes('privaterelay.appleid.com'), '애플 전달용 이메일 설명이 없다');
+  assert.ok(idp.includes('휴대전화 번호는 받더라도 저장하지 않습니다'), '네이버 휴대전화 번호 미저장 문구가 없다');
+});
+
+test('5, 6, 7, 12항이 계정 기준으로 다시 쓰였다 (KAN-240)', () => {
+  const disposal = section('<h2>5. 개인정보의 파기', '<h2>6. 정보주체의 권리').replace(/\s+/g, ' ');
+  assert.ok(disposal.includes('계정 정보: 탈퇴하시면 지체 없이 파기'), '5항에 계정 파기가 없다');
+  assert.ok(disposal.includes('로그인 토큰'), '5항에 로그인 토큰 폐기가 없다');
+
+  const rights = section('<h2>6. 정보주체의 권리', '<h2>7. 만 14세 미만').replace(/\s+/g, ' ');
+  assert.ok(rights.includes('탈퇴'), '6항에 탈퇴 방법이 없다');
+  // 탈퇴 API(KAN-241)가 나오기 전까지의 임시 절차 - 보호책임자 이메일로 요청하고 계정 이메일로 본인 확인.
+  assert.ok(rights.includes('계정에 등록된 이메일 주소로 13항의 이메일에 탈퇴를 요청'), '6항에 임시 탈퇴 절차가 없다');
+
+  const children = section('<h2>7. 만 14세 미만', '<h2>8. 개인정보 자동 수집 장치').replace(/\s+/g, ' ');
+  assert.ok(children.includes('생년월일로 나이를 확인해 만 14세 미만이면 가입을 거절'), '7항에 생년월일 확인 방식이 없다');
+
+  const consent = section('<h2>12. 동의를 받는 방식', '<h2>13. 개인정보 보호책임자').replace(/\s+/g, ' ');
+  assert.ok(consent.includes('앱은 처음 로그인할 때 이 방침에 대한 동의를 받습니다'), '12항에 가입 동의가 없다');
+});
+
+// ── 방침 버전 = 서버가 받는 동의 버전 (KAN-240) ─────────────────────────────────
+// 앱은 가입할 때 동의한 방침 버전을 보내고, 서버는 AccenturyProperties.Auth.PRIVACY_POLICY_VERSION과
+// 정확히 같을 때만 동의로 기록한다. 게시본의 버전이 서버 기본값과 어긋나면 이용자가 읽은 문서와 서버가
+// 기록하는 동의가 다른 문서를 가리키게 된다.
+const PROPERTIES = join(HERE, '..', '..', 'backend', 'src', 'main', 'java', 'app', 'accentury', 'backend', 'common',
+  'AccenturyProperties.java');
+const RESOURCES = join(HERE, '..', '..', 'backend', 'src', 'main', 'resources');
+
+function publishedVersion(body) {
+  const match = body.match(/<meta name="accentury-policy-version" content="([^"]+)" \/>/);
+  assert.ok(match, 'accentury-policy-version 메타가 없다');
+  return match[1];
+}
+
+test('게시 HTML의 방침 버전이 BE 설정 기본값과 같다 (KAN-240)', () => {
+  const source = readFileSync(PROPERTIES, 'utf8');
+  const constant = source.match(/PRIVACY_POLICY_VERSION = "([^"]+)";/);
+  assert.ok(constant, 'AccenturyProperties에 PRIVACY_POLICY_VERSION 상수가 없다');
+  assert.ok(source.includes('@DefaultValue(Auth.PRIVACY_POLICY_VERSION) String privacyPolicyVersion'),
+    'Auth.privacyPolicyVersion의 기본값이 상수를 가리키지 않는다');
+  assert.equal(publishedVersion(html), constant[1], '게시 HTML의 방침 버전과 BE 기본값이 다르다');
+  // 버전은 app_user.privacy_policy_version varchar(32)에 들어간다.
+  assert.ok(constant[1].length <= 32, '방침 버전이 32자를 넘는다');
+});
+
+test('application.yml이 방침 버전을 덮어쓰지 않는다 (KAN-240)', () => {
+  // yml이 값을 정하면 위 테스트가 보는 기본값은 쓰이지 않는 값이 된다. 버전의 정본은 상수 하나다.
+  for (const name of readdirSync(RESOURCES).filter((f) => /^application.*\.ya?ml$/.test(f))) {
+    const yml = readFileSync(join(RESOURCES, name), 'utf8');
+    assert.ok(!/^\s*privacy-policy-version\s*:/m.test(yml), `${name}이 privacy-policy-version을 정한다`);
+  }
+});
+
+test('시행일 표기 두 자리가 방침 버전과 같고, 두 환경 게시본 모두 버전 메타를 싣는다 (KAN-240)', () => {
+  const version = publishedVersion(html);
+  const stamps = [...html.matchAll(/시행일: ([0-9-]+) \(방침 버전 ([0-9-]+)\)/g)];
+  assert.equal(stamps.length, 2, '시행일 표기가 머리와 14항 두 자리에 있어야 한다');
+  for (const [, effective, stamped] of stamps) {
+    assert.equal(effective, version, '시행일이 방침 버전과 다르다');
+    assert.equal(stamped, version, '본문에 적힌 방침 버전이 메타와 다르다');
+  }
+  for (const env of ['prod', 'staging']) {
+    assert.equal(publishedVersion(rendered(env)), version, `${env} 게시본의 방침 버전이 다르다`);
+  }
 });

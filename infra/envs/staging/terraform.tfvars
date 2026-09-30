@@ -28,9 +28,13 @@ ai_root_volume_size = 40
 # 15분 연속이면 -1. 내부 ALB(least_outstanding_requests)가 backend 태스크 3개의 동시 호출을 빈 인스턴스로 나눈다.
 ai_max_size = 3
 
-# staging 전용 학습 데이터 S3 (KAN-201, 2026-09-08 결정). 내부 테스터의 음성 WAV와 AI 원점수를 모델 재학습용으로
-# 보존한다 - FR-DP-01(원본 음성 미보존)의 staging 예외다. prod는 false로 버킷도 권한도 파라미터도 없다.
+# staging 전용 학습 데이터 S3 (KAN-201, 2026-09-08 결정). 학습 활용에 동의한 테스터 계정의 음성 WAV와 AI 원점수를
+# 모델 재학습용으로 보존한다 - FR-DP-01(원본 음성 미보존)의 staging 예외다. prod는 false로 버킷도 권한도 파라미터도 없다.
+# 대상 계정은 SSM ACCENTURY_TRAINING_TESTERIDS를 put-parameter로 채운다(자리 표시 값이면 아무것도 저장하지 않는다, KAN-239).
 training_bucket_enabled = true
+
+# 보유 기간 만료일 (KAN-239). 동의서가 아직 없어 자리 표시 날짜다 - 동의서의 보유 기간이 정해지면 그 끝날로 바꾼다.
+training_retention_until = "2026-12-31T00:00:00Z"
 
 ssm_prefix = "/accentury/staging"
 
@@ -46,3 +50,14 @@ db_skip_final_snapshot = true
 # prod에 그대로 적용되어야 관찰의 의미가 있다 (2026-08-28 확정).
 waf_enforce    = true
 waf_rate_limit = 300
+
+# 네이버 로그인 Client ID (KAN-243). 시크릿이 아니고 앱의 NAVER_CLIENT_ID와 같은 값이다. 두 환경이 같은 네이버
+# 앱을 쓴다. 짝인 Client Secret은 시크릿이라 여기 두지 않고 apply 뒤 put-parameter로 넣는다 (README "소셜 로그인" 절).
+auth_naver_client_id = "2nlTdPK4RqeqQcLtb6xH"
+
+# 애플 (KAN-241). 셋 다 시크릿이 아니다. 번들 ID는 identityToken의 aud 검증(애플 로그인)과 탈퇴 revoke의 client_id,
+# 팀 ID와 키 ID는 탈퇴 revoke의 client_secret JWT(iss, kid)다. 팀 ID는 apple-app-site-association의 appID 앞부분과 같다.
+# 짝인 Sign in with Apple 키(.p8)는 시크릿이라 여기 두지 않고 apply 뒤 put-parameter로 넣는다 (README "소셜 로그인" 절).
+auth_apple_bundle_id = "com.accentury.app"
+auth_apple_team_id   = "559P9SYY57"
+auth_apple_key_id    = "PR2QSQK4JW"

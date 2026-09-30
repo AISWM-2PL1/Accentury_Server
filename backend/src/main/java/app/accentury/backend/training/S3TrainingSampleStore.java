@@ -20,7 +20,12 @@ import java.util.Map;
 /**
  * 학습 샘플을 S3 버킷에 WAV 1개 + 메타 JSON 1개로 보존한다 (KAN-201 객체 규약).
  * <p>
- * 키는 {@code <region>/<testVersion>/<sessionId>/<itemId>/<analysisJobId>.wav|.json}이다. 첫 조각이
+ * <b>동의한 테스터 계정의 세션만 남긴다</b> (KAN-239, {@link TrainingSpeakers}). 익명 세션과 목록 밖 계정의
+ * 세션은 S3를 부르지 않고 카운터({@code result=skipped})만 올린다 - 로그는 남기지 않는다(웹 업로드마다 한 줄이다).
+ * <p>
+ * 키는 {@code <region>/<testVersion>/<speaker>/<itemId>/<sampleId>.wav|.json}이다. speaker는 세션 ID의, sampleId는
+ * 분석 작업 ID의 가명(HMAC)이라 같은 세션의 문항은 한 접두에 모이고 DB와 로그의 ID와는 이어지지 않는다. 로그에도
+ * 작업 ID와 객체 키를 한 줄에 함께 남기지 않는다 - 그 한 줄이 가명과 원문의 대응표가 된다. 첫 조각이
  * 지역이라 지역별 데이터셋을 접두 나열 한 번으로 뽑고, 재녹음은 같은 문항에 새 분석 작업을 만들므로
  * 작업 ID가 키에 있어 덮어쓰지 않는다. WAV를 먼저 올리고 JSON을 나중에 올린다 - JSON이 있는데 WAV가
  * 없는 반쪽 샘플보다 WAV만 있고 JSON이 없는 쪽이 학습 데이터로 골라내기 쉽다(메타 없는 WAV는 버린다).
@@ -45,31 +50,41 @@ public class S3TrainingSampleStore implements TrainingSampleStore {
 
     private final S3Client s3;
     private final String bucket;
+    private final TrainingSpeakers speakers;
     private final ObjectMapper objectMapper;
     private final Clock clock;
     private final Counter saved;
     private final Counter failed;
+    private final Counter skipped;
 
-    public S3TrainingSampleStore(S3Client s3, String bucket, ObjectMapper objectMapper, Clock clock,
-                                 MeterRegistry meterRegistry) {
+    public S3TrainingSampleStore(S3Client s3, String bucket, TrainingSpeakers speakers, ObjectMapper objectMapper,
+                                 Clock clock, MeterRegistry meterRegistry) {
         this.s3 = s3;
         this.bucket = bucket;
+        this.speakers = speakers;
         this.objectMapper = objectMapper;
         this.clock = clock;
         this.saved = counter(meterRegistry, "saved");
         this.failed = counter(meterRegistry, "failed");
+        this.skipped = counter(meterRegistry, "skipped");
     }
 
     private static Counter counter(MeterRegistry registry, String result) {
         return Counter.builder(ServiceMetrics.TRAINING_SAMPLES)
-                .description("staging 학습 샘플 저장 시도 - 태그 result는 saved | failed (KAN-201)")
+                .description("staging 학습 샘플 저장 시도 - 태그 result는 saved | failed | skipped (KAN-201, KAN-239)")
                 .tag("result", result)
                 .register(registry);
     }
 
     @Override
     public void save(TrainingSample sample) {
-        String prefix = sample.keyPrefix();
+        if (!speakers.consented(sample.ownerId())) {
+            skipped.increment();
+            return;
+        }
+        String speaker = speakers.speaker(sample.sessionId());
+        String sampleId = speakers.sampleId(sample.analysisJobId());
+        String prefix = sample.keyPrefix(speaker, sampleId);
         try {
             byte[] audio = sample.audio();
             s3.putObject(PutObjectRequest.builder()
@@ -84,26 +99,27 @@ public class S3TrainingSampleStore implements TrainingSampleStore {
                             .key(prefix + ".json")
                             .contentType(JSON_CONTENT_TYPE)
                             .build(),
-                    RequestBody.fromString(objectMapper.writeValueAsString(metadata(sample))));
+                    RequestBody.fromString(objectMapper.writeValueAsString(metadata(sample, speaker, sampleId))));
             saved.increment();
-            log.info("학습 샘플 저장 jobId={} key={} bytes={}", sample.analysisJobId(), prefix, audio.length);
+            // 식별자와 크기를 싣지 않는다 - 작업 ID와 바이트 수는 S3 목록의 크기, 시각과 맞춰 가명과 원문 ID를 다시
+            // 잇는 단서가 된다 (PR #4 리뷰 P3). 저장 건수는 카운터가 센다.
+            log.info("학습 샘플 저장");
         } catch (RuntimeException e) {
             failed.increment();
             // 사유는 한 줄로 충분하다 - 권한, 네트워크, 직렬화 어느 쪽이든 메시지에 드러난다.
-            log.warn("학습 샘플 저장 실패 - 분석 결과에는 영향 없음 jobId={} key={} 사유={}",
-                    sample.analysisJobId(), prefix, e.toString());
+            log.warn("학습 샘플 저장 실패 - 분석 결과에는 영향 없음 jobId={} 사유={}", sample.analysisJobId(), e.toString());
         }
     }
 
     /**
      * 메타 JSON 본문 - 필드 순서는 티켓 표와 같고, 없는 값(판정 실패의 점수, 성공의 오류 코드)은 키를
-     * 아예 내지 않는다. 키와 같은 값(작업, 세션, 문항 ID와 지역)을 본문에도 둔다 - 객체를 옮겨 담아
-     * 키를 잃어도 자립한다.
+     * 아예 내지 않는다. 키와 같은 값(sampleId, speaker, 문항 ID와 지역)을 본문에도 둔다 - 객체를 옮겨 담아
+     * 키를 잃어도 자립한다. 세션 ID와 작업 ID의 원문, 소유 계정, AI 호출 상관 ID는 싣지 않는다 (KAN-239).
      */
-    Map<String, Object> metadata(TrainingSample sample) {
+    Map<String, Object> metadata(TrainingSample sample, String speaker, String sampleId) {
         Map<String, Object> body = new LinkedHashMap<>();
-        body.put("analysisJobId", sample.analysisJobId());
-        body.put("sessionId", sample.sessionId());
+        body.put("sampleId", sampleId);
+        body.put("speaker", speaker);
         body.put("itemId", sample.itemId());
         body.put("region", sample.region());
         putIfPresent(body, "scriptKey", sample.scriptKey());
@@ -116,7 +132,6 @@ public class S3TrainingSampleStore implements TrainingSampleStore {
         putIfPresent(body, "modelVersion", sample.modelVersion());
         putIfPresent(body, "aiScoreVersion", sample.aiScoreVersion());
         putIfPresent(body, "errorCode", sample.errorCode());
-        body.put("correlationId", sample.correlationId());
         body.put("savedAt", Instant.now(clock).toString());
         return body;
     }

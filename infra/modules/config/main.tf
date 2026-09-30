@@ -266,15 +266,97 @@ resource "aws_ssm_parameter" "kakao_app_id" {
   value = var.auth_kakao_app_id
 }
 
+# 네이버 로그인 Client ID와 Secret (KAN-243). 네이버 사용자 조회 API는 토큰의 발급 앱을 알려 주지 않아서, backend가
+# SDK refresh token을 이 두 값으로 교환해 성공해야 우리 앱의 토큰으로 본다 (NaverIdpVerifier). 네이버 개발자 센터의
+# 앱 설정에 있는 값이고 앱(Android, iOS)의 NAVER_CLIENT_ID, NAVER_CLIENT_SECRET과 같다.
+# Client ID는 위 셋과 같이 tfvars로 넣는 String이다. Secret은 시크릿이라 tfvars에 두지 않고 카카오 Admin 키처럼
+# 자리만 만든 뒤 apply 뒤에 한 번 넣는다 (README "소셜 로그인" 절):
+#   aws ssm put-parameter --overwrite --type SecureString --name /accentury/{env}/ACCENTURY_AUTH_NAVERCLIENTSECRET --value '<Client Secret>'
+# 그 다음 backend 태스크를 새로 띄운다. 둘 중 하나라도 자리 표시 값인 동안 네이버 로그인만 401이다.
+# write-only인 이유는 kakao_admin_key 주석과 같다.
+resource "aws_ssm_parameter" "naver_client_id" {
+  name  = "${var.ssm_prefix}/ACCENTURY_AUTH_NAVERCLIENTID"
+  type  = "String"
+  value = var.auth_naver_client_id
+}
+
+resource "aws_ssm_parameter" "naver_client_secret" {
+  name             = "${var.ssm_prefix}/ACCENTURY_AUTH_NAVERCLIENTSECRET"
+  type             = "SecureString"
+  value_wo         = "unset-put-parameter-after-apply"
+  value_wo_version = 1
+}
+
+# 탈퇴한 애플 계정의 토큰 revoke (KAN-241, 애플 심사 지침 5.1.1(v)). backend가 애플 키(.p8)로 client_secret JWT를
+# 서명해 앱이 보낸 authorization code를 교환하고 revoke한다 (AppleTokenRevoker). 팀 ID와 키 ID는 시크릿이 아니라
+# tfvars로 넣는 String이고, 키 원문은 네이버 Secret처럼 자리만 만든 뒤 apply 뒤에 한 번 넣는다 (README "소셜 로그인" 절):
+#   aws ssm put-parameter --overwrite --type SecureString --name /accentury/{env}/ACCENTURY_AUTH_APPLEPRIVATEKEY --value file://AuthKey_XXXXXXXXXX.p8
+# 그 다음 backend 태스크를 새로 띄운다.
+#
+# 네이버 값과 다른 점은 하나다: 셋 다 backend의 필수 설정이 아니다(DeploymentConfigGuard 밖이다). 하나라도 없거나
+# 자리 표시 값이면 backend가 revoke만 건너뛰고 탈퇴는 성공시키므로(feedback_slack_webhook_url과 같은 사정), apply와
+# 이미지 배포의 순서 제약이 없다. write-only인 이유는 kakao_admin_key 주석과 같다.
+resource "aws_ssm_parameter" "apple_team_id" {
+  name  = "${var.ssm_prefix}/ACCENTURY_AUTH_APPLETEAMID"
+  type  = "String"
+  value = var.auth_apple_team_id
+}
+
+resource "aws_ssm_parameter" "apple_key_id" {
+  name  = "${var.ssm_prefix}/ACCENTURY_AUTH_APPLEKEYID"
+  type  = "String"
+  value = var.auth_apple_key_id
+}
+
+resource "aws_ssm_parameter" "apple_private_key" {
+  name             = "${var.ssm_prefix}/ACCENTURY_AUTH_APPLEPRIVATEKEY"
+  type             = "SecureString"
+  value_wo         = "unset-put-parameter-after-apply"
+  value_wo_version = 1
+}
+
 # ---- staging 전용 학습 데이터 S3 (KAN-201) ----
 
 # 값이 있는 환경에만 파라미터가 생긴다 - prod 태스크 정의에는 이 환경 변수가 아예 없어 backend가 S3 클라이언트도
 # 저장 빈도 만들지 않는다 (TrainingConfig의 조건이 이 프로퍼티다). 두 환경이 같은 deploy 프로파일을 쓰므로
-# 환경별 yml 없이 이 파라미터 하나가 스위치다. 이름은 Spring 프로퍼티 규칙(accentury.training.bucket)이다.
+# 환경별 yml 없이 이 파라미터 하나가 스위치다. 이름은 Spring 프로퍼티 규칙(accentury.training.consented-bucket)이다.
 resource "aws_ssm_parameter" "training_bucket" {
   count = var.training_bucket_name == null ? 0 : 1
 
-  name  = "${var.ssm_prefix}/ACCENTURY_TRAINING_BUCKET"
+  name  = "${var.ssm_prefix}/ACCENTURY_TRAINING_CONSENTEDBUCKET"
   type  = "String"
   value = var.training_bucket_name
+}
+
+# 학습 활용에 동의한 테스터 계정 목록 (KAN-239) - app_user.id를 쉼표로 잇는다. backend는 이 계정들의 세션만 저장한다.
+# 동의는 운영 절차로 받으므로 값은 Terraform이 아니라 운영자가 넣는다 (계정 id를 레포에 남기지 않는다):
+#   aws ssm put-parameter --overwrite --type StringList --name /accentury/staging/ACCENTURY_TRAINING_TESTERIDS --value '<id>,<id>'
+# 그 다음 backend 태스크를 새로 띄운다. 자리 표시 값인 동안 backend는 빈 목록으로 보고 아무것도 저장하지 않는다
+# (TrainingConfig) - 켜진 채로 동의 전이어도 안전한 기본값이다. write-only인 이유는 kakao_admin_key 주석과 같다.
+resource "aws_ssm_parameter" "training_tester_ids" {
+  count = var.training_bucket_name == null ? 0 : 1
+
+  name             = "${var.ssm_prefix}/ACCENTURY_TRAINING_TESTERIDS"
+  type             = "StringList"
+  value_wo         = "unset-put-parameter-after-apply"
+  value_wo_version = 1
+}
+
+# 세션 ID 가명화 키 (KAN-239) - HMAC-SHA256(sessionId, 이 키)가 학습 샘플의 speaker다. backend만 읽는다(태스크 정의
+# secrets). ephemeral 난수를 write-only로 넣어 state에 값이 남지 않는다 (KAN-242와 같은 방식). 회전은
+# value_wo_version을 올리고 apply한 뒤 backend를 새로 띄운다 - 이미 쌓인 샘플과 이후 샘플의 speaker가 이어지지 않는다.
+ephemeral "random_password" "training_pseudonym_key" {
+  count = var.training_bucket_name == null ? 0 : 1
+
+  length  = 64
+  special = false
+}
+
+resource "aws_ssm_parameter" "training_pseudonym_key" {
+  count = var.training_bucket_name == null ? 0 : 1
+
+  name             = "${var.ssm_prefix}/ACCENTURY_TRAINING_PSEUDONYMKEY"
+  type             = "SecureString"
+  value_wo         = ephemeral.random_password.training_pseudonym_key[0].result
+  value_wo_version = 1
 }

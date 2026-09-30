@@ -56,8 +56,29 @@ variable "ai_max_size" {
 
 variable "training_bucket_enabled" {
   type        = bool
-  description = "staging 전용 학습 데이터 S3 버킷과 그 접근 권한, SSM ACCENTURY_TRAINING_BUCKET을 만들지 (KAN-201). staging true, prod false - prod는 FR-DP-01 그대로라 반드시 false다. 값을 바꾸면 태스크 정의 secrets가 바뀌어 backend 태스크가 새로 뜬다."
+  description = "staging 전용 학습 데이터 S3 버킷과 그 접근 권한, 버킷 정책, 학습 읽기 역할, SSM ACCENTURY_TRAINING_CONSENTEDBUCKET / TESTERIDS / PSEUDONYMKEY를 만들지 (KAN-201, KAN-239). staging true, prod false - prod는 FR-DP-01 그대로라 반드시 false다. 값을 바꾸면 태스크 정의 secrets가 바뀌어 backend 태스크가 새로 뜬다. false로 바꾸는 apply가 곧 수집 중지이자 버킷 파기다(force_destroy)."
   default     = false
+}
+
+variable "training_retention_until" {
+  type        = string
+  description = "학습 데이터 보유 기간 만료일 (KAN-239) - 테스터 동의서의 보유 기간 끝날과 같은 날이다. S3 수명주기 만료일이라 UTC 자정의 RFC3339(예: 2026-12-31T00:00:00Z)만 받는다. training_bucket_enabled = true인데 없으면 plan이 실패한다."
+  default     = null
+
+  validation {
+    # 정규식은 모양만 본다 - 2026-13-45 같은 없는 날짜는 formatdate(RFC3339 파서)가 거른다 (PR #4 리뷰 P3).
+    condition = var.training_retention_until == null || (
+      can(regex("^\\d{4}-\\d{2}-\\d{2}T00:00:00Z$", var.training_retention_until))
+      && can(formatdate("YYYY", var.training_retention_until))
+    )
+    error_message = "training_retention_until은 UTC 자정의 RFC3339여야 한다 (예: 2026-12-31T00:00:00Z) - S3 수명주기 만료일 규칙이다."
+  }
+}
+
+variable "training_reader_principals" {
+  type        = list(string)
+  description = "학습 읽기 역할(accentury-<env>-training-reader)을 맡을 수 있는 주체 ARN 목록 (KAN-239). 비우면 이 계정 루트라 계정 안에서 sts:AssumeRole을 허용받은 IAM 주체가 맡는다. 학습 데이터의 객체 본문(GetObject)은 이 역할만 읽는다."
+  default     = []
 }
 
 variable "ai_root_volume_size" {
@@ -154,5 +175,23 @@ variable "auth_apple_bundle_id" {
 variable "auth_kakao_app_id" {
   type        = string
   description = "카카오 앱 ID(숫자) - access_token_info의 app_id (KAN-223)"
+  default     = "unset-put-parameter-after-apply"
+}
+
+variable "auth_naver_client_id" {
+  type        = string
+  description = "네이버 로그인 Client ID - SDK refresh token 교환용 (KAN-243). Secret은 apply 뒤 put-parameter로 넣는다"
+  default     = "unset-put-parameter-after-apply"
+}
+
+variable "auth_apple_team_id" {
+  type        = string
+  description = "애플 개발자 팀 ID - 탈퇴 때 애플 토큰 revoke용 (KAN-241). 키 원문은 apply 뒤 put-parameter로 넣는다"
+  default     = "unset-put-parameter-after-apply"
+}
+
+variable "auth_apple_key_id" {
+  type        = string
+  description = "Sign in with Apple 키의 Key ID - 탈퇴 때 애플 토큰 revoke용 (KAN-241)"
   default     = "unset-put-parameter-after-apply"
 }

@@ -45,3 +45,14 @@ db_skip_final_snapshot = false
 # 관찰의 의미가 있다 (2026-08-28 확정).
 waf_enforce    = true
 waf_rate_limit = 300
+
+# 네이버 로그인 Client ID (KAN-243). 시크릿이 아니고 앱의 NAVER_CLIENT_ID와 같은 값이다. 두 환경이 같은 네이버
+# 앱을 쓴다. 짝인 Client Secret은 시크릿이라 여기 두지 않고 apply 뒤 put-parameter로 넣는다 (README "소셜 로그인" 절).
+auth_naver_client_id = "2nlTdPK4RqeqQcLtb6xH"
+
+# 애플 (KAN-241). 셋 다 시크릿이 아니다. 번들 ID는 identityToken의 aud 검증(애플 로그인)과 탈퇴 revoke의 client_id,
+# 팀 ID와 키 ID는 탈퇴 revoke의 client_secret JWT(iss, kid)다. 팀 ID는 apple-app-site-association의 appID 앞부분과 같다.
+# 짝인 Sign in with Apple 키(.p8)는 시크릿이라 여기 두지 않고 apply 뒤 put-parameter로 넣는다 (README "소셜 로그인" 절).
+auth_apple_bundle_id = "com.accentury.app"
+auth_apple_team_id   = "559P9SYY57"
+auth_apple_key_id    = "PR2QSQK4JW"

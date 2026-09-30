@@ -1,6 +1,7 @@
 package app.accentury.backend.auth;
 
 import app.accentury.backend.PropertiesFixture;
+import app.accentury.backend.common.AccenturyProperties;
 import app.accentury.backend.common.ApiException;
 import app.accentury.backend.common.ErrorCode;
 import app.accentury.backend.common.RateLimits;
@@ -23,10 +24,11 @@ class AuthServiceUnderAgeTest {
     void IdP_생년월일이_만_14세_미만이면_저장_전에_400이다() {
         LocalDate thirteen = LocalDate.now(UserService.ZONE).minusYears(14).plusDays(1);
         AuthService service = new AuthService(verifiersGiving(thirteen), null, null, null,
-                new RateLimits(PropertiesFixture.defaults(), new SimpleMeterRegistry()), null);
+                new RateLimits(PropertiesFixture.defaults(), new SimpleMeterRegistry()), null, PropertiesFixture.defaults());
 
         ApiException e = assertThrows(ApiException.class, () -> service.login(
-                new LoginRequest("KAKAO", null, "kakao-token", null, null, true, "2026-09-24"), "1.2.3.4"));
+                new LoginRequest("KAKAO", null, "kakao-token", null, null, null, true,
+                        AccenturyProperties.Auth.PRIVACY_POLICY_VERSION), "1.2.3.4"));
 
         assertEquals(ErrorCode.AUTH_UNDER_AGE, e.code());
     }

@@ -216,9 +216,12 @@ public record AccenturyProperties(Session session,
      *                     업로드만으로 반영되고 설정과 배포는 건드리지 않는다.
      * @param tiers        등급 code(소문자 키) → 자산. 키는 {@code ScorePolicyRegistry.TIER_CODES}와
      *                     대소문자 무시 1:1이어야 한다.
+     * @param comments     결과 코멘트 문구 (KAN-249) - 등급이 아니라 억양과 단어 점수의 비교로 고른다.
+     *                     완결성(빈 값 없음, 자리 표시)은 기동 시 {@code ResultComments}가 강제한다.
      */
     public record Result(@Nullable String webTestUrl, @Nullable String assetBaseUrl,
-                         @DefaultValue Map<String, TierAsset> tiers) {
+                         @DefaultValue Map<String, TierAsset> tiers,
+                         @DefaultValue Comments comments) {
     }
 
     /**
@@ -299,14 +302,25 @@ public record AccenturyProperties(Session session,
     /**
      * staging 전용 학습 데이터 수집 (KAN-201, {@code training} 패키지).
      *
-     * @param bucket 음성 WAV와 메타 JSON을 넣을 S3 버킷 이름. <b>미설정이 기본값이고, 그러면 S3 클라이언트도
+     * @param consentedBucket 음성 WAV와 메타 JSON을 넣을 S3 버킷 이름. <b>미설정이 기본값이고, 그러면 S3 클라이언트도
      *               저장 빈도 만들어지지 않는다</b> - 로컬, 테스트, prod 전부 이 상태다 (FR-DP-01 그대로).
-     *               staging에서만 SSM {@code ACCENTURY_TRAINING_BUCKET}으로 들어온다 (config 모듈의
+     *               staging에서만 SSM {@code ACCENTURY_TRAINING_CONSENTEDBUCKET}으로 들어온다 (config 모듈의
      *               optional 파라미터). 빈 문자열은 설정 실수로 보고 기동을 세운다 ({@code TrainingConfig}).
+     *               KAN-201의 이름({@code bucket})에서 바꿨다 (KAN-239) - KAN-239 이전 이미지로 롤백돼도 그 이미지가
+     *               이 값을 읽지 못해 한정 없는 수집이 다시 켜지지 않는다.
      * @param region 그 버킷의 리전. 비우면 SDK 기본 체인(태스크의 {@code AWS_REGION})이다 - 배포 프로파일은
      *               CloudWatch 레지스트리와 같은 값을 명시한다 (application-deploy.yml).
+     * @param testerIds    학습 활용에 동의한 테스터의 {@code app_user.id} 목록 (KAN-239). 이 계정들의 세션만
+     *                     저장한다. staging에서만 SSM StringList {@code ACCENTURY_TRAINING_TESTERIDS}가 넣는다 -
+     *                     Terraform은 자리 표시 값({@link SsmPlaceholder#UNSET})으로 자리만 만들고 운영자가
+     *                     {@code put-parameter}로 채운다. <b>없거나 자리 표시 값이면 빈 목록이고, 그러면 아무것도
+     *                     저장하지 않는다.</b> UUID가 아닌 항목은 설정 실수라 기동을 세운다 ({@code TrainingConfig}).
+     * @param pseudonymKey 세션 ID를 가명으로 바꾸는 HMAC-SHA256 키 (KAN-239). 버킷이 있으면 필수이고 32자
+     *                     이상이어야 한다. staging에서만 SSM SecureString {@code ACCENTURY_TRAINING_PSEUDONYMKEY}가
+     *                     넣는다 (Terraform ephemeral 난수 + write-only라 state에 남지 않는다).
      */
-    public record Training(@Nullable String bucket, @Nullable String region) {
+    public record Training(@Nullable String consentedBucket, @Nullable String region, @Nullable List<String> testerIds,
+                           @Nullable String pseudonymKey) {
     }
 
     /**
@@ -334,11 +348,31 @@ public record AccenturyProperties(Session session,
      *                           세 IdP 값은 시크릿이 아니다. 배포에서는 SSM String 파라미터가 넣고, 콘솔에서 값을
      *                           받기 전에는 자리 표시 값({@link SsmPlaceholder#UNSET})이다 - 그 IdP의 로그인은
      *                           전부 401 {@code AUTH_IDP_TOKEN_INVALID}이고 다른 IdP와 응시는 영향이 없다.
+     * @param naverClientId      네이버 로그인 Client ID - SDK refresh token을 교환할 때 쓴다 (KAN-243). 네이버 사용자 조회
+     *                           API는 토큰의 발급 앱을 알려 주지 않아서, 우리 Client ID와 Secret으로 교환에 성공하는
+     *                           것이 다른 앱의 토큰을 막는 유일한 검사다. 앱(Android, iOS)의 {@code NAVER_CLIENT_ID}와
+     *                           같은 값이고 시크릿이 아니다(SSM String). 자리 표시 값이면 카카오 앱 ID와 같이 네이버
+     *                           로그인만 전부 401이다.
+     * @param naverClientSecret  네이버 로그인 Client Secret - 위 교환의 짝이다. SSM SecureString이고, 비었거나 자리 표시
+     *                           값이면 위와 같다.
+     * @param appleTeamId        애플 개발자 팀 ID - 탈퇴 때 애플 토큰 revoke(KAN-241)의 client_secret JWT {@code iss}다.
+     *                           시크릿이 아니다. 아래 둘과 번들 ID 중 하나라도 비었거나 자리 표시 값이면 revoke를 건너뛰고
+     *                           WARN만 남긴다 - 탈퇴 자체는 성공한다.
+     * @param appleKeyId         Sign in with Apple 키의 Key ID - client_secret JWT 헤더의 {@code kid}다.
+     * @param applePrivateKey    그 키의 .p8 원문(PKCS#8 PEM) - client_secret JWT를 ES256으로 서명한다. SSM SecureString이다.
      * @param googleJwksUrl      구글 JWKS 주소. 테스트가 가짜 JWKS로 바꾸는 자리다.
      * @param appleJwksUrl       애플 JWKS 주소. 위와 같다.
      * @param kakaoApiBaseUrl    카카오 API 기준 주소 ({@code kapi.kakao.com}). 테스트가 MockWebServer로 바꾼다.
      * @param naverApiBaseUrl    네이버 API 기준 주소 ({@code openapi.naver.com}). 위와 같다.
+     * @param naverAuthBaseUrl   네이버 인증 서버 기준 주소 ({@code nid.naver.com}) - 토큰 교환(KAN-243)이 부른다. 위와 같다.
+     * @param appleAuthBaseUrl   애플 인증 서버 기준 주소 ({@code appleid.apple.com}) - 탈퇴의 토큰 교환과 revoke가 부른다. 위와 같다.
      * @param idpTimeout         IdP 호출(JWKS 조회 포함)의 연결과 읽기 타임아웃. 넘으면 502 {@code AUTH_IDP_UNAVAILABLE}이다.
+     * @param privacyPolicyVersion 게시 중인 개인정보처리방침 버전 (KAN-240). 가입 요청의 {@code privacyPolicyVersion}이
+     *                           이 값과 정확히 같아야 동의로 기록한다. 다르면 400 {@code AUTH_CONSENT_REQUIRED}다 -
+     *                           옛 앱 빌드나 조작된 요청이 계정 고지가 없는 옛 방침에 "동의"한 것으로 남지 않게 한다.
+     *                           기본값 {@link #PRIVACY_POLICY_VERSION}은 {@code infra/privacy/privacy.html}의
+     *                           {@code accentury-policy-version} 메타와 같아야 하고 {@code privacy.test.mjs}가 둘을
+     *                           대조한다. 방침을 개정하면 이 상수, privacy.html, 앱 두 곳(Android, iOS)의 상수를 함께 올린다.
      */
     public record Auth(@Nullable String jwtSecret,
                        @DefaultValue("accentury") String issuer,
@@ -349,20 +383,46 @@ public record AccenturyProperties(Session session,
                        @Nullable String googleClientId,
                        @Nullable String appleBundleId,
                        @Nullable String kakaoAppId,
+                       @Nullable String naverClientId,
+                       @Nullable String naverClientSecret,
+                       @Nullable String appleTeamId,
+                       @Nullable String appleKeyId,
+                       @Nullable String applePrivateKey,
                        @DefaultValue("https://www.googleapis.com/oauth2/v3/certs") String googleJwksUrl,
                        @DefaultValue("https://appleid.apple.com/auth/keys") String appleJwksUrl,
                        @DefaultValue("https://kapi.kakao.com") String kakaoApiBaseUrl,
                        @DefaultValue("https://openapi.naver.com") String naverApiBaseUrl,
-                       @DefaultValue("5s") Duration idpTimeout) {
+                       @DefaultValue("https://nid.naver.com") String naverAuthBaseUrl,
+                       @DefaultValue("https://appleid.apple.com") String appleAuthBaseUrl,
+                       @DefaultValue("5s") Duration idpTimeout,
+                       @DefaultValue(Auth.PRIVACY_POLICY_VERSION) String privacyPolicyVersion) {
+
+        /** 게시 중인 개인정보처리방침 버전 - privacy.html의 {@code accentury-policy-version} 메타와 같은 값이다 (KAN-240). */
+        public static final String PRIVACY_POLICY_VERSION = "2026-09-29";
     }
 
     /**
-     * 등급 하나의 결과 화면과 공유 문구 (§3.7 - comment, share.text). 공유 이미지 URL은 여기 없다 -
-     * {@link Result#assetBaseUrl()}과 등급 code로 만든다 (KAN-132).
+     * 등급 하나의 공유 문구 (§3.7 - share.text). 공유 이미지 URL은 여기 없다 -
+     * {@link Result#assetBaseUrl()}과 등급 code로 만든다 (KAN-132). 결과 코멘트도 여기 없다 -
+     * 등급이 아니라 점수 비교로 고르므로 {@link Comments}에 있다 (KAN-249).
      *
-     * @param comment   등급별 진단 코멘트 - 결과 화면에 그대로 표시된다 (KAN-29).
      * @param shareText 공유 카드 문구 - 이름 없는 1인칭 (KAN-30)
      */
-    public record TierAsset(@Nullable String comment, @Nullable String shareText) {
+    public record TierAsset(@Nullable String shareText) {
+    }
+
+    /**
+     * 결과 화면 코멘트 (§3.7 comment, KAN-249). 최고 등급이 아니면 억양 점수와 단어 점수를 비교해
+     * 앞의 셋 중 하나를 쓰고, 문구 안의 {@code {nextTier}}에는 한 단계 위 등급의 이름이 들어간다.
+     * 등급 이름 뒤에 조사를 붙이지 않고 "까지"로 잇는 것은 받침 유무(경남 토박이)와 무관하게
+     * 문장이 맞게 하려는 것이다.
+     *
+     * @param intonationAhead 억양 점수 &gt; 단어 점수
+     * @param even            억양 점수 = 단어 점수
+     * @param vocabularyAhead 억양 점수 &lt; 단어 점수
+     * @param top             최고 등급 - 점수와 무관한 고정 문구
+     */
+    public record Comments(@Nullable String intonationAhead, @Nullable String even,
+                           @Nullable String vocabularyAhead, @Nullable String top) {
     }
 }

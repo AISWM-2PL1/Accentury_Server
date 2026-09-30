@@ -73,7 +73,8 @@ public final class PropertiesFixture {
     }
 
     private static AccenturyProperties.Result result() {
-        return new AccenturyProperties.Result(null, null, Map.of());
+        return new AccenturyProperties.Result(null, null, Map.of(),
+                new AccenturyProperties.Comments(null, null, null, null));
     }
 
     /** 집계 정책만 바꾼 설정 - 일자 경계와 조회 상한(KAN-106) 검증이 쓴다. */
@@ -102,9 +103,11 @@ public final class PropertiesFixture {
      */
     public static AccenturyProperties.Auth auth() {
         return new AccenturyProperties.Auth(null, "accentury", Duration.ofMinutes(30), Duration.ofDays(30), 30,
-                false, null, null, null,
+                false, null, null, null, null, null, null, null, null,
                 "https://www.googleapis.com/oauth2/v3/certs", "https://appleid.apple.com/auth/keys",
-                "https://kapi.kakao.com", "https://openapi.naver.com", Duration.ofSeconds(5));
+                "https://kapi.kakao.com", "https://openapi.naver.com", "https://nid.naver.com",
+                "https://appleid.apple.com", Duration.ofSeconds(5),
+                AccenturyProperties.Auth.PRIVACY_POLICY_VERSION);
     }
 
     private static AccenturyProperties properties(AccenturyProperties.Analysis analysis,
@@ -135,7 +138,7 @@ public final class PropertiesFixture {
                 // 저장은 그대로 돈다.
                 new AccenturyProperties.Feedback(10, Duration.ofDays(365), null),
                 // 학습 데이터 버킷 없음 - 기본 상태다 (KAN-201). 저장 코드가 호출되지 않는다.
-                new AccenturyProperties.Training(null, null),
+                new AccenturyProperties.Training(null, null, null, null),
                 auth(),
                 trustedProxies);
     }

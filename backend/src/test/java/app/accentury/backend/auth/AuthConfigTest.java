@@ -40,8 +40,10 @@ class AuthConfigTest {
         AccenturyProperties.Auth a = base.auth();
         AccenturyProperties.Auth auth = new AccenturyProperties.Auth(a.jwtSecret(), a.issuer(), a.accessTokenTtl(),
                 a.refreshTokenTtl(), a.rateLimitPerMinute(), fakeIdp, a.googleClientId(), a.appleBundleId(),
-                a.kakaoAppId(), a.googleJwksUrl(), a.appleJwksUrl(), a.kakaoApiBaseUrl(), a.naverApiBaseUrl(),
-                Duration.ofSeconds(5));
+                a.kakaoAppId(), a.naverClientId(), a.naverClientSecret(), a.appleTeamId(), a.appleKeyId(),
+                a.applePrivateKey(), a.googleJwksUrl(), a.appleJwksUrl(),
+                a.kakaoApiBaseUrl(), a.naverApiBaseUrl(), a.naverAuthBaseUrl(), a.appleAuthBaseUrl(),
+                Duration.ofSeconds(5), a.privacyPolicyVersion());
         return new AccenturyProperties(base.session(), base.analysis(), base.upload(), base.vocab(), base.completion(),
                 base.cors(), base.result(), base.analytics(), base.admin(), base.share(), base.feedback(),
                 base.training(), auth, base.trustedProxies());

@@ -199,11 +199,12 @@ public class SessionService {
                     purged.sessionId(), purged.answers(), purged.attempts(), purged.results());
         }
 
-        // 토큰은 로그에 남기지 않는다 (§2.6, NFR-SC-07).
-        log.info("세션 생성 sessionId={} platform={} testVersion={} voiceSet={} voiceSetBy={} region={} traffic={} userId={}",
+        // 토큰은 로그에 남기지 않는다 (§2.6, NFR-SC-07). 계정 id도 남기지 않고 계정 세션 여부만 남긴다 (KAN-240) -
+        // 세션 행은 24시간 뒤 지워지지만 로그는 14일 남아, 한 줄에 sessionId와 userId가 같이 있으면 그동안 세션과
+        // 계정의 대응표가 된다. staging에서는 그 sessionId가 학습 음성의 가명 키까지 이어진다 (KAN-239).
+        log.info("세션 생성 sessionId={} platform={} testVersion={} voiceSet={} voiceSetBy={} region={} traffic={} account={}",
                 sessionId, client != null ? client.platform() : null, testVersion, voiceSet,
-                voiceSetRequested ? "client" : "server", region, traffic,
-                account != null ? account.userId() : null);
+                voiceSetRequested ? "client" : "server", region, traffic, account != null);
 
         // 응시 시도 1건 (KAN-106) - 폐기+생성 트랜잭션이 커밋된 뒤다.
         // 실패는 카운터 쪽에서 삼킨다 - 통계가 세션 생성을 막으면 안 된다 (FR-AN-10).

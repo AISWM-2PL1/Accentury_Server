@@ -1,5 +1,6 @@
 package app.accentury.backend.auth;
 
+import app.accentury.backend.common.AccenturyProperties;
 import app.accentury.backend.common.ApiException;
 import app.accentury.backend.common.ErrorCode;
 import app.accentury.backend.common.RateLimits;
@@ -12,7 +13,6 @@ import org.springframework.transaction.support.TransactionTemplate;
 
 import java.time.Instant;
 import java.time.LocalDate;
-import java.util.regex.Pattern;
 
 /**
  * 로그인, refresh, 로그아웃 (KAN-223, 명세서 §3.9, §3.12, §3.13).
@@ -34,9 +34,6 @@ public class AuthService {
     /** 애플 이름 입력 상한 - 저장 전에 {@link IdpProfile}이 50자로 자르지만, 그보다 훨씬 긴 본문은 거절한다. */
     static final int APPLE_NAME_MAX = 200;
 
-    /** 동의한 방침 버전 형식 - {@code app_user.privacy_policy_version} varchar(32). */
-    private static final Pattern POLICY_VERSION = Pattern.compile("[A-Za-z0-9._-]{1,32}");
-
     private final IdpVerifiers idpVerifiers;
     private final AppUserRepository users;
     private final AccessTokens accessTokens;
@@ -44,14 +41,19 @@ public class AuthService {
     private final RateLimits rateLimits;
     private final TransactionTemplate transactionTemplate;
 
+    /** 게시 중인 방침 버전 (KAN-240) - 가입 요청의 버전이 이 값과 정확히 같아야 동의로 기록한다. */
+    private final String privacyPolicyVersion;
+
     AuthService(IdpVerifiers idpVerifiers, AppUserRepository users, AccessTokens accessTokens,
-                RefreshTokens refreshTokens, RateLimits rateLimits, TransactionTemplate transactionTemplate) {
+                RefreshTokens refreshTokens, RateLimits rateLimits, TransactionTemplate transactionTemplate,
+                AccenturyProperties properties) {
         this.idpVerifiers = idpVerifiers;
         this.users = users;
         this.accessTokens = accessTokens;
         this.refreshTokens = refreshTokens;
         this.rateLimits = rateLimits;
         this.transactionTemplate = transactionTemplate;
+        this.privacyPolicyVersion = properties.auth().privacyPolicyVersion();
     }
 
     /**
@@ -116,18 +118,21 @@ public class AuthService {
                     .orElse(null);
             if (existing != null) {
                 if (existing.deletedAt() != null) {
-                    // 탈퇴(FR-AC-09)가 아직 없어 이 분기는 닿지 않는다. 탈퇴 티켓이 재가입 규칙을 정할 때까지 막아 둔다.
+                    // 탈퇴(KAN-241)는 provider_user_id를 deleted:<계정 id>로 바꿔 자리를 비우므로 IdP 사용자 id로는 탈퇴 행이
+                    // 찾아지지 않는다 - 재로그인은 아래에서 새 계정이 된다. 이 분기는 치환 없이 deleted_at만 찍힌 행(손으로 고친
+                    // 데이터)이 되살아나지 않게 막는 방어선이다.
                     throw new ApiException(ErrorCode.AUTH_IDP_TOKEN_INVALID);
                 }
                 existing.fillBlanksFrom(profile, now);
                 return new Account(existing, false);
             }
-            String policyVersion = request.privacyPolicyVersion();
+            // 형식이 아니라 게시 중인 버전과의 일치를 본다 (KAN-240) - 옛 앱 빌드나 조작된 요청이 계정 고지가 없는
+            // 옛 방침에 동의한 것으로 남지 않게 한다. 저장하는 값도 요청 원문이 아니라 서버의 값이다(둘은 같다).
             if (!Boolean.TRUE.equals(request.privacyConsent())
-                    || policyVersion == null || !POLICY_VERSION.matcher(policyVersion).matches()) {
+                    || !privacyPolicyVersion.equals(request.privacyPolicyVersion())) {
                 throw new ApiException(ErrorCode.AUTH_CONSENT_REQUIRED);
             }
-            AppUser created = new AppUser(profile, policyVersion, now);
+            AppUser created = new AppUser(profile, privacyPolicyVersion, now);
             users.saveAndFlush(created);
             return new Account(created, true);
         });
@@ -148,6 +153,15 @@ public class AuthService {
             throw new ApiException(ErrorCode.VALIDATION_FAILED,
                     (provider.usesIdToken() ? "idToken" : "accessToken") + "이 필요합니다.");
         }
+        // 네이버는 access token만으로 발급 앱을 가릴 수 없어 refresh token을 교환해 본다 (KAN-243, NaverIdpVerifier).
+        // 가짜 IdP 판정보다 먼저 확인한다 - 다른 필수 필드와 같은 규칙이다.
+        String idpRefreshToken = null;
+        if (provider == Provider.NAVER) {
+            idpRefreshToken = request.refreshToken();
+            if (idpRefreshToken == null || idpRefreshToken.isBlank() || idpRefreshToken.length() > TOKEN_MAX) {
+                throw new ApiException(ErrorCode.VALIDATION_FAILED, "네이버 로그인에는 refreshToken이 필요합니다.");
+            }
+        }
         String nonce = null;
         String appleName = null;
         if (provider == Provider.APPLE) {
@@ -160,7 +174,7 @@ public class AuthService {
                 throw new ApiException(ErrorCode.VALIDATION_FAILED, "user.name이 너무 깁니다.");
             }
         }
-        return new IdpCredential(provider, token, nonce, appleName);
+        return new IdpCredential(provider, token, nonce, appleName, idpRefreshToken);
     }
 
     private static Provider provider(@Nullable String value) {

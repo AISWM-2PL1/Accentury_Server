@@ -22,6 +22,13 @@
 # 함수를 고치지 않고 정적 페이지를 서빙할 수 있다 (2026-09-01 KAN-133 정정). 이 전제는
 # infra/modules/edge/spa-rewrite.test.mjs가 붙들고 있다.
 #
+# ── 환경별 본문 (KAN-239) ────────────────────────────────────────────────────
+# 파일은 하나이고, `<!-- staging-only:begin -->`와 `<!-- staging-only:end -->` 줄 사이는 staging에만
+# 게시된다. prod는 그 두 줄과 사이를 잘라낸 본문이 올라간다 - staging 학습 수집 고지는 prod에 없어야
+# 한다 (prod는 음성을 저장하지 않는다, FR-DP-01). 표식은 각자 한 줄을 통째로 차지해야 한다(줄 단위로
+# 자른다). `--render <env>`는 AWS 없이 그 환경에 올라갈 본문만 표준 출력으로 내보낸다 - 계약 테스트
+# (infra/privacy/privacy.test.mjs)가 이 경로로 prod 본문을 검사하므로 자르는 규칙은 여기 하나다.
+#
 # content-type을 명시하는 이유: S3는 확장자로 타입을 추론하므로 .html이면 text/html이 맞게
 # 붙지만, 이 페이지가 HTML로 렌더링되는 것이 AC라서 추론에 맡기지 않고 박아 둔다.
 # cache-control은 5분으로 짧게 잡는다. 문서 교체가 언제 일어날지 모르는데 길게 잡으면 "고쳐
@@ -41,9 +48,11 @@ trap on_error ERR
 usage() {
   cat <<'USAGE'
 사용법: scripts/publish-privacy.sh <staging|prod>
+        scripts/publish-privacy.sh --render <staging|prod>
 
   infra/privacy/privacy.html을 그 환경의 웹 S3 버킷 루트에 올리고, CloudFront를 무효화한 뒤
   도메인으로 실제 응답을 받아 상태·타입·내용을 대조한다.
+  --render는 업로드 없이 그 환경에 올라갈 본문만 표준 출력으로 내보낸다 (prod는 staging-only 블록 제외).
 
 환경 변수로 덮어쓸 수 있는 값 (없으면 terraform output에서 읽는다):
   WEB_BUCKET                 대상 S3 버킷 이름
@@ -55,6 +64,11 @@ usage() {
 USAGE
 }
 
+RENDER_ONLY=0
+if [[ $# -eq 2 && "$1" == "--render" ]]; then
+  RENDER_ONLY=1
+  shift
+fi
 if [[ $# -ne 1 ]]; then
   usage >&2
   exit 2
@@ -82,6 +96,25 @@ if [[ ! -f "$SRC" ]]; then
   echo "오류: $SRC 이(가) 없다." >&2
   exit 1
 fi
+
+# 그 환경에 올라갈 본문. staging은 원본 그대로(표식은 HTML 주석이라 보이지 않는다), prod는 표식 줄과
+# 그 사이를 잘라낸다.
+render() {
+  if [[ "$ENV_NAME" == "prod" ]]; then
+    sed '/^<!-- staging-only:begin -->$/,/^<!-- staging-only:end -->$/d' "$SRC"
+  else
+    cat "$SRC"
+  fi
+}
+
+if [[ "$RENDER_ONLY" -eq 1 ]]; then
+  render
+  exit 0
+fi
+
+RENDERED="$(mktemp)"
+trap 'rm -f "$RENDERED"' EXIT
+render >"$RENDERED"
 
 CURRENT_STEP="필요한 명령 확인"
 for cmd in aws curl; do
@@ -122,7 +155,7 @@ echo ""
 
 CURRENT_STEP="S3 업로드: $KEY"
 echo "업로드: $KEY"
-aws s3 cp "$SRC" "s3://$WEB_BUCKET/$KEY" \
+aws s3 cp "$RENDERED" "s3://$WEB_BUCKET/$KEY" \
   --content-type 'text/html; charset=utf-8' \
   --cache-control 'public, max-age=300' \
   --no-progress
@@ -155,7 +188,7 @@ if [[ "$status" != "200" ]]; then
 elif [[ "$content_type" != text/html* ]]; then
   echo "  ✗ content-type이 '$content_type' (text/html 이어야 한다)" >&2
   failed=1
-elif ! cmp -s "$body" "$SRC"; then
+elif ! cmp -s "$body" "$RENDERED"; then
   # 내용이 다르면 캐시가 남았거나, SPA 재작성이 index.html을 돌려준 것이다.
   echo "  ✗ 받은 내용이 로컬 파일과 다르다 (캐시가 남았거나 SPA 재작성에 걸렸다)" >&2
   echo "      재작성 규칙을 확인해라: infra/modules/edge/spa-rewrite.js" >&2

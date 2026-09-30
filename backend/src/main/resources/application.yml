@@ -217,6 +217,13 @@ accentury:
     # 두면 그 키가 배포로 새는 길이 생기므로 여기 값을 두지 않는다.
     # google-client-id, apple-bundle-id, kakao-app-id는 IdP 토큰이 우리 앱의 것인지 가르는 값이다 (명세서 §3.9).
     # 배포에서는 SSM String(ACCENTURY_AUTH_GOOGLECLIENTID 등)이 넣는다. 없거나 자리 표시 값이면 그 IdP 로그인만 401이다.
+    # naver-client-id, naver-client-secret은 네이버 SDK refresh token을 교환해 발급 앱을 확인하는 값이다 (KAN-243).
+    # 배포에서는 SSM String ACCENTURY_AUTH_NAVERCLIENTID와 SecureString ACCENTURY_AUTH_NAVERCLIENTSECRET이 넣는다.
+    # 둘 중 하나라도 없거나 자리 표시 값이면 네이버 로그인만 401이다. 로컬은 fake-idp로 돈다.
+    # apple-team-id, apple-key-id, apple-private-key는 탈퇴한 애플 계정의 토큰 revoke용이다 (KAN-241, 명세서 §3.14).
+    # 애플 키(.p8)로 client_secret JWT를 서명한다. 배포에서는 SSM String ACCENTURY_AUTH_APPLETEAMID, ACCENTURY_AUTH_APPLEKEYID와
+    # SecureString ACCENTURY_AUTH_APPLEPRIVATEKEY가 넣는다. 필수 설정이 아니다 - 하나라도 없거나 자리 표시 값이면 revoke만
+    # 건너뛰고 WARN을 남기며 탈퇴는 성공한다 (AppleTokenRevoker).
   # 요청 제한의 기준 IP를 정할 때 신뢰할 프록시 대역 (명세서 §2.5, KAN-28).
   # 비어 있으면 X-Forwarded-For를 아예 읽지 않는다 - 프록시 없이 뜬 서버에서 헤더 위조로
   # IP 제한을 우회하지 못하게 하는 기본값이다. ALB 뒤에 배포하면 반드시 그 서브넷을 넣어야
@@ -268,14 +275,19 @@ accentury:
   # staging 전용 학습 데이터 S3 (KAN-201, training 패키지). bucket이 있으면 분석이 종결될 때마다 음성 WAV와
   # 메타 JSON을 그 버킷에 남긴다 - FR-DP-01(원본 음성 미보존)의 staging 예외다. 미설정이 기본값이고, 그러면
   # S3 클라이언트도 저장 빈도 만들어지지 않는다 (로컬, 테스트, prod). staging에서만 SSM
-  # ACCENTURY_TRAINING_BUCKET이 넣는다 (config 모듈의 optional 파라미터, prod 태스크 정의에는 이 변수가 없다).
+  # ACCENTURY_TRAINING_CONSENTEDBUCKET이 넣는다 (config 모듈의 optional 파라미터, prod 태스크 정의에는 이 변수가 없다).
   # region은 그 버킷의 리전 - 배포 프로파일이 CloudWatch 레지스트리와 같은 값을 명시한다 (application-deploy.yml).
+  # 버킷이 있어도 저장 대상은 동의 테스터 계정(tester-ids, SSM ACCENTURY_TRAINING_TESTERIDS)의 세션뿐이고, 세션 ID는
+  # pseudonym-key(SSM ACCENTURY_TRAINING_PSEUDONYMKEY)로 만든 HMAC 가명으로 바뀐다 (KAN-239). 목록이 없거나 자리 표시
+  # 값이면 아무것도 저장하지 않고, 버킷이 있는데 키가 없으면 기동을 세운다.
   # admin과 같은 이유로 블록째 주석이다.
   # training:
-  #   bucket: accentury-staging-training-<계정 ID>
+  #   consented-bucket: accentury-staging-training-<계정 ID>
   #   region: ap-northeast-2
+  #   tester-ids: <app_user.id>,<app_user.id>
+  #   pseudonym-key: <64자 난수>
   # /result 등급별 자산 (명세서 §3.7, KAN-25) - 서버가 내려주므로 앱 배포 없이 여기서 교체 (KAN-29/30)
-  # 기동 시 5개 등급 전부 존재해야 한다 (TierAssets 검증). 코멘트와 문구는 더미다 - 확정되면
+  # 기동 시 5개 등급 전부 존재해야 한다 (TierAssets 검증). 공유 문구는 더미다 - 확정되면
   # 여기서 교체한다. 키는 등급 code의 소문자다 (relaxed binding이 대문자 키를 보존하지 않으므로
   # 소문자로 적고, 조회가 대소문자를 무시한다).
   # 공유 이미지는 등급마다 URL을 적지 않는다 (KAN-132) - asset-base-url 아래 <code>.png가 자산 정본
@@ -284,19 +296,23 @@ accentury:
   result:
     web-test-url: https://accentury.app/t?c=kko_share    # 공유 유입 계측 캠페인 파라미터가 붙은 완성 URL (2026-08-14 확정 - 전 등급 공통 고정값, KAN-30)
     asset-base-url: https://accentury.app/share          # 등급 이미지 기준 URL - share.imageUrl = <기준>/<등급 code 소문자>.png (KAN-132)
+    # 결과 코멘트는 등급이 아니라 억양과 단어 점수의 비교로 고른다 (2026-09-28 확정, KAN-249).
+    # 최고 등급이 아니면 비교 문구 셋 중 하나이고 {nextTier}에 한 단계 위 등급 이름이 들어간다.
+    # 조사 없이 "까지"로 잇는 것은 받침 유무(경남 토박이)와 무관하게 문장이 맞게 하려는 것이다.
+    # 비교 문구에 {nextTier}가 없거나 빈 값이면 서버가 뜨지 않는다 (ResultComments 검증).
+    comments:
+      intonation-ahead: "억양은 좋았어요! 단어만 조금 더 맞히면 {nextTier}까지 한 걸음이에요."
+      even: "억양도 단어도 고르게 잘했어요! 조금만 더 하면 {nextTier}까지 한 걸음이에요."
+      vocabulary-ahead: "단어는 좋았어요! 억양만 조금 더 살리면 {nextTier}까지 한 걸음이에요."
+      top: "억양도 단어도 완벽한 경남 토박이예요. 더 배울 게 없어요!"
     tiers:
       outsider:
-        comment: "억양도 단어도 아직 표준어에 가깝습니다. 경남 사투리 입문을 환영합니다."
         share-text: "나는 외지인! 너도 시도해볼래?"
       traveler:
-        comment: "여행에서 주워들은 사투리가 조금 묻어 있습니다. 아직은 손님 티가 납니다."
         share-text: "나는 여행객! 너도 시도해볼래?"
       wannabe:
-        comment: "사투리를 쓰고 싶은 마음은 가득한데 억양이 아직 따라오지 못했습니다."
         share-text: "나는 사투리 호소인! 너도 시도해볼래?"
       honorary:
-        comment: "억양은 거의 토박이인데 단어에서 들켰습니다."
         share-text: "나는 명예주민! 너도 시도해볼래?"
       native:
-        comment: "억양도 단어도 완벽한 경남 토박이입니다. 더 배울 것이 없습니다."
         share-text: "나는 경남 토박이! 너도 시도해볼래?"

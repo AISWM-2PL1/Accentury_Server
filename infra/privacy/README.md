@@ -41,6 +41,12 @@ scripts/publish-privacy.sh prod
 S3에 올리고 CloudFront를 무효화한 뒤 도메인으로 실제 응답을 받아 상태, content-type, 내용까지
 대조한다. 멱등이라 몇 번 돌려도 된다.
 
+**환경별 본문 (KAN-239).** 파일은 하나이고, `<!-- staging-only:begin -->`와 `<!-- staging-only:end -->`
+두 줄 사이는 staging에만 올라간다. prod에는 스크립트가 두 줄과 그 사이를 잘라낸 본문을 올린다 - staging 학습
+수집 고지가 prod 방침에 섞이면 안 되기 때문이다(prod는 음성을 저장하지 않는다). 표식은 각자 한 줄을 통째로
+차지해야 한다. 올라갈 본문은 AWS 없이 `scripts/publish-privacy.sh --render <env>`로 볼 수 있고, 계약 테스트가
+같은 경로로 prod 본문을 검사한다.
+
 **웹 배포와 무관하게 이 파일만 갈아 끼울 수 있다.** `web-deploy.yml`은 `aws s3 sync`를
 `--delete` 없이 쓰고 배포 역할에는 `s3:DeleteObject` 자체가 없어서
 (`infra/modules/deploy/main.tf`), 여기서 올린 `privacy.html`은 이후의 웹 배포에 지워지지 않는다.
@@ -82,8 +88,17 @@ S3에 올리고 CloudFront를 무효화한 뒤 도메인으로 실제 응답을 
   넣기로 한 2026-09-07 팀 결정(KAN-196 앱, KAN-197 웹) 뒤 사업자가 Google LLC의 Google AdMob으로
   정해져, 2항 제3자 제공 표, 4항 국외 이전, 10항 광고의 「확정 후 기재」 자리표시자를 전부
   채웠다.
-- **시행일** — 본문 머리(`시행일: 정식 게시일에 기재합니다`)와 14항, 두 자리를 게시 당일
-  날짜로 바꾼다.
+- **시행일과 방침 버전** - 2026-09-29(KAN-240)부터 시행일은 방침 버전과 같은 날짜다. 본문 머리와 14항의
+  `시행일: <날짜> (방침 버전 <날짜>)` 두 자리, `<meta name="accentury-policy-version">`, backend
+  `AccenturyProperties.Auth.PRIVACY_POLICY_VERSION`이 한 값이어야 하고 `privacy.test.mjs`가 대조한다. prod 게시일이
+  이 날짜와 다르면 네 자리를 게시일로 함께 올리고, 앱 두 곳의 상수(Android `LoginScreenState.kt`,
+  iOS `LoginScreenState.swift`)도 같은 값으로 올린다. 서버는 게시 중인 버전과 다른 동의를 400으로 거절하므로
+  **서버 배포와 앱 상수가 어긋나면 그동안 앱 가입이 막힌다.**
+- **계정 PII 반영 (KAN-240)** - 앱 소셜 로그인(KAN-223)이 받는 계정 정보가 1항 「계정」, 3항 「소셜 로그인
+  제공자로부터 받는 정보」, 5항 파기, 6항 탈퇴 절차, 7항 생년월일 확인, 12항 가입 동의에 반영돼 있어야 한다.
+  반영 여부는 `privacy.test.mjs`의 KAN-240 테스트 넷이 붙든다. 앱 로그인(KAN-224)을 prod에 내기 전에
+  이 본문이 prod에 게시돼 있어야 한다. 6항의 임시 탈퇴 절차(보호책임자 이메일)는 탈퇴 API(KAN-241)가 나오면
+  앱 안 탈퇴로 바꾼다.
 - **스토어 답안 일치** — KAN-174(Play 데이터 안전)와 KAN-175(App Store 라벨)의 답이 광고
   도입 후 기준으로 갱신돼 있어야 한다.
 

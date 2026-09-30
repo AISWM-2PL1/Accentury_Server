@@ -70,7 +70,7 @@ variable "ai_analysis_timeout_seconds" {
 
 variable "training_bucket_name" {
   type        = string
-  description = "staging 전용 학습 데이터 S3 버킷 이름 (KAN-201). 값이 있으면 ACCENTURY_TRAINING_BUCKET 파라미터를 만들어 backend가 분석 종결마다 음성 WAV와 메타 JSON을 그 버킷에 남긴다 (accentury.training.bucket). null이면 파라미터 자체가 없고 backend는 저장 코드를 만들지 않는다 - prod는 반드시 null이다 (FR-DP-01 그대로)."
+  description = "staging 전용 학습 데이터 S3 버킷 이름 (KAN-201). 값이 있으면 ACCENTURY_TRAINING_CONSENTEDBUCKET 파라미터를 만들어 backend가 분석 종결마다 음성 WAV와 메타 JSON을 그 버킷에 남긴다 (accentury.training.consented-bucket). 값이 있으면 동의 테스터 목록(ACCENTURY_TRAINING_TESTERIDS, 자리 표시 값)과 가명 키(ACCENTURY_TRAINING_PSEUDONYMKEY)도 함께 만든다 (KAN-239). null이면 파라미터 자체가 없고 backend는 저장 코드를 만들지 않는다 - prod는 반드시 null이다 (FR-DP-01 그대로)."
   default     = null
 }
 
@@ -101,5 +101,23 @@ variable "auth_apple_bundle_id" {
 variable "auth_kakao_app_id" {
   type        = string
   description = "카카오 앱 ID(숫자, KAN-223). access_token_info의 app_id와 일치해야 한다 - 다른 앱의 토큰을 막는 유일한 검사다."
+  default     = "unset-put-parameter-after-apply"
+}
+
+variable "auth_naver_client_id" {
+  type        = string
+  description = "네이버 로그인 Client ID (KAN-243). backend가 SDK refresh token을 교환할 때 쓴다 - Secret은 SSM에 따로 넣는다."
+  default     = "unset-put-parameter-after-apply"
+}
+
+variable "auth_apple_team_id" {
+  type        = string
+  description = "애플 개발자 팀 ID (KAN-241). 탈퇴 때 애플 토큰 revoke의 client_secret JWT iss다 - 키 원문은 SSM에 따로 넣는다."
+  default     = "unset-put-parameter-after-apply"
+}
+
+variable "auth_apple_key_id" {
+  type        = string
+  description = "Sign in with Apple 키의 Key ID (KAN-241). client_secret JWT 헤더의 kid다."
   default     = "unset-put-parameter-after-apply"
 }

@@ -91,7 +91,7 @@ class AnalysisDispatchConfigTest {
                 Duration.ofMillis(500), Duration.ofSeconds(30));
         RestAiAnalysisClient client = new RestAiAnalysisClient(restClient, restClient, new ObjectMapper(), null);
         AnalysisDispatcher.AnalysisRequest request = new AnalysisDispatcher.AnalysisRequest(
-                "a_connect", "s_connect", "v1", null, "gn-2026.08.1", "sv-0.3", null, 3000, new byte[] {1, 2, 3});
+                "a_connect", "s_connect", "v1", null, "gn-2026.08.1", "sv-0.3", null, null, 3000, new byte[] {1, 2, 3});
 
         long started = System.nanoTime();
         AiAnalysisClient.AiUnavailableException e = assertThrows(AiAnalysisClient.AiUnavailableException.class,
