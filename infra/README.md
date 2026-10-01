@@ -13,7 +13,7 @@ infra/
     data/             RDS PostgreSQL (KAN-122)
     fargate/          backend ECS Fargate 서비스 - 클러스터, 태스크 정의, 서비스, 실행 역할과 태스크 역할, 로그 그룹 (KAN-165), 목표 추적 오토스케일링 min 1 max 3 (KAN-168)
     ai-host/          ai 전용 EC2 - ASG, 운영 compose, 기동 스크립트, systemd 유닛, egress 가드와 health 타이머 (KAN-124, KAN-36)
-    config/           backend, ai 환경 변수의 정본인 SSM 파라미터와 시크릿 2종 (관리자 토큰, 내부 호출 토큰) (KAN-129, KAN-36)
+    config/           backend, ai 환경 변수의 정본인 SSM 파라미터와 시크릿 (관리자 토큰, 내부 호출 토큰, JWT 서명 키 - state에 값이 없는 write-only, KAN-242) (KAN-129, KAN-36)
     edge/             internal ALB(대상 그룹 ip), VPC 오리진, CloudFront, S3 (KAN-125, KAN-126)
     waf/              CloudFront 앞단 웹 ACL. us-east-1 프로바이더로 호출한다 (KAN-149)
     monitoring/       SNS 이메일과 CloudWatch 경보 12종(ALB, RDS 3종 + backend 서비스 2종 + AI 호스트 4종 + 관측성 3종), 운영 대시보드 1개 (KAN-134, KAN-165, KAN-36, KAN-38)
@@ -192,7 +192,8 @@ terraform plan
 terraform apply
 ```
 
-생성물: `accentury-tfstate-<account_id>` 버킷 (버전 관리, 암호화, 퍼블릭 차단),
+생성물: `accentury-tfstate-<account_id>` 버킷 (버전 관리, 암호화, 퍼블릭 차단, 이전 버전 30일 만료와
+TLS 강제 정책 - KAN-242),
 ECR 리포지토리 `accentury/backend`, `accentury/ai`, `accentury/ai-model` (IMMUTABLE,
 라이프사이클 정책: 태그 없는 이미지 1일, 최근 50개 유지), GitHub Actions OIDC 공급자
 (`token.actions.githubusercontent.com`, KAN-127 - 계정에 1개뿐이라 여기서 만든다.
@@ -960,11 +961,11 @@ fargate 모듈이 config의 파라미터 이름 목록을 그대로 태스크 �
 | `SPRING_PROFILES_ACTIVE` | `deploy` (두 환경 동일). 이 프로파일에서만 backend가 아래 8개 누락 시 기동을 세운다 (`DeploymentConfigGuard`) | String |
 | `SPRING_DATASOURCE_URL` | `jdbc:aws-wrapper:postgresql://<RDS 주소>:5432/accentury?secretsManagerSecretId=<마스터 시크릿 ARN>` | String |
 | `ACCENTURY_ANALYSIS_AIBASEURL` | `http://ai.accentury.internal:8000` (프라이빗 영역의 고정 이름, 두 환경 동일, KAN-36) | String |
-| `ACCENTURY_ANALYSIS_AITOKEN` | `random_password` 48자 영숫자. backend가 AI 호출마다 `X-Accentury-Internal-Token`으로 싣는다 (KAN-36) | SecureString |
+| `ACCENTURY_ANALYSIS_AITOKEN` | ephemeral 난수 48자 영숫자, write-only라 state에 값이 없다 (KAN-242). backend가 AI 호출마다 `X-Accentury-Internal-Token`으로 싣는다 (KAN-36) | SecureString |
 | `ACCENTURY_TRUSTEDPROXIES` | 해당 환경 VPC CIDR 하나 | String |
 | `ACCENTURY_RESULT_WEBTESTURL` | `https://<도메인>/t?c=kko_share` | String |
 | `ACCENTURY_RESULT_ASSETBASEURL` | `https://<도메인>/share` (KAN-132). backend가 등급 code를 붙여 `share.imageUrl`을 만든다. 이미지는 웹 버킷 `share/<code>.png` (`scripts/publish-share-assets.sh`) | String |
-| `ACCENTURY_ADMIN_TOKEN` | `random_password` 48자 영숫자. 관리자 API(§6)와 E2E 스모크(KAN-138)가 쓴다 | SecureString |
+| `ACCENTURY_ADMIN_TOKEN` | ephemeral 난수 48자 영숫자, write-only라 state에 값이 없다 (KAN-242). 관리자 API(§6)와 E2E 스모크(KAN-138)가 쓴다 | SecureString |
 | `ACCENTURY_SHARE_KAKAOADMINKEY` | 카카오디벨로퍼스 콘솔의 앱 Admin 키 (KAN-164). Terraform은 자리 표시 값으로 만들고(write-only `value_wo`라 state에 값이 남지 않는다) apply 뒤 `put-parameter --overwrite`로 넣는다 (아래 "카카오 공유 웹훅" 절). 두 환경 같은 값 | SecureString |
 | `ACCENTURY_FEEDBACK_SLACKWEBHOOKURL` | 이용 후기 알림이 나가는 슬랙 채널(`#feedback`)의 Incoming Webhook URL (KAN-211). 카카오 키와 같이 자리 표시 값으로 만들고 apply 뒤 `put-parameter`로 넣는다 (아래 "이용 후기 슬랙 알림" 절). **선택 값이다 - 없거나 자리 표시 값이면 backend가 알림만 끄고 그대로 기동한다** (`DeploymentConfigGuard` 밖이라 apply와 배포의 순서 제약이 없다). 채널이 하나라 두 환경 같은 값 | SecureString |
 | `ai/ACCENTURY_AI_INTERNAL_TOKEN` | `ACCENTURY_ANALYSIS_AITOKEN`과 같은 난수. ai 서버가 health를 뺀 모든 요청에서 대조한다 (KAN-36). ai 호스트 역할만 읽는다 | SecureString |
@@ -987,13 +988,8 @@ aws ssm get-parameter --with-decryption --name /accentury/staging/ACCENTURY_ADMI
   --query Parameter.Value --output text
 ```
 
-재발급은 `terraform apply -replace='module.config.random_password.admin_token'`(taint는
-deprecated) 뒤 backend 태스크를 새로 띄우는 것이다 (`aws ecs update-service --force-new-deployment`,
-위 "backend Fargate 서비스" - secrets는 태스크 시작 시 한 번 읽힌다). 내부 호출 토큰은
-`-replace='module.config.random_password.ai_internal_token'` 뒤 **ai 호스트 reload 먼저, backend
-force-new-deployment 다음**이다 (그 사이 backend 호출은 401로 끊겨 회로가 열렸다가 닫힌다). 값은
-Terraform state(S3 암호화 + 버전 관리 버킷)에 남는다 - KAN-140이 수용한 범위이고, 레포, 이미지,
-로그에는 없다.
+재발급(회전)은 아래 "시크릿 회전" 절이다. 값은 SSM에만 있다 - Terraform state, 레포, 이미지, 로그
+어디에도 없다 (KAN-242).
 
 **이 토큰은 GitHub에 두지 않는다** (2026-09-05, KAN-171 리뷰 P3). 예전에는
 `e2e-smoke.yml`이 저장소 시크릿 `ACCENTURY_ADMIN_TOKEN`을 읽었는데 두 가지가 걸렸다.
@@ -1011,6 +1007,69 @@ apply나 재발급으로 토큰이 바뀌어도 GitHub 쪽에 맞춰 줄 것이 
 gh secret list                                 # ACCENTURY_ADMIN_TOKEN이 보이면
 gh secret delete ACCENTURY_ADMIN_TOKEN         # 지운다
 ```
+
+### 시크릿 회전 (KAN-242)
+
+관리자 토큰, 내부 호출 토큰, JWT 서명 키는 Terraform state에 값을 남기지 않는다. 난수는 `ephemeral
+"random_password"`가 apply 동안에만 만들고, SSM 파라미터에는 write-only 인자(`value_wo`)로 넘긴다. state에는
+`has_value_wo = true`와 `value_wo_version`만 남는다. 예전처럼 `random_password` + `value`로 두면 값이 state(버전 관리
+버킷)에 평문으로 남아, 버킷을 읽을 수 있는 주체는 누구나 임의 사용자의 Access JWT를 만들 수 있었다.
+
+Terraform이 값을 기억하지 않으므로 "값이 바뀌었다"를 스스로 알 수 없다. 그래서 회전은 `modules/config/main.tf`
+상단 `locals`의 버전 숫자를 올리는 것이다.
+
+| 시크릿 | 버전 local | 다시 읽어야 하는 쪽 |
+| --- | --- | --- |
+| 관리자 토큰 | `admin_token_version` | backend (워크플로는 SSM에서 직접 읽으므로 GitHub에 맞출 것이 없다) |
+| 내부 호출 토큰 (파라미터 2개) | `ai_internal_token_version` | ai 호스트, backend |
+| JWT 서명 키 | `jwt_secret_version` | backend |
+
+순서 (환경마다, staging 먼저):
+
+1. 버전 숫자를 올리고 `terraform apply`. plan에는 해당 파라미터의 `value_wo_version` 갱신만 나와야 한다.
+   내부 호출 토큰을 바꿨다면 apply 직후 두 파라미터가 같은지 대조한다 (값 대신 해시만 출력한다).
+
+   ```
+   for n in ACCENTURY_ANALYSIS_AITOKEN ai/ACCENTURY_AI_INTERNAL_TOKEN; do
+     aws ssm get-parameter --with-decryption --name "/accentury/staging/$n" --query Parameter.Value --output text | shasum -a 256
+   done
+   ```
+
+   두 해시가 다르면 apply가 한쪽만 쓰고 실패한 뒤 재시도된 것이다 (재시도의 ephemeral은 새 값이고, 버전이 이미
+   맞는 쪽은 다시 쓰이지 않는다). 값이 state에 없어 plan은 이것을 못 본다. `ai_internal_token_version`을 한 번
+   더 올려 apply하면 둘이 같은 값으로 다시 쓰인다. 같은 이유로 둘 중 한 파라미터만 `-replace`하지 않는다.
+2. Actions "Image Deploy"를 그 환경으로, `image_tag`에 현재 SSM `IMAGE_TAG` 값을 넣어 수동 실행한다. 같은 태그
+   재실행은 ai 호스트를 한 대씩 reload한 뒤 backend에 새 배포를 강제하고(`deploy.yml`, 리비전을 쌓지 않는다) E2E
+   스모크까지 돈다. **ai 먼저, backend 다음**이 내부 호출 토큰에 맞는 순서다 - 그 사이 backend 호출은 401로 끊겨
+   회로가 열렸다가 닫힌다. 관리자 토큰과 JWT 키만 바꿨다면 ai reload는 필요 없지만 같은 실행으로 해도 된다.
+3. 스모크 통과를 확인한다. JWT 키를 바꿨다면 앱은 다음 요청에서 401을 받고 refresh로 새 Access를 받는다.
+
+버전 숫자는 두 환경이 같은 모듈에서 읽는다. staging만 apply한 동안 prod plan에는 파라미터 갱신이 남는데, prod도
+회전해야 한다는 표시다. 같은 순서로 prod에서 한 번 더 밟는다.
+
+**이 파라미터의 다른 인자를 바꿀 때도 버전을 함께 올린다.** provider는 description 같은 다른 인자가 바뀌어도
+PutParameter를 다시 보내는데, 버전이 그대로면 `value_wo`를 읽지 않고 state의 빈 `value`를 실어 거부된다.
+
+state에 값이 없는지 확인 (envs 루트에서):
+
+```
+terraform state pull | jq '.resources[] | select(.module=="module.config" and .type=="aws_ssm_parameter")
+  | select(.name|test("admin_token|ai_token|jwt_secret")) | {name, value: .instances[0].attributes.value,
+  has_value_wo: .instances[0].attributes.has_value_wo}'
+```
+
+`value`가 비어 있고(`""`) `has_value_wo`가 `true`면 된다 (2026-10-01 staging 전환 뒤 실측).
+
+**Redis AUTH 토큰은 state에 남는다 (위험 수용).** aws provider 6.61.0의 `aws_elasticache_replication_group`에는
+write-only 인자(`auth_token_wo` 같은 것)가 없다 (2026-10-01 provider 바이너리 확인). 복제 그룹 자체가 `auth_token`을
+state에 두므로 SSM 쪽만 write-only로 바꿔도 의미가 없다. Redis는 사설 서브넷에 있고 redis-sg가 backend-sg의 6379만
+받으므로, 토큰을 알아도 VPC 안의 backend 자리에 있지 않으면 쓸 수 없다. provider에 write-only 인자가 생기면 같은
+방식으로 옮긴다. 회전은 아래 "앱 계정 인증" 절의 세 단계다.
+
+**state 버킷 (bootstrap).** 회전해도 옛 값은 이전 state 버전 객체에 남는다. 그래서 state 버킷에 이전 버전 30일
+만료 규칙을 두고(그 사이가 잘못된 apply 뒤 복구 창이다), TLS가 아닌 요청을 거부하는 버킷 정책을 둔다. 읽기 주체를
+Terraform 운영자 역할로 좁히는 정책은 두지 않는다 - 역할 목록이 틀리면 state가 잠기고, 2026-10-01 확인 시점에 이
+버킷을 읽을 수 있는 주체는 전부 SSM도 직접 읽는 관리자라 좁혀서 얻는 것이 없다 (KAN-242 노출 범위 표).
 
 ### 카카오 공유 웹훅 검증 키 (KAN-164)
 
@@ -1178,9 +1237,9 @@ revoke 없이 성공한다(탈퇴 때마다 `애플 토큰 revoke 건너뜀` WAR
 
 **키 재발급.**
 
-- JWT 서명 키: `terraform apply -replace='module.config.random_password.jwt_secret'` 뒤 backend 태스크를 새로 띄운다.
+- JWT 서명 키: 위 "시크릿 회전" 절이다 (`modules/config`의 `local.jwt_secret_version`을 올린다, KAN-242).
   그 순간까지 발급된 Access(최대 30분)가 무효가 되고, 앱은 refresh로 새로 받는다. Refresh는 Redis라 영향이 없다.
-- Redis AUTH 토큰: 세 단계다. `ROTATE`는 새 토큰을 더하되 옛 토큰도 계속 받으므로, 유출 대응이라면 마지막 단계를
+- Redis AUTH 토큰: 세 단계다. 이 토큰은 state에 값이 남는다 (위 "시크릿 회전" 절의 Redis 결정). `ROTATE`는 새 토큰을 더하되 옛 토큰도 계속 받으므로, 유출 대응이라면 마지막 단계를
   빼먹으면 옛 토큰이 살아 있다 (Codex 리뷰).
   1. `terraform apply -replace='module.data.random_password.redis_auth_token'` - 새 토큰이 더해지고 옛 토큰도 받는다.
      떠 있는 태스크가 끊기지 않는다.
