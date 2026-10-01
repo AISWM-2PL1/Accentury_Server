@@ -85,22 +85,41 @@ resource "aws_ssm_parameter" "asset_base_url" {
 
 # ---- 시크릿 ----
 
+# 아래 세 시크릿(관리자 토큰, 내부 호출 토큰, JWT 서명 키)은 Terraform state에 값을 남기지 않는다 (KAN-242).
+# 난수는 ephemeral random_password가 apply 동안에만 만들고, 파라미터에는 write-only 인자(value_wo)로
+# 넘긴다 - provider는 value_wo를 state에 두지 않고, read 때도 value를 비운 채 has_value_wo만 남긴다.
+# random_password 리소스와 value로 두면 결과가 state(버전 관리 버킷)에 평문으로 남아, 버킷을 읽을 수 있는
+# 주체는 누구나 JWT를 위조할 수 있었다. 카카오 Admin 키(아래 kakao_admin_key)가 먼저 쓴 방식이다.
+#
+# ephemeral 값은 plan과 apply마다 새로 뽑히지만, provider는 value_wo_version이 바뀔 때만 그 값을 쓴다.
+# 그래서 아래 버전 숫자를 올리는 것이 곧 회전이다 - 올린 뒤 apply, ai 호스트 reload, backend 새 배포,
+# E2E 스모크 순서다 (README "시크릿 회전" 절). 두 환경이 같은 모듈을 쓰므로 숫자 하나가 두 환경의 회전이고,
+# 한 환경만 apply한 동안 다른 환경 plan에는 파라미터 갱신이 남는다 - 그 환경도 회전해야 한다는 표시다.
+#
+# 이 파라미터의 다른 인자(description, type 등)를 바꿀 때도 버전을 함께 올린다. provider는 다른 인자가
+# 바뀌어도 PutParameter를 다시 보내는데, 버전이 그대로면 value_wo를 읽지 않고 state의 빈 value를 실어
+# 거부된다 (SSM 값은 1자 이상).
+locals {
+  admin_token_version       = 1
+  ai_internal_token_version = 1
+  jwt_secret_version        = 1
+}
+
 # 관리자 API(§6)와 E2E 스모크(KAN-138) 합성 트래픽 표시의 공유 시크릿. AdminAuth가 32자 미만을
 # 거부하므로 그 위로 넉넉히 잡는다. 특수문자를 빼는 것은 curl과 워크플로 YAML에서 따옴표 문제를
-# 만들지 않기 위해서다 - 48자 영숫자면 엔트로피는 충분하다.
-# state에 평문이 남는다 (S3 암호화 + 버전 관리 버킷, KAN-140이 수용한 범위). 값 조회:
+# 만들지 않기 위해서다 - 48자 영숫자면 엔트로피는 충분하다. 값 조회:
 #   aws ssm get-parameter --with-decryption --name /accentury/{env}/ACCENTURY_ADMIN_TOKEN --query Parameter.Value --output text
-# 재발급은 envs 루트에서 `terraform apply -replace='module.config.random_password.admin_token'`, 그리고
-# 인스턴스에서 systemctl reload accentury (README "관리자 토큰" 절). taint는 0.15.2부터 deprecated다.
-resource "random_password" "admin_token" {
+# 워크플로(배포 스모크, 수동 스모크)도 SSM에서 직접 읽으므로 회전 뒤 GitHub에 맞춰 줄 것이 없다.
+ephemeral "random_password" "admin_token" {
   length  = 48
   special = false
 }
 
 resource "aws_ssm_parameter" "admin_token" {
-  name  = "${var.ssm_prefix}/ACCENTURY_ADMIN_TOKEN"
-  type  = "SecureString" # AWS 관리 키(aws/ssm) - EC2 역할에 별도 kms 권한이 필요 없다 (compute IAM 주석).
-  value = random_password.admin_token.result
+  name             = "${var.ssm_prefix}/ACCENTURY_ADMIN_TOKEN"
+  type             = "SecureString" # AWS 관리 키(aws/ssm) - EC2 역할에 별도 kms 권한이 필요 없다 (compute IAM 주석).
+  value_wo         = ephemeral.random_password.admin_token.result
+  value_wo_version = local.admin_token_version
 }
 
 # backend -> ai 내부 호출의 공유 시크릿 (KAN-36). 두 서비스가 다른 호스트로 갈라지면서 "같은
@@ -109,22 +128,29 @@ resource "aws_ssm_parameter" "admin_token" {
 # (accentury.analysis.ai-token -> ACCENTURY_ANALYSIS_AITOKEN), ai 쪽은 FastAPI 설정 이름
 # (ACCENTURY_AI_INTERNAL_TOKEN)이고, ai 것은 ai 호스트 역할만 읽는 하위 경로 {prefix}/ai/ 에 둔다
 # (compute 모듈 IAM). backend 호스트의 기동 스크립트는 하위 경로를 읽지 않는다 (--recursive 없음).
-# 재발급은 admin_token과 같은 방식이고, 두 호스트 모두 reload해야 한다.
-resource "random_password" "ai_internal_token" {
+# 두 파라미터가 같은 버전 local을 쓰는 것이 핵심이다 - 한 apply 안에서 ephemeral 값은 하나라 둘 다 같은
+# 값을 받지만, 한쪽 버전만 올리면 그쪽만 새 값이 되어 backend와 ai가 서로 다른 토큰을 갖는다.
+# 같은 어긋남이 apply 도중 실패로도 생긴다 (Codex 리뷰 P2) - 한쪽만 쓰인 뒤 재시도하면 재시도의 ephemeral은
+# 새 값이고 버전이 이미 맞는 쪽은 다시 쓰이지 않는다. 값이 state에 없으니 plan도 이것을 못 본다. 그래서
+# 회전 뒤 두 값을 대조하고, 다르면 버전을 한 번 더 올려 둘을 같은 apply에서 다시 쓴다 (README "시크릿 회전").
+# 한 파라미터만 -replace하는 것도 같은 이유로 하지 않는다.
+ephemeral "random_password" "ai_internal_token" {
   length  = 48
   special = false
 }
 
 resource "aws_ssm_parameter" "ai_token_backend" {
-  name  = "${var.ssm_prefix}/ACCENTURY_ANALYSIS_AITOKEN"
-  type  = "SecureString"
-  value = random_password.ai_internal_token.result
+  name             = "${var.ssm_prefix}/ACCENTURY_ANALYSIS_AITOKEN"
+  type             = "SecureString"
+  value_wo         = ephemeral.random_password.ai_internal_token.result
+  value_wo_version = local.ai_internal_token_version
 }
 
 resource "aws_ssm_parameter" "ai_token_ai" {
-  name  = "${var.ssm_prefix}/ai/ACCENTURY_AI_INTERNAL_TOKEN"
-  type  = "SecureString"
-  value = random_password.ai_internal_token.result
+  name             = "${var.ssm_prefix}/ai/ACCENTURY_AI_INTERNAL_TOKEN"
+  type             = "SecureString"
+  value_wo         = ephemeral.random_password.ai_internal_token.result
+  value_wo_version = local.ai_internal_token_version
 }
 
 # 실모델 기준 분석 시간 예산 (KAN-172 확정, 2026-09-08. KAN-22가 임시로 올렸던 값을 KAN-57의
@@ -216,18 +242,20 @@ resource "aws_ssm_parameter" "feedback_slack_webhook_url" {
 # ---- 앱 계정 인증 (KAN-223) ----
 
 # Access JWT(HS256)의 서명 키. backend(AccessTokens)가 32바이트 미만을 거부하므로 64자 영숫자로 넉넉히 잡는다.
-# 모든 backend 태스크가 같은 키여야 한다 - 한 태스크가 발급한 Access를 다른 태스크가 검증한다. 재발급은
-# `terraform apply -replace='module.config.random_password.jwt_secret'` 뒤 backend 태스크를 새로 띄운다. 그 순간
-# 발급된 Access(최대 30분)가 전부 무효가 되고, 앱은 refresh로 새로 받는다 (Refresh는 Redis라 영향이 없다).
-resource "random_password" "jwt_secret" {
+# 모든 backend 태스크가 같은 키여야 한다 - 한 태스크가 발급한 Access를 다른 태스크가 검증한다. 대칭 키라 이 값을
+# 읽는 주체는 임의 사용자의 Access를 만들 수 있으므로 위 "시크릿" 절의 write-only 방식을 쓴다 (KAN-242). 회전은
+# local.jwt_secret_version을 올려 apply한 뒤 backend 태스크를 새로 띄운다. 그 순간 발급된 Access(최대 30분)가
+# 전부 무효가 되고, 앱은 refresh로 새로 받는다 (Refresh는 Redis라 영향이 없다).
+ephemeral "random_password" "jwt_secret" {
   length  = 64
   special = false
 }
 
 resource "aws_ssm_parameter" "jwt_secret" {
-  name  = "${var.ssm_prefix}/ACCENTURY_AUTH_JWTSECRET"
-  type  = "SecureString"
-  value = random_password.jwt_secret.result
+  name             = "${var.ssm_prefix}/ACCENTURY_AUTH_JWTSECRET"
+  type             = "SecureString"
+  value_wo         = ephemeral.random_password.jwt_secret.result
+  value_wo_version = local.jwt_secret_version
 }
 
 # Refresh 토큰 저장소 ElastiCache의 주소와 AUTH 토큰 (data 모듈). 이름은 Spring Boot 프로퍼티 규칙이다
