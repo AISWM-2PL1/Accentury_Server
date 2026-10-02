@@ -2,7 +2,9 @@ package app.accentury.backend.analytics;
 
 import app.accentury.backend.common.AdminAuth;
 import app.accentury.backend.common.ApiException;
+import app.accentury.backend.common.ClientIps;
 import app.accentury.backend.common.ErrorCode;
+import jakarta.servlet.http.HttpServletRequest;
 import org.jspecify.annotations.Nullable;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.http.CacheControl;
@@ -48,10 +50,12 @@ class AnalyticsController {
 
     private final AnalyticsQueryService service;
     private final AdminAuth adminAuth;
+    private final ClientIps clientIps;
 
-    AnalyticsController(AnalyticsQueryService service, AdminAuth adminAuth) {
+    AnalyticsController(AnalyticsQueryService service, AdminAuth adminAuth, ClientIps clientIps) {
         this.service = service;
         this.adminAuth = adminAuth;
+        this.clientIps = clientIps;
     }
 
     /**
@@ -76,8 +80,9 @@ class AnalyticsController {
             @RequestParam(required = false) @Nullable String from,
             @RequestParam(required = false) @Nullable String to,
             @RequestParam(required = false) @Nullable String traffic,
-            @RequestHeader(value = AdminAuth.TOKEN_HEADER, required = false) @Nullable String token) {
-        adminAuth.authorize(token);
+            @RequestHeader(value = AdminAuth.TOKEN_HEADER, required = false) @Nullable String token,
+            HttpServletRequest httpRequest) {
+        adminAuth.authorize(token, clientIps.resolve(httpRequest));
         return ResponseEntity.ok()
                 // 내부 지표라도 중간 캐시에 남기지 않는다. - 오류 응답과 같은 방침 (§2.3)
                 .cacheControl(CacheControl.noStore())

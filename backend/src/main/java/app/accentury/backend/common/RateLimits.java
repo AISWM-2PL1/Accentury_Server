@@ -37,7 +37,10 @@ import java.util.concurrent.TimeUnit;
  * <ul>
  *   <li>IP 축(세션 생성, 업로드)은 WAF의 rate 규칙(KAN-149)이 엣지에서 한 번 더 막는다 -
  *       CloudFront 앞이라 태스크 수와 무관하다. 단 WAF가 Block 모드일 때 성립하는 수용이다.
- *       지금은 Count 모드({@code waf_enforce=false})라 KAN-169, KAN-171의 Block 전환이 전제다.</li>
+ *       두 환경 모두 Block이다({@code waf_enforce = true}, staging KAN-169, prod KAN-171).
+ *       AUTH 축은 {@code rate-limit-auth}가 보완한다 (KAN-244) - 로그인은 요청마다 외부 IdP를 불러
+ *       태스크 수만큼 풀린 한도가 곧 IdP 쿼터 소진으로 이어지므로, 그 규칙은 다른 rate 규칙과 달리
+ *       backend 한도보다 낮게 둬 엣지에서 먼저 자른다.</li>
  *   <li>세션 축은 토큰 하나가 낼 수 있는 요청을 태스크 수(최대 3)배까지 허용하는 것인데,
  *       한도 자체가 정상 응시의 여유 배수라 3배여도 GPU 보호(문항당 시도 상한, §5.1)와
  *       DB 부하 양쪽에 실질 영향이 없다.</li>

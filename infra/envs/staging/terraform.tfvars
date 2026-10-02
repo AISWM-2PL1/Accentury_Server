@@ -51,6 +51,14 @@ db_skip_final_snapshot = true
 waf_enforce    = true
 waf_rate_limit = 300
 
+# 로그인과 refresh, 관리자 경로 rate 규칙 (KAN-244, 2026-10-02 확정). waf_enforce를 따른다. 근거는 README "WAF 웹 ACL".
+waf_auth_rate_limit  = 100
+waf_admin_rate_limit = 50
+
+# IP 평판 관리형 규칙 (KAN-244). 두 환경 Count(false)로 시작해 staging에서 일주일 관찰한 뒤 staging부터 true,
+# prod가 뒤따른다 (2026-10-02 결정).
+waf_ip_reputation_enforce = false
+
 # 네이버 로그인 Client ID (KAN-243). 시크릿이 아니고 앱의 NAVER_CLIENT_ID와 같은 값이다. 두 환경이 같은 네이버
 # 앱을 쓴다. 짝인 Client Secret은 시크릿이라 여기 두지 않고 apply 뒤 put-parameter로 넣는다 (README "소셜 로그인" 절).
 auth_naver_client_id = "2nlTdPK4RqeqQcLtb6xH"

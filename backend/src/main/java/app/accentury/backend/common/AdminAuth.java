@@ -1,6 +1,8 @@
 package app.accentury.backend.common;
 
 import org.jspecify.annotations.Nullable;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.stereotype.Component;
 
@@ -27,6 +29,8 @@ import java.security.MessageDigest;
 @ConditionalOnProperty(prefix = "accentury.admin", name = "token")
 public class AdminAuth {
 
+    private static final Logger log = LoggerFactory.getLogger(AdminAuth.class);
+
     /** 관리자 토큰을 싣는 헤더 - 세 관리자 엔드포인트가 같은 이름을 쓴다. */
     public static final String TOKEN_HEADER = "X-Admin-Token";
 
@@ -34,11 +38,12 @@ public class AdminAuth {
      * 토큰 최소 길이 - 무작위로 발급한 시크릿이면 자연히 넘는 값이고, 사람이 지어낸 값
      * ({@code admin123})은 여기서 걸린다 (2026-08-17 확정).
      * <p>
-     * 이 검사가 없으면 약한 토큰에 무제한 추측이 열린다 - 관리자 엔드포인트에는 요청 제한이
-     * 없기 때문이다(미인증 요청은 DB에 닿지 않아 부하 경로는 아니지만, 시도 횟수는 무제한이다).
-     * 제한을 거는 대신 <b>약한 토큰이 배포되지 못하게</b> 막는 쪽을 골랐다 - 근본이고,
+     * 이 검사가 없으면 약한 토큰에 무제한 추측이 열린다 - backend에는 관리자 엔드포인트의 요청
+     * 제한이 없기 때문이다(미인증 요청은 DB에 닿지 않아 부하 경로는 아니지만, 시도 횟수는 무제한이다).
+     * backend에 제한을 거는 대신 <b>약한 토큰이 배포되지 못하게</b> 막는 쪽을 골랐다 - 근본이고,
      * 운영자의 정상 폴링을 막을 위험도 없다. 길이만 보는 것은 엔트로피의 하한일 뿐이라
-     * 값 자체는 무작위로 발급해야 한다.
+     * 값 자체는 무작위로 발급해야 한다. 추측 속도는 엣지의 WAF 규칙 {@code rate-limit-admin}이
+     * IP당으로 묶는다 (KAN-244).
      */
     private static final int MIN_TOKEN_LENGTH = 32;
 
@@ -74,12 +79,19 @@ public class AdminAuth {
      * <p>
      * 길이 차이로도 새지 않게 상수 시간 비교를 쓴다 ({@link MessageDigest#isEqual}) -
      * 토큰을 한 글자씩 맞춰 보는 공격을 막는 관례다.
+     * <p>
+     * 실패는 호출 IP와 함께 WARN으로 남긴다 (KAN-244). 관리자 경로는 IP 허용 목록 없이 공개
+     * CloudFront로 열려 있어(스모크 러너 IP가 고정되지 않는다), 추측 시도가 어디서 오는지 보이는
+     * 것이 회전을 판단할 근거다. <b>토큰 값은 남기지 않는다</b> - 틀린 값이라도 운영자의 오타는
+     * 진짜 토큰과 한두 글자 차이일 수 있다.
      *
+     * @param clientIp 요청 제한과 같은 기준의 호출 IP ({@link ClientIps#resolve})
      * @throws ApiException 401 {@code ADMIN_UNAUTHORIZED}
      */
-    public void authorize(@Nullable String token) {
+    public void authorize(@Nullable String token, String clientIp) {
         if (token == null
                 || !MessageDigest.isEqual(token.getBytes(StandardCharsets.UTF_8), expectedToken)) {
+            log.warn("관리자 인증 실패 ip={}", clientIp);
             throw new ApiException(ErrorCode.ADMIN_UNAUTHORIZED);
         }
     }

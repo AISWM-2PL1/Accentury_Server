@@ -50,7 +50,7 @@ class ActiveVersionTransactionTest extends IntegrationTest {
     void restoreBaseline() {
         // 활성 포인터는 클래스 사이 초기화 대상이 아니다 (DatabaseWipeExtension.KEEP) -
         // 바꾼 테스트가 직접 되돌린다.
-        activeVersionService.activate(BASELINE, "테스트 정리");
+        activeVersionService.activate(BASELINE, "테스트 정리", "127.0.0.1");
         // 되돌리기가 실제로 통했는지 확인한다 - 이 컨텍스트를 공유하는 뒤 클래스들이 원인에서
         // 먼 곳에서 무너지지 않게 여기서 세운다.
         assertEquals(BASELINE, storedActiveVersion(), "baseline으로 되돌린 채 클래스를 벗어나야 한다");
@@ -68,7 +68,7 @@ class ActiveVersionTransactionTest extends IntegrationTest {
         // 예외 타입만 보면 "포인터 행이 사라졌다"는 다른 IllegalStateException과 구별되지
         // 않는다 - 주입한 실패가 맞는지 메시지로 못 박는다.
         IllegalStateException thrown = assertThrows(IllegalStateException.class,
-                () -> failing.activate(OLDER, "실패 주입"));
+                () -> failing.activate(OLDER, "실패 주입", "127.0.0.1"));
         assertEquals(BROKEN_AUDIT_MESSAGE, thrown.getMessage());
 
         // DB: 감사 INSERT가 터졌으니 같은 트랜잭션의 포인터 UPDATE도 함께 사라져야 한다.
@@ -91,7 +91,7 @@ class ActiveVersionTransactionTest extends IntegrationTest {
     void 전환은_바깥_트랜잭션이_롤백해도_커밋된다() {
         transactionTemplate.execute(tx -> {
             tx.setRollbackOnly();
-            return activeVersionService.activate(OLDER, "바깥 롤백 시험");
+            return activeVersionService.activate(OLDER, "바깥 롤백 시험", "127.0.0.1");
         });
 
         assertEquals(OLDER, storedActiveVersion(), "전환은 바깥 트랜잭션에 딸려 롤백되면 안 된다");
