@@ -2500,6 +2500,12 @@ destroy는 리소스를 지우지만 개인정보가 담긴 **잔존물**을 전
 - **trusted-proxies는 VPC CIDR 하나** (KAN-129): VPC 오리진 구조에서 CloudFront 발
   트래픽은 VPC 안 ENI 사설 IP로 들어오고 ALB도 VPC 안이라 XFF의 오른쪽 두 홉이
   같은 대역에 든다. CloudFront 오리진 페이싱 공인 대역은 매칭될 일이 없어 넣지 않는다.
+  **정정 (KAN-244, 2026-10-02 staging 실측)**: XFF에는 그 공인 대역의 엣지 IP도 한 홉 들어 있어,
+  VPC CIDR만 신뢰하면 backend가 엣지 IP(예: 54.182.245.160)를 접속자로 뽑았다. 전원이 엣지 서버
+  단위로 IP 한도를 나눠 쓰고 있었다. 대역을 신뢰 목록에 넣는 대신 API 경로의 오리진 요청 정책이
+  `CloudFront-Viewer-Address`를 넘기고, backend `ClientIps`가 신뢰 프록시 뒤에서 그 헤더를 먼저 읽는다
+  (`modules/edge`의 `aws_cloudfront_origin_request_policy.api`). 대역 목록은 AWS가 바꾸면 조용히 같은
+  문제로 돌아가지만, 헤더는 CloudFront가 직접 채우는 값이라 관리할 목록이 없다.
 - **Spring 프로파일 이름은 `deploy`** (KAN-129): staging과 prod가 같은 이름을 쓴다.
   환경 이름을 프로파일로 쓰면 `application-staging.yml` 같은 환경별 파일이 생길 여지가
   남아 "환경 간 차이는 tfvars와 SSM 값뿐"이 깨진다.
@@ -2565,6 +2571,6 @@ destroy는 리소스를 지우지만 개인정보가 담긴 **잔존물**을 전
   *.accentury.app)를 건다. CloudFront는 오리진 인증서 도메인이 Origin domain 값
   또는 오리진으로 전달되는 Host 헤더와 맞으면 받아들이는데(AWS 문서 "Require
   HTTPS for communication between CloudFront and your custom origin"), API 동작이
-  Managed-AllViewer라 Host가 ALB까지 가므로 ALB DNS 이름과 인증서가 달라도
+  viewer 헤더를 전부 넘기는 정책(KAN-244부터 Managed-AllViewer 대신 사용자 정의 `api` 정책)이라 Host가 ALB까지 가므로 ALB DNS 이름과 인증서가 달라도
   된다. VPC 오리진 정책은 https-only, alb-sg 인바운드는 443만 연다. 인증서
   2장(us-east-1은 뷰어 구간, 서울은 오리진 구간)이 각각 쓰인다.

@@ -63,7 +63,7 @@ resource "aws_lb_target_group" "backend" {
 #   - CloudFront는 오리진 인증서가 신뢰 CA 발급(ELB는 ACM 가능)이고, 인증서 도메인이
 #     Origin domain 값 "또는 오리진으로 전달되는 Host 헤더" 중 하나와 일치하면 받아들인다
 #     (Require HTTPS for communication between CloudFront and your custom origin).
-#   - /v0/*, /admin/v0/* 동작은 Managed-AllViewer라 Host(accentury.app 등)가 ALB까지 온다.
+#   - /v0/*, /admin/v0/* 동작은 viewer 헤더를 전부 넘기는 정책(아래 api 정책)이라 Host(accentury.app 등)가 ALB까지 온다.
 #     그래서 ALB DNS 이름(internal-*.elb.amazonaws.com)과 인증서가 안 맞아도 문제없고,
 #     서울 리전 ACM 인증서(accentury.app + *.accentury.app, KAN-119)로 충분하다.
 #   - VPC 오리진 문서는 NLB TLS 리스너만 미지원으로 적고 ALB HTTPS에는 제약이 없다.
@@ -218,8 +218,36 @@ data "aws_cloudfront_cache_policy" "caching_optimized" {
   name = "Managed-CachingOptimized"
 }
 
-data "aws_cloudfront_origin_request_policy" "all_viewer" {
-  name = "Managed-AllViewer"
+# API 경로(/v0/*, /admin/v0/*)의 오리진 요청 정책 (KAN-244). Managed-AllViewer와 같이 viewer의 헤더,
+# 쿠키, 쿼리 문자열을 전부 넘기고, CloudFront 헤더는 CloudFront-Viewer-Address 하나만 더한다.
+#
+# backend가 요청 제한과 감사의 기준 IP를 정하려면 접속자 IP가 필요한데, XFF만으로는 안 된다. VPC
+# 오리진이라도 ALB가 XFF에 덧붙이는 직전 홉은 CloudFront 오리진 페이싱 공인 IP(예: 54.182.240.0/21)라,
+# 신뢰 목록(VPC CIDR)에 없는 그 홉을 backend가 접속자로 고른다 (2026-10-02 staging 실측, 실제 IP
+# 58.72.42.92가 54.182.245.160으로 찍혔다). CloudFront 대역을 신뢰 목록에 넣는 안은 AWS가 대역을
+# 바꾸면 조용히 같은 문제로 돌아가서 고르지 않았다. 이 헤더는 CloudFront가 직접 채우는 값이라
+# viewer가 위조할 수 없다 (AWS 문서 "trusted, immutable header").
+#
+# Managed-AllViewerAndCloudFrontHeaders를 쓰지 않는 이유: 도시, 위경도, 우편번호 같은 위치 헤더까지
+# 넘긴다. backend가 쓰지 않는 위치 정보를 받지 않는다.
+resource "aws_cloudfront_origin_request_policy" "api" {
+  name    = "${local.name}-api"
+  comment = "accentury ${var.env} API - all viewer values + CloudFront-Viewer-Address, KAN-244"
+
+  headers_config {
+    header_behavior = "allViewerAndWhitelistCloudFront"
+    headers {
+      items = ["CloudFront-Viewer-Address"]
+    }
+  }
+
+  cookies_config {
+    cookie_behavior = "all"
+  }
+
+  query_strings_config {
+    query_string_behavior = "all"
+  }
 }
 
 resource "aws_cloudfront_distribution" "this" {
@@ -263,7 +291,7 @@ resource "aws_cloudfront_distribution" "this" {
     # 캐싱 비활성 + 전 헤더 전달(Authorization 포함). correlation ID 박제와
     # 4xx TTL 우려(KAN-101)를 캐싱 비활성으로 해소한다.
     cache_policy_id          = data.aws_cloudfront_cache_policy.caching_disabled.id
-    origin_request_policy_id = data.aws_cloudfront_origin_request_policy.all_viewer.id
+    origin_request_policy_id = aws_cloudfront_origin_request_policy.api.id
 
     viewer_protocol_policy = "redirect-to-https"
     compress               = true
@@ -282,7 +310,7 @@ resource "aws_cloudfront_distribution" "this" {
     cached_methods  = ["GET", "HEAD"]
 
     cache_policy_id          = data.aws_cloudfront_cache_policy.caching_disabled.id
-    origin_request_policy_id = data.aws_cloudfront_origin_request_policy.all_viewer.id
+    origin_request_policy_id = aws_cloudfront_origin_request_policy.api.id
 
     viewer_protocol_policy = "redirect-to-https"
     compress               = true

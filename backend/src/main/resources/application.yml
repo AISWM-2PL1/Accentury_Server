@@ -230,6 +230,8 @@ accentury:
   # 한다 (안 넣으면 전원이 ALB IP 하나를 공유해 서로의 한도를 깎는다, KAN-35/36).
   # 배포(KAN-129): SSM ACCENTURY_TRUSTEDPROXIES=<해당 환경 VPC CIDR> 하나다. CloudFront VPC 오리진 ENI와
   # ALB가 둘 다 VPC 안이라 XFF의 오른쪽 두 홉이 같은 대역에 들고, deploy 프로파일은 비어 있으면 기동을 세운다.
+  # 단 XFF의 그다음 홉은 CloudFront 엣지의 공인 IP라 XFF만으로는 접속자가 아니라 엣지가 뽑힌다. 그래서 신뢰
+  # 프록시 뒤에서는 CloudFront-Viewer-Address 헤더를 먼저 읽는다 (ClientIps, KAN-244 - 2026-10-02 실측).
   trusted-proxies: []    # 예: ["10.0.0.0/16"]
   cors:
     # 스탠드얼론 웹 테스트(KAN-31) 오리진 - 웹 배포 시 지정 (명세서 §2.5).

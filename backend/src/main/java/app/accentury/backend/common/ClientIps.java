@@ -22,6 +22,13 @@ import java.util.List;
  * 접속자다 - 프록시는 자기가 본 상대를 오른쪽에 덧붙이므로 왼쪽으로 갈수록 위조 가능
  * 구간이다. 형식이 이상한 값을 만나면 거기서 멈추고 직접 접속 IP로 되돌아간다 -
  * 판정 불가를 "제한 없음"으로 해석하지 않는다.
+ * <p>
+ * <b>CloudFront 뒤에서는 {@code CloudFront-Viewer-Address}가 먼저다</b> (KAN-244). VPC 오리진이라도
+ * ALB가 XFF에 덧붙이는 직전 홉은 CloudFront 오리진 페이싱 공인 IP라, 신뢰 목록(VPC CIDR)만으로는 그
+ * 엣지 IP가 접속자로 뽑힌다 (2026-10-02 staging 실측 - 전원이 엣지 서버 단위로 한도를 나눠 쓰고 있었다).
+ * 이 헤더는 CloudFront가 직접 채우는 {@code IP:포트}라 viewer가 위조할 수 없고, 신뢰 프록시를 거친
+ * 요청에서만 읽는다 - 프록시 없이 직접 붙은 상대가 보낸 값은 XFF와 똑같이 무시한다. 헤더가 없거나
+ * 형식이 이상하면 XFF 규칙으로 내려간다 (CloudFront 없이 ALB만 둔 배치, 로컬).
  */
 @Component
 public class ClientIps {
@@ -29,6 +36,9 @@ public class ClientIps {
     private static final Logger log = LoggerFactory.getLogger(ClientIps.class);
 
     private static final String FORWARDED_FOR = "X-Forwarded-For";
+
+    /** CloudFront가 채우는 접속자 {@code IP:포트} - 오리진 요청 정책이 넘겨야 온다 (infra edge 모듈, KAN-244). */
+    static final String VIEWER_ADDRESS = "CloudFront-Viewer-Address";
 
     private final List<Cidr> trustedProxies;
 
@@ -53,6 +63,10 @@ public class ClientIps {
         if (trustedProxies.isEmpty() || !isTrusted(peer)) {
             // 신뢰 프록시 뒤가 아니다 - 헤더는 상대가 직접 쓴 값이므로 읽지 않는다.
             return peer;
+        }
+        String viewer = viewerAddress(request.getHeader(VIEWER_ADDRESS));
+        if (viewer != null) {
+            return viewer;
         }
         String header = request.getHeader(FORWARDED_FOR);
         if (header == null || header.isBlank()) {
@@ -79,6 +93,37 @@ public class ClientIps {
             return false;
         }
         return trustedProxies.stream().anyMatch(cidr -> cidr.matches(address));
+    }
+
+    /**
+     * {@code CloudFront-Viewer-Address} 값에서 IP만 꺼낸다. 리터럴이 아니면 null.
+     * <p>
+     * 문서의 형식은 {@code 198.51.100.10:46532}다. IPv6 표기는 문서에 없어 대괄호가 있든 없든 받는다 -
+     * 대괄호가 없으면 마지막 콜론 뒤를 포트로 보고 떼어 본다. CloudFront는 포트를 늘 붙이므로
+     * {@code 2001:db8::1:443}은 {@code 2001:db8::1}이다. 포트를 뗀 값이 리터럴이 아니면 값 전체를 본다.
+     */
+    static @Nullable String viewerAddress(@Nullable String header) {
+        if (header == null || header.isBlank()) {
+            return null;
+        }
+        String value = header.strip();
+        if (value.startsWith("[")) {
+            int end = value.indexOf(']');
+            String inside = end > 0 ? value.substring(1, end) : "";
+            return literal(inside) != null ? inside : null;
+        }
+        int colon = value.lastIndexOf(':');
+        if (colon > 0 && isPort(value.substring(colon + 1))) {
+            String withoutPort = value.substring(0, colon);
+            if (literal(withoutPort) != null) {
+                return withoutPort;
+            }
+        }
+        return literal(value) != null ? value : null;
+    }
+
+    private static boolean isPort(String value) {
+        return !value.isEmpty() && value.length() <= 5 && value.chars().allMatch(Character::isDigit);
     }
 
     /** 공백과 IPv6 대괄호, 뒤에 붙은 포트를 걷어낸 IP 리터럴. 리터럴이 아니면 null */
