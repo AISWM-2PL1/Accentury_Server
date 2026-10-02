@@ -81,12 +81,12 @@ class VoiceSetSessionApiTest extends IntegrationTest {
     @BeforeEach
     void activatePool() {
         flow = new SessionTestFlow(mockMvc, objectMapper, analysisJobRepository, transitions);
-        activeVersions.activate(POOL7, "KAN-182 세트 시험");
+        activeVersions.activate(POOL7, "KAN-182 세트 시험", "127.0.0.1");
     }
 
     @AfterEach
     void restoreBaseline() {
-        activeVersions.activate(BASELINE, "테스트 정리");
+        activeVersions.activate(BASELINE, "테스트 정리", "127.0.0.1");
     }
 
     // === AC - voiceSet이 세션에 고정되어 응답과 test_session.voice_set에 남는다 ===

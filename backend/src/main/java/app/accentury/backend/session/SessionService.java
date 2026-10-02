@@ -132,7 +132,7 @@ public class SessionService {
                                   @Nullable String adminToken) {
         rateLimits.check(RateLimits.Scope.SESSION_CREATE, clientIp);
         // 저장 전에 판정한다 - 표시가 틀렸으면 세션도 만들지 않는다 (KAN-138).
-        Traffic traffic = syntheticTraffic.resolve(adminToken);
+        Traffic traffic = syntheticTraffic.resolve(adminToken, clientIp);
 
         // 헤더 하나를 두 용도로 가른다 (KAN-223) - 계정 판정은 저장보다 먼저다. 무효 Access 토큰은 여기서 401이다.
         String bearer = bearerTokenOrNull(authorizationHeader);

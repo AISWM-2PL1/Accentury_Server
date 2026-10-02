@@ -119,6 +119,21 @@ variable "waf_rate_limit" {
   description = "WAF rate-based rule: IP당 5분 창의 세션 생성 + 음성 업로드 허용 수 (KAN-149). 산정 근거는 README 'WAF 웹 ACL'."
 }
 
+variable "waf_auth_rate_limit" {
+  type        = number
+  description = "WAF rate-based rule: IP당 5분 창의 로그인 + refresh 허용 수 (KAN-244). 근거는 README 'WAF 웹 ACL'."
+}
+
+variable "waf_admin_rate_limit" {
+  type        = number
+  description = "WAF rate-based rule: IP당 5분 창의 관리자 경로 요청 허용 수 (KAN-244). 근거는 README 'WAF 웹 ACL'."
+}
+
+variable "waf_ip_reputation_enforce" {
+  type        = bool
+  description = "IP 평판 관리형 규칙을 차단으로 돌릴지 (KAN-244). waf_enforce와 둘 다 true여야 차단한다. Count로 관찰한 뒤 true로 바꾼다."
+}
+
 variable "db_deletion_protection" {
   type        = bool
   description = "RDS 삭제 보호 (prod true)"

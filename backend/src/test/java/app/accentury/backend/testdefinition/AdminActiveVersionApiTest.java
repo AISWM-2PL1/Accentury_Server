@@ -2,10 +2,16 @@ package app.accentury.backend.testdefinition;
 
 import app.accentury.backend.IntegrationTest;
 import app.accentury.backend.common.AdminAuth;
+import ch.qos.logback.classic.Level;
+import ch.qos.logback.classic.Logger;
+import ch.qos.logback.classic.spi.ILoggingEvent;
+import ch.qos.logback.core.read.ListAppender;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.slf4j.LoggerFactory;
 import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
+import org.springframework.data.domain.Limit;
 import org.springframework.http.MediaType;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.context.TestPropertySource;
@@ -16,6 +22,8 @@ import tools.jackson.databind.ObjectMapper;
 import static org.hamcrest.Matchers.containsString;
 import static org.hamcrest.Matchers.nullValue;
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put;
@@ -68,7 +76,7 @@ class AdminActiveVersionApiTest extends IntegrationTest {
 
     @AfterEach
     void restoreBaseline() {
-        activeVersions.activate(BASELINE, "테스트 정리");
+        activeVersions.activate(BASELINE, "테스트 정리", "127.0.0.1");
     }
 
     // === AC - 활성 버전 변경과 롤백 ===
@@ -218,6 +226,46 @@ class AdminActiveVersionApiTest extends IntegrationTest {
                 .andExpect(jsonPath("$.history[1].previousVersion").value(BASELINE))
                 .andExpect(jsonPath("$.history[1].newVersion").value(OLDER))
                 .andExpect(jsonPath("$.history[1].reason").value("전환 사유"));
+    }
+
+    // === KAN-244 - 호출 IP ===
+
+    @Test
+    void 전환과_롤백의_감사_행에_호출_IP가_남는다() throws Exception {
+        // 테스트 프로필은 127.0.0.1을 신뢰 프록시로 두므로 X-Forwarded-For가 호출 IP다 - 요청 제한과 같은 기준이다.
+        mockMvc.perform(activate(OLDER, "IP 기록").header("X-Forwarded-For", "203.0.113.7"))
+                .andExpect(status().isOk());
+        assertEquals("203.0.113.7", latestAudit().callerIp());
+
+        mockMvc.perform(rollback("IP 기록").header("X-Forwarded-For", "198.51.100.9"))
+                .andExpect(status().isOk());
+        assertEquals("198.51.100.9", latestAudit().callerIp());
+    }
+
+    @Test
+    void 틀린_토큰은_호출_IP와_함께_WARN으로_남고_토큰_값은_남지_않는다() throws Exception {
+        String wrongToken = "wrong-admin-token-0123456789abcdef";
+        Logger logger = (Logger) LoggerFactory.getLogger(AdminAuth.class);
+        ListAppender<ILoggingEvent> appender = new ListAppender<>();
+        appender.start();
+        logger.addAppender(appender);
+        try {
+            mockMvc.perform(get(DEFINITIONS_URL)
+                            .header(AdminAuth.TOKEN_HEADER, wrongToken)
+                            .header("X-Forwarded-For", "192.0.2.44"))
+                    .andExpect(status().isUnauthorized());
+            mockMvc.perform(get(DEFINITIONS_URL).header("X-Forwarded-For", "192.0.2.45"))
+                    .andExpect(status().isUnauthorized());
+        } finally {
+            logger.detachAppender(appender);
+        }
+
+        assertTrue(appender.list.stream().anyMatch(e -> e.getLevel() == Level.WARN
+                && e.getFormattedMessage().equals("관리자 인증 실패 ip=192.0.2.44")), "틀린 토큰의 WARN이 없다: " + appender.list);
+        assertTrue(appender.list.stream().anyMatch(e -> e.getLevel() == Level.WARN
+                && e.getFormattedMessage().equals("관리자 인증 실패 ip=192.0.2.45")), "누락 토큰의 WARN이 없다: " + appender.list);
+        assertFalse(appender.list.stream().anyMatch(e -> e.getFormattedMessage().contains(wrongToken)),
+                "토큰 값이 로그에 남았다");
     }
 
     // === §6 - 버전 목록 ===
@@ -397,6 +445,10 @@ class AdminActiveVersionApiTest extends IntegrationTest {
     private String body(String testVersion, String reason) {
         return objectMapper.writeValueAsString(
                 new ActiveVersionRequest(ActiveVersionAudit.Action.ACTIVATE, testVersion, reason));
+    }
+
+    private ActiveVersionAudit latestAudit() {
+        return audits.findAllByOrderByRecordedAtDescIdDesc(Limit.of(1)).getFirst();
     }
 
     private long auditCount() {

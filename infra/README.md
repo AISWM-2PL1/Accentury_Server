@@ -1426,9 +1426,12 @@ SecureString으로 두면 되고(AWS 관리 키라 별도 kms 권한 불요), �
 
 | 우선순위 | 규칙 | 하는 일 | 예외 |
 | --- | --- | --- | --- |
-| 10 | `rate-limit-costly-posts` | IP당 5분 창에 `POST /v0/sessions` + `POST …/recording` 합산 `waf_rate_limit`건 초과 시 429 | 폴링, 어휘 답안, 정적 자산은 세지 않음 |
+| 10 | `rate-limit-costly-posts` | IP당 5분 창에 `POST /v0/sessions` + `POST …/recording` + `POST …/feedback` 합산 `waf_rate_limit`건 초과 시 429 | 폴링, 어휘 답안, 정적 자산은 세지 않음 |
+| 15 | `rate-limit-auth` | IP당 5분 창에 `POST /v0/auth/login` + `POST /v0/auth/refresh` 합산 `waf_auth_rate_limit`건 초과 시 429 (KAN-244) | 다른 메서드는 세지 않음 |
+| 16 | `rate-limit-admin` | IP당 5분 창에 `/admin/` 아래 요청 `waf_admin_rate_limit`건 초과 시 429 (KAN-244) | 없음 (메서드 무관) |
 | 20 | `aws-common` | `AWSManagedRulesCommonRuleSet` (본문 8KB 상한, XSS, LFI/RFI, 경로 조작 등. SQLi 규칙은 이 그룹에 없음) | 경로가 `/recording`으로 끝나는 요청은 그룹 전체를 건너뜀 (multipart 음성이 본문 규칙에 걸리므로) |
 | 30 | `aws-known-bad-inputs` | `AWSManagedRulesKnownBadInputsRuleSet` (Log4j, Java 역직렬화 등) | 없음 |
+| 40 | `aws-ip-reputation` | `AWSManagedRulesAmazonIpReputationList` (아마존 위협 인텔리전스의 봇, 정찰, DDoS 출처 IP) (KAN-244) | 없음. `waf_enforce`와 `waf_ip_reputation_enforce`가 둘 다 true일 때만 차단 |
 
 차단 응답은 backend의 429 봉투와 같은 JSON(`RATE_LIMITED`, `retryable: true`,
 `retryAfterMs: 300000`) + `Retry-After: 300`이다. 앱과 웹이 backend 429와 똑같이
@@ -1472,6 +1475,36 @@ Count 관찰은 2026-08-28부터의 staging 사이클과 당일 부하 시험(�
 `POST /v0/sessions` 700건(92초)이 backend 429를 거쳐 WAF 429(`Retry-After: 300`)로 바뀌고 5분 뒤
 풀리는 것을 확인했다. prod는 처음부터 이 값으로 짓는다 (KAN-171).
 
+### 인증, 관리자 경로 rate 규칙과 IP 평판 규칙 (KAN-244)
+
+인증 경로(`waf_auth_rate_limit = 100`): 로그인은 요청마다 외부 IdP를 부른다(카카오 2회, 네이버 1회).
+backend의 AUTH 제한(IP당 분당 30)은 태스크별 인메모리라 태스크 수만큼 풀리므로, IP를 바꿔 가며 무효
+토큰을 보내면 우리 앱의 IdP 호출 쿼터가 소진돼 모든 사용자의 소셜 로그인이 502가 된다. 10번 규칙과 달리
+임계값을 backend 태스크 하나의 한도(5분 150)보다 낮게 둬 엣지에서 먼저 자른다. 정상 사용자는 5분에
+로그인 1회 + refresh 몇 회라 공유 Wi-Fi 수십 명도 안에 들어온다.
+
+관리자 경로(`waf_admin_rate_limit = 50`): 관리자 API는 공개 CloudFront로 열려 있고 공유 토큰 한 겹이다.
+IP 허용 목록은 쓰지 않는다 - E2E 스모크가 GitHub 호스티드 러너에서 관리자 API를 부르는데 러너 IP가
+고정되지 않는다. 대신 추측 속도를 IP당으로 묶고, backend는 인증 실패를 `관리자 인증 실패 ip=...`
+WARN으로 남긴다(토큰 값은 남기지 않는다). 활성 버전 전환 감사 행에는 `caller_ip`가 남는다. 스모크의
+관리자 호출은 실행당 2건이다. 실패 WARN에 낯선 IP가 반복되면 위 "시크릿 회전" 절대로 토큰을 회전한다.
+
+```
+# 서울 리전 로그 그룹 /accentury/<env>/backend
+fields @timestamp, @message
+| filter @message like /관리자 인증 실패/
+| parse @message /ip=(?<ip>\S+)/
+| stats count() by ip
+| sort count desc
+```
+
+IP 평판(`waf_ip_reputation_enforce`): 다른 규칙이 이미 Block인 뒤에 들어온 규칙이라 혼자 Count 관찰을
+거친다. 두 환경 false로 시작해 staging에서 일주일 관찰한다. 위 "Count 관찰 후 Block 전환" 3번의 WAF 로그
+그룹에서 `@message like /aws-ip-reputation/`으로 걸러 IP와 경로를 본다 (그룹 안 규칙 이름은
+`AWSManagedIPReputationList`, `AWSManagedReconnaissanceList`, `AWSManagedIPDDoSList`). 공용 VPN과 클라우드
+대역의 정상 사용자가 섞여 있으면 오탐이다. 오탐 기록을 KAN-244에 남긴 뒤
+staging부터 true로 apply하고 prod가 뒤따른다.
+
 ### rate limit 임계값 300의 근거 (2026-08-28)
 
 - 정상 사용자 1명의 5분 창: 세션 1 + 업로드 5문항(재녹음 포함 10건 이내) = 최대 11건.
@@ -1485,9 +1518,9 @@ Count 관찰은 2026-08-28부터의 staging 사이클과 당일 부하 시험(�
 
 ### 비용
 
-환경당 월 약 8달러(웹 ACL 5 + 규칙 3개 x 1) + 요청 100만 건당 0.60달러. 로그는 매치된
-요청만 7일 보존이라 1달러 미만. 두 환경 합산 월 16달러 안팎을 감수한다 (KAN-149 코멘트,
-2026-08-28).
+환경당 월 약 11달러(웹 ACL 5 + 규칙 6개 x 1) + 요청 100만 건당 0.60달러. 로그는 매치된
+요청만 7일 보존이라 1달러 미만. 두 환경 합산 월 22달러 안팎을 감수한다 (KAN-149 코멘트,
+2026-08-28. KAN-244에서 규칙 3개 추가).
 
 ## 경보와 알림 (KAN-134)
 

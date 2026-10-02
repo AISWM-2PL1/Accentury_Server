@@ -5,13 +5,18 @@
 # 배포의 WAF 선택 목록에 나타나지도 않고 오류도 없다 (ACM 인증서와 같은 함정). 로그 그룹도 같은
 # 리전이어야 WAF가 쓸 수 있다.
 #
-# 규칙은 셋이다. 우선순위 숫자가 작을수록 먼저 평가된다.
-#   10  rate-limit-costly-posts   IP당 5분 창 요청 수 제한. 세션 생성과 음성 업로드만 센다.
+# 규칙은 여섯이다. 우선순위 숫자가 작을수록 먼저 평가된다.
+#   10  rate-limit-costly-posts   IP당 5분 창 요청 수 제한. 세션 생성, 음성 업로드, 후기만 센다.
+#   15  rate-limit-auth           IP당 5분 창 로그인과 refresh 수 제한 (KAN-244).
+#   16  rate-limit-admin          IP당 5분 창 관리자 경로 요청 수 제한 (KAN-244).
 #   20  aws-common                AWSManagedRulesCommonRuleSet. 음성 업로드 경로는 검사에서 뺀다.
 #   30  aws-known-bad-inputs      AWSManagedRulesKnownBadInputsRuleSet (Log4j, Java 역직렬화 등).
+#   40  aws-ip-reputation         AWSManagedRulesAmazonIpReputationList (KAN-244).
 #
 # 전부 var.enforce 하나로 Count(기록만) / Block(차단)을 오간다. 티켓 요구사항대로 Count로 시작해
 # 로그를 며칠 관찰한 뒤 tfvars의 waf_enforce만 true로 바꿔 apply한다. 코드 변경 없이 전환된다.
+# IP 평판 규칙만 var.ip_reputation_enforce가 한 번 더 걸린다 - 다른 규칙이 이미 Block인 뒤에 들어와
+# 혼자 Count 관찰을 거쳐야 해서다 (KAN-244). 둘 다 true여야 차단한다.
 
 locals {
   name = "accentury-${var.env}"
@@ -37,6 +42,11 @@ locals {
   session_create_path_regex = "^/v0(;[^/]*)?/sessions(;[^/]*)?$"
   recording_path_regex      = "/recording(;[^/]*)?$"
   feedback_path_regex       = "^/v0(;[^/]*)?/sessions(;[^/]*)?/[^/]+(;[^/]*)?/feedback(;[^/]*)?$"
+
+  # 로그인과 refresh (KAN-223, AuthController의 /v0/auth/login, /v0/auth/refresh). 같은 정규화를 쓴다.
+  auth_path_regex = "^/v0(;[^/]*)?/auth(;[^/]*)?/(login|refresh)(;[^/]*)?$"
+  # 관리자 API 전체 (명세서 §6, /admin/v0/...). 접두 세그먼트만 본다 - 하위 경로가 늘어도 빠지지 않는다.
+  admin_path_regex = "^/admin(;[^/]*)?/"
 
   # 차단 응답 본문. backend GlobalExceptionHandler가 내는 429 봉투(ErrorCode.RATE_LIMITED)와 같은
   # 모양이라 앱(UploadClient.toResult, SessionClient.toResult)과 웹(errorEnvelope.ts)이 backend
@@ -212,6 +222,165 @@ resource "aws_wafv2_web_acl" "this" {
     }
   }
 
+  # ---- 15. 로그인과 refresh rate-based rule (KAN-244) ----
+  #
+  # 로그인은 요청마다 외부 IdP를 부른다 (카카오 2회, 네이버 1회). backend의 AUTH 제한(IP당 분당
+  # 30)은 태스크별 인메모리라 태스크 수만큼 풀리고(KAN-167), IP를 바꿔 가며 무효 토큰을 보내면 우리
+  # 앱의 IdP 호출 쿼터가 소진돼 모든 사용자의 소셜 로그인이 502가 된다. 엣지에서 IP당으로 끊는다.
+  #
+  # 임계값(var.auth_rate_limit, 100)은 10번 규칙과 달리 backend 태스크 하나의 한도(5분 150)보다
+  # 낮다 - backend보다 먼저 자르는 것이 이 규칙의 목적이다 (IdP 쿼터 보호, 2026-10-02 확정). 정상
+  # 사용자는 5분에 로그인 1회 + refresh 몇 회라 공유 Wi-Fi 수십 명도 안에 들어온다.
+  # POST만 센다. 두 경로 모두 POST이고, 다른 메서드는 backend가 IdP를 부르지 않고 405로 끝낸다.
+  rule {
+    name     = "rate-limit-auth"
+    priority = 15
+
+    action {
+      dynamic "block" {
+        for_each = var.enforce ? [1] : []
+        content {
+          custom_response {
+            response_code            = 429
+            custom_response_body_key = "rate-limited"
+
+            response_header {
+              name  = "Retry-After"
+              value = tostring(local.rate_limited_retry_after_seconds)
+            }
+          }
+        }
+      }
+
+      dynamic "count" {
+        for_each = var.enforce ? [] : [1]
+        content {}
+      }
+    }
+
+    statement {
+      rate_based_statement {
+        limit                 = var.auth_rate_limit
+        evaluation_window_sec = local.rate_limit_window_seconds
+        aggregate_key_type    = "IP"
+
+        scope_down_statement {
+          and_statement {
+            statement {
+              byte_match_statement {
+                search_string         = "POST"
+                positional_constraint = "EXACTLY"
+
+                field_to_match {
+                  method {}
+                }
+
+                text_transformation {
+                  priority = 0
+                  type     = "NONE"
+                }
+              }
+            }
+
+            statement {
+              regex_match_statement {
+                regex_string = local.auth_path_regex
+
+                field_to_match {
+                  uri_path {}
+                }
+
+                text_transformation {
+                  priority = 0
+                  type     = "URL_DECODE"
+                }
+
+                text_transformation {
+                  priority = 1
+                  type     = "NORMALIZE_PATH"
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+
+    visibility_config {
+      cloudwatch_metrics_enabled = true
+      metric_name                = "${local.name}-rate-limit-auth"
+      sampled_requests_enabled   = false
+    }
+  }
+
+  # ---- 16. 관리자 경로 rate-based rule (KAN-244) ----
+  #
+  # 관리자 API는 공개 CloudFront로 라우팅되고 48자 공유 토큰 한 겹뿐이다. IP 허용 목록은 쓰지
+  # 않는다 - GitHub 호스티드 러너의 E2E 스모크가 관리자 API를 부르는데 러너 IP가 고정되지 않는다.
+  # 대신 추측 속도를 엣지에서 묶고, 실패는 backend가 호출 IP와 함께 WARN으로 남긴다 (AdminAuth).
+  # 스모크의 관리자 호출은 실행당 2건이라 임계값(var.admin_rate_limit, 50)에 닿지 않는다.
+  # 메서드는 가리지 않는다 - 관리자 API는 GET과 PUT이 섞여 있고 어느 쪽이든 토큰을 검사한다.
+  rule {
+    name     = "rate-limit-admin"
+    priority = 16
+
+    action {
+      dynamic "block" {
+        for_each = var.enforce ? [1] : []
+        content {
+          custom_response {
+            response_code            = 429
+            custom_response_body_key = "rate-limited"
+
+            response_header {
+              name  = "Retry-After"
+              value = tostring(local.rate_limited_retry_after_seconds)
+            }
+          }
+        }
+      }
+
+      dynamic "count" {
+        for_each = var.enforce ? [] : [1]
+        content {}
+      }
+    }
+
+    statement {
+      rate_based_statement {
+        limit                 = var.admin_rate_limit
+        evaluation_window_sec = local.rate_limit_window_seconds
+        aggregate_key_type    = "IP"
+
+        scope_down_statement {
+          regex_match_statement {
+            regex_string = local.admin_path_regex
+
+            field_to_match {
+              uri_path {}
+            }
+
+            text_transformation {
+              priority = 0
+              type     = "URL_DECODE"
+            }
+
+            text_transformation {
+              priority = 1
+              type     = "NORMALIZE_PATH"
+            }
+          }
+        }
+      }
+    }
+
+    visibility_config {
+      cloudwatch_metrics_enabled = true
+      metric_name                = "${local.name}-rate-limit-admin"
+      sampled_requests_enabled   = false
+    }
+  }
+
   # ---- 20. AWSManagedRulesCommonRuleSet ----
   #
   # 이 그룹의 SizeRestrictions_BODY는 본문 8KB 초과를 차단한다. 음성 업로드는 multipart 수백 KB
@@ -308,6 +477,41 @@ resource "aws_wafv2_web_acl" "this" {
     visibility_config {
       cloudwatch_metrics_enabled = true
       metric_name                = "${local.name}-aws-known-bad-inputs"
+      sampled_requests_enabled   = false
+    }
+  }
+
+  # ---- 40. AWSManagedRulesAmazonIpReputationList (KAN-244) ----
+  # 아마존 위협 인텔리전스가 봇, 정찰, DDoS 출처로 분류한 IP. 이미 Block인 다른 규칙과 달리 새로
+  # 들어오는 규칙이라 var.ip_reputation_enforce로 따로 Count 관찰을 거친다 - 두 환경 Count로
+  # 시작해 staging에서 일주일 관찰한 뒤 staging부터 Block, prod가 뒤따른다 (2026-10-02 결정).
+  # 오탐은 주로 공용 VPN과 클라우드 대역에서 나므로 관찰 로그의 IP를 그 관점으로 본다.
+  rule {
+    name     = "aws-ip-reputation"
+    priority = 40
+
+    override_action {
+      dynamic "none" {
+        for_each = var.enforce && var.ip_reputation_enforce ? [1] : []
+        content {}
+      }
+
+      dynamic "count" {
+        for_each = var.enforce && var.ip_reputation_enforce ? [] : [1]
+        content {}
+      }
+    }
+
+    statement {
+      managed_rule_group_statement {
+        name        = "AWSManagedRulesAmazonIpReputationList"
+        vendor_name = "AWS"
+      }
+    }
+
+    visibility_config {
+      cloudwatch_metrics_enabled = true
+      metric_name                = "${local.name}-aws-ip-reputation"
       sampled_requests_enabled   = false
     }
   }

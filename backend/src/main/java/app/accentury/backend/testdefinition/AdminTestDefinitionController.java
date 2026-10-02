@@ -1,6 +1,8 @@
 package app.accentury.backend.testdefinition;
 
 import app.accentury.backend.common.AdminAuth;
+import app.accentury.backend.common.ClientIps;
+import jakarta.servlet.http.HttpServletRequest;
 import org.jspecify.annotations.Nullable;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.data.domain.Limit;
@@ -43,16 +45,19 @@ class AdminTestDefinitionController {
     private static final Limit HISTORY_LIMIT = Limit.of(50);
 
     private final AdminAuth adminAuth;
+    private final ClientIps clientIps;
     private final ActiveVersionService activeVersions;
     private final StoredTestDefinitionRepository definitions;
     private final ActiveVersionAuditRepository audits;
     private final TestDefinitionRegistry registry;
 
-    AdminTestDefinitionController(AdminAuth adminAuth, ActiveVersionService activeVersions,
+    AdminTestDefinitionController(AdminAuth adminAuth, ClientIps clientIps,
+                                  ActiveVersionService activeVersions,
                                   StoredTestDefinitionRepository definitions,
                                   ActiveVersionAuditRepository audits,
                                   TestDefinitionRegistry registry) {
         this.adminAuth = adminAuth;
+        this.clientIps = clientIps;
         this.activeVersions = activeVersions;
         this.definitions = definitions;
         this.audits = audits;
@@ -84,15 +89,17 @@ class AdminTestDefinitionController {
     @PutMapping("/active-version")
     ResponseEntity<ActiveVersionResponse> putActiveVersion(
             @RequestBody ActiveVersionRequest request,
-            @RequestHeader(value = AdminAuth.TOKEN_HEADER, required = false) @Nullable String token) {
+            @RequestHeader(value = AdminAuth.TOKEN_HEADER, required = false) @Nullable String token,
+            HttpServletRequest httpRequest) {
+        String clientIp = clientIps.resolve(httpRequest);
         // 인증이 첫 관문이다 - 형식 검증을 먼저 하면 미인증 호출자가 입력 검증 피드백을
         // 얻는다 (KAN-106의 일자 파싱과 같은 순서 규칙).
-        adminAuth.authorize(token);
+        adminAuth.authorize(token, clientIp);
         request.validate();
 
         ActiveVersionResponse response = switch (request.action()) {
-            case ACTIVATE -> activeVersions.activate(request.testVersion(), request.reason());
-            case ROLLBACK -> activeVersions.rollback(request.reason());
+            case ACTIVATE -> activeVersions.activate(request.testVersion(), request.reason(), clientIp);
+            case ROLLBACK -> activeVersions.rollback(request.reason(), clientIp);
         };
         return noStore().body(response);
     }
@@ -111,8 +118,9 @@ class AdminTestDefinitionController {
      */
     @GetMapping("/test-definitions")
     ResponseEntity<TestDefinitionListResponse> listDefinitions(
-            @RequestHeader(value = AdminAuth.TOKEN_HEADER, required = false) @Nullable String token) {
-        adminAuth.authorize(token);
+            @RequestHeader(value = AdminAuth.TOKEN_HEADER, required = false) @Nullable String token,
+            HttpServletRequest httpRequest) {
+        adminAuth.authorize(token, clientIps.resolve(httpRequest));
 
         ActiveTestVersion current = activeVersions.current();
         List<TestDefinitionListResponse.Definition> published =

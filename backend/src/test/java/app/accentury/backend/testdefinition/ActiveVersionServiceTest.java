@@ -41,7 +41,7 @@ class ActiveVersionServiceTest {
         ActiveVersionService service = service(registryWith("gb-2026.08.1", "GYEONGBUK"), "gn-2026.08.1");
 
         ApiException rejected = assertThrows(ApiException.class,
-                () -> service.activate("gb-2026.08.1", null));
+                () -> service.activate("gb-2026.08.1", null, "127.0.0.1"));
         assertEquals(ErrorCode.ADMIN_DIALECT_NOT_ALLOWED, rejected.code());
     }
 
@@ -50,7 +50,7 @@ class ActiveVersionServiceTest {
         ActiveVersionService service = service(registryWith(null, null), "gn-2026.08.1");
 
         ApiException rejected = assertThrows(ApiException.class,
-                () -> service.activate("gn-9999.99.9", null));
+                () -> service.activate("gn-9999.99.9", null, "127.0.0.1"));
         assertEquals(ErrorCode.RESOURCE_NOT_FOUND, rejected.code());
     }
 
@@ -58,7 +58,7 @@ class ActiveVersionServiceTest {
     void 되돌아갈_이전_버전이_없으면_409다() {
         ActiveVersionService service = service(registryWith(null, null), "gn-2026.08.1");
 
-        ApiException rejected = assertThrows(ApiException.class, () -> service.rollback(null));
+        ApiException rejected = assertThrows(ApiException.class, () -> service.rollback(null, "127.0.0.1"));
         assertEquals(ErrorCode.ADMIN_ROLLBACK_UNAVAILABLE, rejected.code());
     }
 
@@ -71,8 +71,8 @@ class ActiveVersionServiceTest {
         CountingActiveVersions pointers = new CountingActiveVersions("gn-2026.08.1", null);
         ActiveVersionService service = service(registryWith("gb-2026.08.1", "GYEONGBUK"), pointers);
 
-        assertThrows(ApiException.class, () -> service.activate("gn-9999.99.9", null));
-        assertThrows(ApiException.class, () -> service.activate("gb-2026.08.1", null));
+        assertThrows(ApiException.class, () -> service.activate("gn-9999.99.9", null, "127.0.0.1"));
+        assertThrows(ApiException.class, () -> service.activate("gb-2026.08.1", null, "127.0.0.1"));
 
         assertEquals(0, pointers.locks, "검증 전에 잠금을 잡으면 안 된다");
     }
@@ -92,7 +92,7 @@ class ActiveVersionServiceTest {
         CountingActiveVersions pointers = new CountingActiveVersions("gn-2026.08.1", "gn-2026.07.0");
         ActiveVersionService service = service(registryWith("gn-2026.07.0", "GYEONGNAM"), pointers);
 
-        assertEquals("gn-2026.07.0", service.rollback(null).activeVersion());
+        assertEquals("gn-2026.07.0", service.rollback(null, "127.0.0.1").activeVersion());
 
         assertEquals(1, pointers.locks, "전환은 잠금 아래에서 한 번만 일어난다");
         assertEquals(0, pointers.unlockedReads, "목적지를 잠금 밖에서 읽으면 안 된다");
@@ -104,7 +104,7 @@ class ActiveVersionServiceTest {
         CountingActiveVersions pointers = new CountingActiveVersions("gn-2026.08.1", null);
         ActiveVersionService service = service(registryWith(null, null), pointers);
 
-        assertThrows(ApiException.class, () -> service.rollback(null));
+        assertThrows(ApiException.class, () -> service.rollback(null, "127.0.0.1"));
         assertEquals(0, pointers.unlockedReads, "판정을 잠금 밖에서 하면 목적지 계산과 갈라진다");
     }
 
@@ -115,7 +115,7 @@ class ActiveVersionServiceTest {
         RecordingAudits audits = new RecordingAudits();
         ActiveVersionService service = service(registryWith("gn-2026.07.0", "GYEONGNAM"), pointers, audits);
 
-        ActiveVersionResponse response = service.activate("gn-2026.07.0", "시험 전환");
+        ActiveVersionResponse response = service.activate("gn-2026.07.0", "시험 전환", "127.0.0.1");
 
         assertEquals("gn-2026.07.0", response.activeVersion());
         assertEquals("gn-2026.08.1", response.previousVersion());

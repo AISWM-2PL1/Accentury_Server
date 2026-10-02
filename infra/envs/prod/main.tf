@@ -250,9 +250,12 @@ module "waf" {
     aws = aws.us_east_1
   }
 
-  env        = var.env
-  enforce    = var.waf_enforce
-  rate_limit = var.waf_rate_limit
+  env                   = var.env
+  enforce               = var.waf_enforce
+  rate_limit            = var.waf_rate_limit
+  auth_rate_limit       = var.waf_auth_rate_limit
+  admin_rate_limit      = var.waf_admin_rate_limit
+  ip_reputation_enforce = var.waf_ip_reputation_enforce
 }
 
 # internal ALB(대상 그룹 ip), VPC 오리진, CloudFront, S3. 대상 등록은 ECS 서비스가 한다 (KAN-165).
