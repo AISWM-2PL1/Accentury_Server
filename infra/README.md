@@ -182,8 +182,11 @@ diff -r infra/envs/staging infra/envs/prod
 
 ### 0. bootstrap (계정에 한 번만)
 
-state 버킷은 Terraform state를 담을 곳이라 자기 자신을 원격 state로 만들 수
-없다 (닭과 달걀). 이 스택만 로컬 state로 실행한다.
+state 버킷은 Terraform state를 담을 곳이라 처음에는 자기 자신을 원격 state로 만들 수
+없다 (닭과 달걀). 그래서 처음에는 로컬 state로 만들었고, 2026-10-03(KAN-245)에 그 버킷의
+`bootstrap/terraform.tfstate`로 옮겼다 (`backend.tf`). 이제는 envs와 똑같이 `terraform init`만 하면
+원격 state를 읽는다. 버킷부터 다시 만들어야 하는 계정에서는 `backend.tf`를 잠시 빼고 로컬로 apply한 뒤
+`terraform init -migrate-state`로 되돌린다.
 
 ```
 cd infra/bootstrap
@@ -202,7 +205,8 @@ envs/*의 deploy 모듈이 data 소스로 조회하므로 bootstrap apply가 먼
 대신 여기서 만든다. 없으면 envs apply의 클러스터 생성이 실패한다), Application Auto Scaling의
 ECS용 서비스 연결 역할 `AWSServiceRoleForApplicationAutoScaling_ECSService` (KAN-168 - 같은
 이유. 없으면 envs apply의 scalable target 등록이 실패한다).
-로컬에 남는 `terraform.tfstate`는 커밋하지 않는다 (.gitignore 처리 완료).
+CloudTrail trail `accentury-account-audit`과 로그 버킷 `accentury-cloudtrail-<account_id>`, GuardDuty
+detector (KAN-245, 아래 "전송 구간과 엣지 보안").
 
 배포용 리포지토리 `accentury/backend`와 `accentury/ai`는 KAN-120이 콘솔에서 먼저
 만들었다. `ecr.tf`의 import 블록이 첫 plan에서 그 둘을 state로 흡수하므로 별도
@@ -1521,6 +1525,65 @@ staging부터 true로 apply하고 prod가 뒤따른다.
 환경당 월 약 11달러(웹 ACL 5 + 규칙 6개 x 1) + 요청 100만 건당 0.60달러. 로그는 매치된
 요청만 7일 보존이라 1달러 미만. 두 환경 합산 월 22달러 안팎을 감수한다 (KAN-149 코멘트,
 2026-08-28. KAN-244에서 규칙 3개 추가).
+
+## 전송 구간과 엣지 보안 (KAN-245)
+
+보안 검토(KAN-238) #8, #9, #11, #14, #15를 한 번에 반영한 설정 묶음이다.
+
+| 항목 | 어디 | 내용 |
+| --- | --- | --- |
+| S3 TLS 강제 | `modules/edge`(web), `modules/ai-host`(boot), envs(training, KAN-239), bootstrap(tfstate, KAN-242와 audit) | `aws:SecureTransport = false` 요청 전부 거부 |
+| 보안 응답 헤더 | `modules/edge`의 `aws_cloudfront_response_headers_policy.security`, 세 동작 모두 | HSTS 1년 + includeSubDomains(preload 없음), nosniff, `X-Frame-Options: DENY`, `strict-origin-when-cross-origin`, CSP는 Report-Only |
+| JDBC 서버 인증서 검증 | `modules/config`의 `SPRING_DATASOURCE_URL`, `backend/Dockerfile` | `sslmode=verify-full` + 이미지 안 RDS 전역 CA 번들. 서버 쪽 `rds.force_ssl`은 PG16 기본 파라미터 그룹에서 이미 1 |
+| backend 아웃바운드 | `modules/network` | 443(IPv4, IPv6)과 SG 참조 3개(RDS 5432, Redis 6379, AI ALB 8000)만 |
+| 계정 감사, 위협 탐지 | `bootstrap/audit.tf` | CloudTrail 관리 이벤트 + 학습, tfstate 버킷 S3 데이터 이벤트, GuardDuty + S3 보호 |
+
+### JDBC 서버 인증서 검증의 적용 순서
+
+`sslrootcert`가 가리키는 CA 번들은 backend 이미지 안에 있다. SSM의 URL이 먼저 바뀌고 옛 이미지 태스크가 뜨면
+파일이 없어 DB 연결이 실패하고 기동하지 못한다. 그래서 환경마다:
+
+1. 이 변경이 든 이미지가 먼저 배포된다 (staging은 Dev push, prod는 Release 승격). URL이 그대로라 이 이미지는 옛
+   방식으로 붙는다.
+2. 그 뒤 `terraform apply`로 URL을 바꾸고, Actions "Image Deploy"를 같은 태그로 다시 돌려 태스크가 새 URL을
+   읽게 한다 (secrets는 태스크 시작 때 한 번 읽힌다).
+3. 이 apply 뒤로는 KAN-245 이전 이미지로 롤백하지 않는다. 꼭 돌아가야 하면 URL에서 두 파라미터를 먼저 뺀다.
+
+검증이 실제로 켜졌는지는 `sslrootcert`를 없는 경로로 바꾼 태스크가 기동에 실패하는 것으로 확인한다.
+CA 번들은 Dockerfile의 `ADD --checksum`이 해시를 고정한다. AWS가 번들을 갱신하면 빌드가 실패하므로 새 해시로 고친다.
+
+### backend 아웃바운드 축소의 적용 순서
+
+넓은 규칙(`backend_all_ipv4/ipv6`)과 좁은 규칙은 별개 리소스라 한 번의 apply에서 삭제와 생성이 동시에 돈다.
+삭제가 먼저 끝나면 그 사이 태스크의 바깥 연결이 끊긴다. 좁은 규칙부터 만든다 (KAN-165의 SG 교체 교훈):
+
+```
+terraform apply \
+  -target=module.network.aws_vpc_security_group_egress_rule.backend_https_ipv4 \
+  -target=module.network.aws_vpc_security_group_egress_rule.backend_https_ipv6 \
+  -target=module.network.aws_vpc_security_group_egress_rule.backend_to_rds \
+  -target=module.network.aws_vpc_security_group_egress_rule.backend_to_redis \
+  -target=module.network.aws_vpc_security_group_egress_rule.backend_to_ai_alb
+terraform apply    # 넓은 규칙 삭제와 나머지
+```
+
+VPC DNS, ECS 태스크 메타데이터, Time Sync는 SG가 거르지 않으므로 규칙이 필요 없다 (AWS VPC 문서). 새 바깥
+연결(443이 아닌 포트)을 쓰는 기능을 더하면 여기에 규칙을 함께 더해야 한다 - 빠뜨리면 그 연결만 타임아웃이 난다.
+
+### CloudTrail과 GuardDuty
+
+trail은 계정에 하나다(`accentury-account-audit`, 전 리전, 로그 파일 검증). 관리 이벤트는 읽기와 쓰기를 모두
+남겨 SSM `GetParameter`, Secrets Manager `GetSecretValue`도 기록된다. S3 데이터 이벤트는 학습 버킷과 tfstate
+버킷 객체만 남긴다. 로그는 `accentury-cloudtrail-<account_id>`에 1년 보관한다.
+
+```
+# 최근 학습 버킷 객체 읽기 (CloudTrail 콘솔 이벤트 기록은 데이터 이벤트를 보여 주지 않는다 - 버킷의 로그를 본다)
+aws s3 ls s3://accentury-cloudtrail-<account_id>/AWSLogs/<account_id>/CloudTrail/ap-northeast-2/ --recursive | tail
+# 관리 이벤트 (90일)
+aws cloudtrail lookup-events --lookup-attributes AttributeKey=EventName,AttributeValue=GetParameter --max-results 5
+```
+
+GuardDuty는 서울 리전 detector 하나와 S3 데이터 이벤트 보호다. 발견 사항은 콘솔 GuardDuty에서 본다.
 
 ## 경보와 알림 (KAN-134)
 

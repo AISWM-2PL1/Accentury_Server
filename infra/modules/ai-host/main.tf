@@ -178,6 +178,39 @@ resource "aws_s3_bucket_public_access_block" "boot" {
   restrict_public_buckets = true
 }
 
+# TLS가 아닌 요청 거부 (KAN-245, 보안 검토 #11). 호스트는 부팅 때 aws s3 cp(HTTPS)로 받으므로 영향이 없다.
+data "aws_iam_policy_document" "boot_bucket" {
+  statement {
+    sid     = "DenyInsecureTransport"
+    effect  = "Deny"
+    actions = ["s3:*"]
+    resources = [
+      aws_s3_bucket.boot.arn,
+      "${aws_s3_bucket.boot.arn}/*",
+    ]
+
+    principals {
+      type        = "*"
+      identifiers = ["*"]
+    }
+
+    condition {
+      test     = "Bool"
+      variable = "aws:SecureTransport"
+      values   = ["false"]
+    }
+  }
+}
+
+resource "aws_s3_bucket_policy" "boot" {
+  bucket = aws_s3_bucket.boot.id
+  policy = data.aws_iam_policy_document.boot_bucket.json
+
+  # 같은 버킷의 퍼블릭 액세스 차단과 정책을 동시에 바꾸면 S3가 OperationAborted로 거절할 수 있어 순서를
+  # 고정한다 (tfstate 버킷과 같은 이유). Deny뿐이라 퍼블릭 정책으로 판정되지 않는다.
+  depends_on = [aws_s3_bucket_public_access_block.boot]
+}
+
 locals {
   # 키는 모듈 안 파일 이름이고 그대로 ai-host/ 아래의 오브젝트 키가 된다. 호스트에 놓이는 경로는
   # user_data의 fetch 호출이 정한다 - compose만 이름이 docker-compose.yml로 바뀐다.

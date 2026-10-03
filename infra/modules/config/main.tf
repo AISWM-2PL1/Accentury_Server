@@ -50,10 +50,17 @@ resource "aws_ssm_parameter" "ai_base_url" {
 # AWS Advanced JDBC Wrapper URL. 사용자 이름과 비밀번호 파라미터는 없다 - 시크릿 ARN만 넘기면
 # 플러그인이 연결 시점에 읽고, 회전 뒤 인증 실패가 나면 다시 받아 재접속한다 (KAN-129 확정).
 # ARN을 URL 쿼리에 그대로 넣는다 - 쿼리 구분자(&, =)가 ARN에 없어 인코딩이 필요 없다.
+#
+# sslmode=verify-full (KAN-245): 기본값 prefer는 암호화만 하고 서버 인증서를 검증하지 않아, 경로 중간에서
+# 다른 서버가 RDS인 척해도 붙는다. Redis는 이미 검증하므로 그 비대칭을 없앤다. CA 번들은 backend 이미지에
+# 들어 있다 (backend/Dockerfile의 /app/certs/rds-global-bundle.pem). 이 두 쿼리 파라미터는 wrapper가 자기
+# 것이 아니라서 그대로 pgJDBC에 넘긴다. 서버 쪽 rds.force_ssl은 PG16 기본 파라미터 그룹에서 이미 1이다.
+# 순서 주의: 이 값이 CA 번들 없는 옛 이미지에 닿으면 기동이 실패한다 - 새 이미지 배포가 먼저, 이 apply가
+# 나중이다. 이 apply 뒤로는 KAN-245 이전 이미지로 롤백하지 않는다 (README "JDBC 서버 인증서 검증").
 resource "aws_ssm_parameter" "datasource_url" {
   name  = "${var.ssm_prefix}/SPRING_DATASOURCE_URL"
   type  = "String"
-  value = "jdbc:aws-wrapper:postgresql://${var.rds_endpoint}/${var.db_name}?secretsManagerSecretId=${var.rds_master_user_secret_arn}"
+  value = "jdbc:aws-wrapper:postgresql://${var.rds_endpoint}/${var.db_name}?secretsManagerSecretId=${var.rds_master_user_secret_arn}&sslmode=verify-full&sslrootcert=/app/certs/rds-global-bundle.pem"
 }
 
 # 요청 제한의 기준 IP를 정할 때 신뢰하는 프록시 대역 (KAN-28 ClientIps). VPC CIDR 하나다 -
