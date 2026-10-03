@@ -4,10 +4,17 @@ import jakarta.servlet.http.HttpServletRequest;
 import org.jspecify.annotations.Nullable;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
 
 import java.net.InetAddress;
+import java.time.Clock;
+import java.time.Duration;
+import java.time.Instant;
+import java.util.Collections;
 import java.util.List;
+import java.util.Locale;
+import java.util.concurrent.atomic.AtomicReference;
 
 /**
  * 요청 제한의 기준 IP 결정 (API 명세서 §2.5, KAN-23 도입, KAN-28 신뢰 프록시 검증).
@@ -40,9 +47,23 @@ public class ClientIps {
     /** CloudFront가 채우는 접속자 {@code IP:포트} - 오리진 요청 정책이 넘겨야 온다 (infra edge 모듈, KAN-244). */
     static final String VIEWER_ADDRESS = "CloudFront-Viewer-Address";
 
-    private final List<Cidr> trustedProxies;
+    /**
+     * 신뢰 프록시 뒤인데 {@link #VIEWER_ADDRESS} 없이 XFF로 판정했을 때의 경고 간격. 요청마다 남기면 그 상태가
+     * 이어지는 동안 로그가 트래픽만큼 쌓이므로, 설정이 빠졌다는 사실과 판정 재료만 간격을 두고 알린다.
+     */
+    static final Duration MISSING_VIEWER_ADDRESS_WARN_INTERVAL = Duration.ofMinutes(10);
 
+    private final List<Cidr> trustedProxies;
+    private final Clock clock;
+    private final AtomicReference<@Nullable Instant> lastMissingViewerAddressWarn = new AtomicReference<>();
+
+    @Autowired
     public ClientIps(AccenturyProperties properties) {
+        this(properties, Clock.systemUTC());
+    }
+
+    ClientIps(AccenturyProperties properties, Clock clock) {
+        this.clock = clock;
         this.trustedProxies = properties.trustedProxies().stream().map(Cidr::parse).toList();
         if (trustedProxies.isEmpty()) {
             // 프록시 없이 뜬 서버에는 이것이 맞는 기본값이라 기동을 세우지는 않는다. 다만
@@ -64,11 +85,13 @@ public class ClientIps {
             // 신뢰 프록시 뒤가 아니다 - 헤더는 상대가 직접 쓴 값이므로 읽지 않는다.
             return peer;
         }
-        String viewer = viewerAddress(request.getHeader(VIEWER_ADDRESS));
+        String viewerHeader = request.getHeader(VIEWER_ADDRESS);
+        String viewer = viewerAddress(viewerHeader);
         if (viewer != null) {
             return viewer;
         }
         String header = request.getHeader(FORWARDED_FOR);
+        warnMissingViewerAddress(request, peer, viewerHeader, header);
         if (header == null || header.isBlank()) {
             return peer;
         }
@@ -85,6 +108,34 @@ public class ClientIps {
         }
         // 전부 신뢰 프록시다 - 체인 안에서 시작된 요청이므로 직접 접속 IP가 최선의 키다.
         return peer;
+    }
+
+    /**
+     * CloudFront 뒤 배포에서 {@link #VIEWER_ADDRESS}가 오지 않으면 XFF의 직전 홉(엣지 공인 IP)이 접속자로 뽑힌다 -
+     * 오류 없이 한도만 엣지 단위로 묶이는 고장이라, 판정 재료를 남겨 원인을 가를 수 있게 한다 (KAN-244).
+     * 헤더는 <b>이름만</b> 남긴다 - 값에는 토큰과 쿠키가 있다. XFF는 홉 수만 남긴다.
+     * CloudFront 없이 ALB만 둔 배치나 로컬에서는 정상 경로인데도 찍히지만, 간격을 두므로 양이 작다.
+     */
+    private void warnMissingViewerAddress(HttpServletRequest request, String peer,
+                                          @Nullable String viewerHeader, @Nullable String forwardedFor) {
+        Instant now = clock.instant();
+        Instant last = lastMissingViewerAddressWarn.get();
+        if (last != null && now.isBefore(last.plus(MISSING_VIEWER_ADDRESS_WARN_INTERVAL))) {
+            return;
+        }
+        if (!lastMissingViewerAddressWarn.compareAndSet(last, now)) {
+            return;
+        }
+        List<String> headerNames = Collections.list(request.getHeaderNames()).stream()
+                .map(name -> name.toLowerCase(Locale.ROOT))
+                .distinct()
+                .sorted()
+                .toList();
+        int forwardedHops = forwardedFor == null || forwardedFor.isBlank() ? 0 : forwardedFor.split(",").length;
+        log.warn("{} 없이 X-Forwarded-For로 접속자 IP를 정했다 - CloudFront 뒤라면 엣지 IP가 뽑힌다."
+                        + " peer={} viewerAddress={} xffHops={} headers={} ({}분에 한 번만 남긴다)",
+                VIEWER_ADDRESS, peer, viewerHeader == null ? "없음" : "형식 오류", forwardedHops, headerNames,
+                MISSING_VIEWER_ADDRESS_WARN_INTERVAL.toMinutes());
     }
 
     private boolean isTrusted(String ip) {
