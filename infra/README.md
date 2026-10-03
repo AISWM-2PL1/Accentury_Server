@@ -1583,7 +1583,8 @@ aws s3 ls s3://accentury-cloudtrail-<account_id>/AWSLogs/<account_id>/CloudTrail
 aws cloudtrail lookup-events --lookup-attributes AttributeKey=EventName,AttributeValue=GetParameter --max-results 5
 ```
 
-GuardDuty는 서울 리전 detector 하나와 S3 데이터 이벤트 보호다. 발견 사항은 콘솔 GuardDuty에서 본다.
+GuardDuty는 서울 리전 detector 하나다. 켜 둔 보호는 S3 데이터 이벤트와 RDS 로그인 이벤트뿐이고, AWS가 기본으로 켜는
+EKS 감사 로그, Lambda 네트워크 로그, EBS 악성코드 검사는 `audit.tf`가 끈다. 발견 사항은 콘솔 GuardDuty에서 본다.
 
 ## 경보와 알림 (KAN-134)
 

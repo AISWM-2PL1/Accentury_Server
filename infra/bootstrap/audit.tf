@@ -196,6 +196,26 @@ resource "aws_guardduty_detector_feature" "s3_data_events" {
   status      = "ENABLED"
 }
 
+# detector를 만들면 AWS가 몇 가지 보호 기능을 기본으로 켠다 (2026-10-03 staging 적용 뒤 확인). 쓰는 것만 남기고
+# 상태를 코드로 고정한다 (사용자 결정 2026-10-03):
+#   - RDS_LOGIN_EVENTS: 켬. RDS 로그인 이상(무차별 대입, 낯선 출처)을 본다 - 우리 DB에 실제로 쓸모가 있다.
+#   - EKS_AUDIT_LOGS, LAMBDA_NETWORK_LOGS: 끔. EKS와 Lambda를 쓰지 않는다.
+#   - EBS_MALWARE_PROTECTION: 끔. 발견 사항이 생길 때마다 EBS 스캔 요금이 붙는데, AI 호스트는 교체형이라 의심되면
+#     스캔보다 교체가 싸다.
+# 주의: 이 리소스를 지워도 기능은 꺼지지 않고 state에서만 빠진다 (provider 문서). 끄려면 DISABLED로 apply한다.
+resource "aws_guardduty_detector_feature" "managed" {
+  for_each = {
+    RDS_LOGIN_EVENTS       = "ENABLED"
+    EKS_AUDIT_LOGS         = "DISABLED"
+    LAMBDA_NETWORK_LOGS    = "DISABLED"
+    EBS_MALWARE_PROTECTION = "DISABLED"
+  }
+
+  detector_id = aws_guardduty_detector.this.id
+  name        = each.key
+  status      = each.value
+}
+
 output "audit_bucket" {
   value       = aws_s3_bucket.audit.bucket
   description = "CloudTrail 로그 버킷 (1년 보관)"
