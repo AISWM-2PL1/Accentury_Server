@@ -1,12 +1,23 @@
 package app.accentury.backend.common;
 
 import app.accentury.backend.PropertiesFixture;
+import ch.qos.logback.classic.Level;
+import ch.qos.logback.classic.Logger;
+import ch.qos.logback.classic.spi.ILoggingEvent;
+import ch.qos.logback.core.read.ListAppender;
 import org.junit.jupiter.api.Test;
+import org.slf4j.LoggerFactory;
 import org.springframework.mock.web.MockHttpServletRequest;
 
+import java.time.Clock;
+import java.time.Instant;
+import java.time.ZoneId;
+import java.time.ZoneOffset;
 import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 
@@ -158,11 +169,79 @@ class ClientIpsTest {
     }
 
     @Test
+    void Viewer_Address_없이_XFF로_정하면_판정_재료를_간격을_두고_WARN으로_남긴다() {
+        // CloudFront 뒤에서 헤더가 오지 않는 고장은 오류 없이 엣지 IP로만 드러난다 (KAN-244 staging 실측).
+        MovableClock clock = new MovableClock(Instant.parse("2026-10-03T00:00:00Z"));
+        ClientIps clientIps = new ClientIps(PropertiesFixture.withTrustedProxies(List.of("10.0.0.0/8")), clock);
+        MockHttpServletRequest request = request("10.1.2.3", "58.72.42.92, 54.182.245.160");
+        request.addHeader("X-Admin-Token", "secret-token-value");
+
+        Logger logger = (Logger) LoggerFactory.getLogger(ClientIps.class);
+        ListAppender<ILoggingEvent> appender = new ListAppender<>();
+        appender.start();
+        logger.addAppender(appender);
+        try {
+            clientIps.resolve(request);
+            clientIps.resolve(request);
+            clock.advance(ClientIps.MISSING_VIEWER_ADDRESS_WARN_INTERVAL);
+            clientIps.resolve(request);
+
+            MockHttpServletRequest withViewer = request("10.1.2.3", "58.72.42.92, 54.182.245.160");
+            withViewer.addHeader(ClientIps.VIEWER_ADDRESS, "58.72.42.92:46532");
+            clock.advance(ClientIps.MISSING_VIEWER_ADDRESS_WARN_INTERVAL);
+            clientIps.resolve(withViewer);
+        } finally {
+            logger.detachAppender(appender);
+        }
+
+        List<String> warns = appender.list.stream()
+                .filter(e -> e.getLevel() == Level.WARN)
+                .map(ILoggingEvent::getFormattedMessage)
+                .toList();
+        assertEquals(2, warns.size(), "간격 안의 반복과 헤더가 온 요청은 남기지 않는다: " + warns);
+        String warn = warns.getFirst();
+        assertTrue(warn.contains("peer=10.1.2.3"), warn);
+        assertTrue(warn.contains("viewerAddress=없음"), warn);
+        assertTrue(warn.contains("xffHops=2"), warn);
+        assertTrue(warn.contains("x-admin-token"), "헤더 이름은 남는다: " + warn);
+        assertFalse(warn.contains("secret-token-value"), "헤더 값은 남지 않는다: " + warn);
+        assertFalse(warn.contains("58.72.42.92"), "XFF 값은 남지 않는다: " + warn);
+    }
+
+    @Test
     void 설정값이_IP나_CIDR이_아니면_기동에_실패한다() {
         // 조용히 "신뢰 안 함"으로 흘리면 ALB 배포에서 전원이 한 키를 공유한다.
         assertThrows(IllegalArgumentException.class, () -> clientIps(List.of("proxy.internal")));
         assertThrows(IllegalArgumentException.class, () -> clientIps(List.of("10.0.0.0/64")));
         assertThrows(IllegalArgumentException.class, () -> clientIps(List.of("10.0.0.0/x")));
+    }
+
+    /** 테스트가 시간을 앞으로 미는 시계. */
+    private static final class MovableClock extends Clock {
+        private Instant now;
+
+        MovableClock(Instant now) {
+            this.now = now;
+        }
+
+        void advance(java.time.Duration duration) {
+            now = now.plus(duration);
+        }
+
+        @Override
+        public ZoneId getZone() {
+            return ZoneOffset.UTC;
+        }
+
+        @Override
+        public Clock withZone(ZoneId zone) {
+            return this;
+        }
+
+        @Override
+        public Instant instant() {
+            return now;
+        }
     }
 
     private static ClientIps clientIps(List<String> trustedProxies) {
