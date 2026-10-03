@@ -129,21 +129,57 @@ resource "aws_vpc_security_group_ingress_rule" "backend_from_alb" {
   referenced_security_group_id = aws_security_group.alb.id
 }
 
-# 아웃바운드 전체 허용: ECR 이미지 pull, SSM(secrets 주입), Secrets Manager(RDS 시크릿), CloudWatch(로그,
-# 지표), RDS 접속, ai 호출이 전부 태스크가 밖으로 거는 연결이다. 퍼블릭 IP를 받지만 인바운드는 alb-sg
-# 참조 하나뿐이라 인터넷에서 닿을 길이 없다.
-resource "aws_vpc_security_group_egress_rule" "backend_all_ipv4" {
+# 아웃바운드는 443과 SG 참조 3개뿐이다 (KAN-245, 보안 검토 #8). 예전에는 모든 프로토콜과 포트를 열어 두어,
+# 태스크가 뚫리면 음성과 PII를 아무 포트로나 내보낼 수 있었다. 태스크가 밖으로 거는 연결을 목적지별로 적으면:
+#   443 (IPv4, IPv6): ECR 이미지 pull, SSM(secrets 주입), Secrets Manager(RDS 시크릿), CloudWatch(로그, 지표),
+#                     학습 샘플 S3, 소셜 로그인 IdP(카카오, 네이버, 구글, 애플), 슬랙 웹훅, 카카오 공유 API
+#   5432 -> rds-sg, 6379 -> redis-sg, 8000 -> ai-alb-sg
+# VPC DNS, ECS 태스크 메타데이터, Time Sync는 SG가 거르지 않는다 (AWS VPC 문서) - 규칙이 필요 없다.
+# 퍼블릭 IP를 받지만 인바운드는 alb-sg 참조 하나뿐이라 인터넷에서 닿을 길이 없다.
+# 살아 있는 SG에서 넓은 규칙을 지우는 apply는 좁은 규칙이 먼저 생긴 뒤여야 한다 - README "backend 아웃바운드".
+resource "aws_vpc_security_group_egress_rule" "backend_https_ipv4" {
   security_group_id = aws_security_group.backend.id
-  description       = "outbound for ECR pull, SSM, Secrets Manager, CloudWatch, RDS, ai"
-  ip_protocol       = "-1"
+  description       = "HTTPS to AWS APIs, IdPs, Slack, Kakao"
+  ip_protocol       = "tcp"
+  from_port         = 443
+  to_port           = 443
   cidr_ipv4         = "0.0.0.0/0"
 }
 
-resource "aws_vpc_security_group_egress_rule" "backend_all_ipv6" {
+resource "aws_vpc_security_group_egress_rule" "backend_https_ipv6" {
   security_group_id = aws_security_group.backend.id
-  description       = "outbound for ECR pull, SSM, Secrets Manager, CloudWatch, RDS, ai"
-  ip_protocol       = "-1"
+  description       = "HTTPS to AWS APIs, IdPs, Slack, Kakao"
+  ip_protocol       = "tcp"
+  from_port         = 443
+  to_port           = 443
   cidr_ipv6         = "::/0"
+}
+
+resource "aws_vpc_security_group_egress_rule" "backend_to_rds" {
+  security_group_id            = aws_security_group.backend.id
+  description                  = "postgres 5432 to RDS"
+  ip_protocol                  = "tcp"
+  from_port                    = 5432
+  to_port                      = 5432
+  referenced_security_group_id = aws_security_group.rds.id
+}
+
+resource "aws_vpc_security_group_egress_rule" "backend_to_redis" {
+  security_group_id            = aws_security_group.backend.id
+  description                  = "redis 6379 to ElastiCache"
+  ip_protocol                  = "tcp"
+  from_port                    = 6379
+  to_port                      = 6379
+  referenced_security_group_id = aws_security_group.redis.id
+}
+
+resource "aws_vpc_security_group_egress_rule" "backend_to_ai_alb" {
+  security_group_id            = aws_security_group.backend.id
+  description                  = "ai 8000 to internal AI ALB"
+  ip_protocol                  = "tcp"
+  from_port                    = 8000
+  to_port                      = 8000
+  referenced_security_group_id = aws_security_group.ai_alb.id
 }
 
 resource "aws_security_group" "rds" {

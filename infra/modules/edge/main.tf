@@ -190,6 +190,29 @@ data "aws_iam_policy_document" "web_bucket" {
       values   = [aws_cloudfront_distribution.this.arn]
     }
   }
+
+  # TLS가 아닌 요청 거부 (KAN-245, 보안 검토 #11). CloudFront OAC는 HTTPS로 원본에 붙고, 웹 배포(aws s3 sync)도
+  # HTTPS라 영향이 없다. training(KAN-239)과 tfstate(KAN-242) 버킷과 같은 문장이다.
+  statement {
+    sid     = "DenyInsecureTransport"
+    effect  = "Deny"
+    actions = ["s3:*"]
+    resources = [
+      aws_s3_bucket.web.arn,
+      "${aws_s3_bucket.web.arn}/*",
+    ]
+
+    principals {
+      type        = "*"
+      identifiers = ["*"]
+    }
+
+    condition {
+      test     = "Bool"
+      variable = "aws:SecureTransport"
+      values   = ["false"]
+    }
+  }
 }
 
 resource "aws_s3_bucket_policy" "web" {
@@ -250,6 +273,48 @@ resource "aws_cloudfront_origin_request_policy" "api" {
   }
 }
 
+# 보안 응답 헤더 (KAN-245, 보안 검토 #14). 세 동작(/v0/*, /admin/v0/*, 웹 기본)에 같은 정책을 붙인다.
+#   - HSTS 1년 + includeSubDomains. preload는 넣지 않는다 - 브라우저 목록에서 빼기가 몇 달 걸려 되돌릴 수 없다.
+#   - nosniff, 프레이밍 전면 차단(DENY), strict-origin-when-cross-origin.
+#   - CSP는 Report-Only로 시작한다. 웹 번들이 쓰는 외부 출처(GA4, 광고)를 확인해 위반이 0건이 되면 강제로
+#     바꾸는 것은 후속이다 - 처음부터 강제하면 빠뜨린 출처 하나가 화면을 깨뜨린다.
+# override = true: backend나 S3가 같은 헤더를 보내도 이 값이 정본이다.
+resource "aws_cloudfront_response_headers_policy" "security" {
+  name    = "${local.name}-security-headers"
+  comment = "accentury ${var.env} security headers, KAN-245"
+
+  security_headers_config {
+    strict_transport_security {
+      access_control_max_age_sec = 31536000
+      include_subdomains         = true
+      preload                    = false
+      override                   = true
+    }
+
+    content_type_options {
+      override = true
+    }
+
+    frame_options {
+      frame_option = "DENY"
+      override     = true
+    }
+
+    referrer_policy {
+      referrer_policy = "strict-origin-when-cross-origin"
+      override        = true
+    }
+  }
+
+  custom_headers_config {
+    items {
+      header   = "Content-Security-Policy-Report-Only"
+      value    = "default-src 'self'; frame-ancestors 'none'; object-src 'none'; base-uri 'self'"
+      override = true
+    }
+  }
+}
+
 resource "aws_cloudfront_distribution" "this" {
   enabled             = true
   is_ipv6_enabled     = true
@@ -290,8 +355,9 @@ resource "aws_cloudfront_distribution" "this" {
 
     # 캐싱 비활성 + 전 헤더 전달(Authorization 포함). correlation ID 박제와
     # 4xx TTL 우려(KAN-101)를 캐싱 비활성으로 해소한다.
-    cache_policy_id          = data.aws_cloudfront_cache_policy.caching_disabled.id
-    origin_request_policy_id = aws_cloudfront_origin_request_policy.api.id
+    cache_policy_id            = data.aws_cloudfront_cache_policy.caching_disabled.id
+    origin_request_policy_id   = aws_cloudfront_origin_request_policy.api.id
+    response_headers_policy_id = aws_cloudfront_response_headers_policy.security.id
 
     viewer_protocol_policy = "redirect-to-https"
     compress               = true
@@ -309,8 +375,9 @@ resource "aws_cloudfront_distribution" "this" {
     allowed_methods = ["GET", "HEAD", "OPTIONS", "PUT", "POST", "PATCH", "DELETE"]
     cached_methods  = ["GET", "HEAD"]
 
-    cache_policy_id          = data.aws_cloudfront_cache_policy.caching_disabled.id
-    origin_request_policy_id = aws_cloudfront_origin_request_policy.api.id
+    cache_policy_id            = data.aws_cloudfront_cache_policy.caching_disabled.id
+    origin_request_policy_id   = aws_cloudfront_origin_request_policy.api.id
+    response_headers_policy_id = aws_cloudfront_response_headers_policy.security.id
 
     viewer_protocol_policy = "redirect-to-https"
     compress               = true
@@ -322,9 +389,10 @@ resource "aws_cloudfront_distribution" "this" {
     allowed_methods = ["GET", "HEAD"]
     cached_methods  = ["GET", "HEAD"]
 
-    cache_policy_id        = data.aws_cloudfront_cache_policy.caching_optimized.id
-    viewer_protocol_policy = "redirect-to-https"
-    compress               = true
+    cache_policy_id            = data.aws_cloudfront_cache_policy.caching_optimized.id
+    response_headers_policy_id = aws_cloudfront_response_headers_policy.security.id
+    viewer_protocol_policy     = "redirect-to-https"
+    compress                   = true
 
     # SPA 재작성은 기본 동작에만 붙인다. /v0/*에는 붙이지 않는다 (KAN-126).
     function_association {

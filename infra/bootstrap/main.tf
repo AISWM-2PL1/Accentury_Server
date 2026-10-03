@@ -1,9 +1,9 @@
 # Terraform state 백엔드(S3 버킷) 생성 전용 스택 (KAN-140).
 #
-# 닭과 달걀 문제 때문에 이 스택만 로컬 state를 쓴다 - state를 담을 버킷을
-# Terraform으로 만들려면 그 시점에는 아직 원격 백엔드가 없다. 여기서 만든
-# terraform.tfstate는 버킷 이름 외에 비밀값이 없고, .gitignore(*.tfstate)로
-# 레포에 들어가지 않는다. 재실행이 필요하면 import로 복구한다:
+# 닭과 달걀 문제 때문에 처음에는 로컬 state로 만들었다 - state를 담을 버킷을
+# Terraform으로 만들려면 그 시점에는 아직 원격 백엔드가 없다. 버킷이 생긴 뒤
+# 2026-10-03(KAN-245)에 state를 그 버킷의 bootstrap/terraform.tfstate로 옮겼다 (backend.tf).
+# 버킷부터 다시 만들어야 하면 backend.tf의 안내를 따르고, 리소스가 이미 있으면 import로 복구한다:
 #   terraform import aws_s3_bucket.tfstate accentury-tfstate-<account_id>
 
 terraform {

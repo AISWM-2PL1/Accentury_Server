@@ -36,6 +36,16 @@ RUN groupadd --system --gid 10001 accentury \
 
 WORKDIR /app
 COPY --from=build /workspace/build/app.jar /app/app.jar
+
+# RDS 전역 CA 번들 (KAN-245). JDBC URL의 sslmode=verify-full이 이 파일로 RDS 서버 인증서와 호스트 이름을
+# 검증한다 (SSM SPRING_DATASOURCE_URL의 sslrootcert, infra/modules/config). 체크섬을 고정해 빌드 중 받은
+# 파일이 바뀌었으면 빌드가 실패한다 - AWS가 번들을 갱신하면(CA 교체 공지) 새 해시로 이 줄을 고친다.
+# 로컬 compose의 PostgreSQL은 URL에 sslmode가 없어 이 파일을 쓰지 않는다.
+# 디렉터리를 먼저 만든다 - ADD가 상위 디렉터리를 만들면 --chmod(644)가 디렉터리에도 걸려 실행 비트가 빠지고,
+# 비루트 사용자가 파일에 닿지 못한다 (2026-10-03 로컬 빌드에서 확인).
+RUN mkdir -m 755 /app/certs
+ADD --checksum=sha256:fe45bbebf92ad3e27a583bbb2ddd1553c521ed4d49af5514dc0a40372ea5395c --chmod=644 \
+    https://truststore.pki.rds.amazonaws.com/global/global-bundle.pem /app/certs/rds-global-bundle.pem
 USER accentury
 
 EXPOSE 8080
