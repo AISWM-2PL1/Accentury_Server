@@ -1533,7 +1533,7 @@ staging부터 true로 apply하고 prod가 뒤따른다.
 | 항목 | 어디 | 내용 |
 | --- | --- | --- |
 | S3 TLS 강제 | `modules/edge`(web), `modules/ai-host`(boot), envs(training, KAN-239), bootstrap(tfstate, KAN-242와 audit) | `aws:SecureTransport = false` 요청 전부 거부 |
-| 보안 응답 헤더 | `modules/edge`의 `aws_cloudfront_response_headers_policy.security`, 세 동작 모두 | HSTS 1년 + includeSubDomains(preload 없음), nosniff, `X-Frame-Options: DENY`, `strict-origin-when-cross-origin`, CSP는 Report-Only |
+| 보안 응답 헤더 | `modules/edge`의 `aws_cloudfront_response_headers_policy.security`, 세 동작 모두 | HSTS 1년 + includeSubDomains(preload 없음), nosniff, `X-Frame-Options: DENY`, `strict-origin-when-cross-origin`, CSP는 Report-Only. 수집 지점(`report-uri`/`report-to`)이 아직 없어 위반은 브라우저 콘솔에만 찍힌다 - enforce 전환 후속은 수집 엔드포인트부터 |
 | JDBC 서버 인증서 검증 | `modules/config`의 `SPRING_DATASOURCE_URL`, `backend/Dockerfile` | `sslmode=verify-full` + 이미지 안 RDS 전역 CA 번들. 서버 쪽 `rds.force_ssl`은 PG16 기본 파라미터 그룹에서 이미 1 |
 | backend 아웃바운드 | `modules/network` | 443(IPv4, IPv6)과 SG 참조 3개(RDS 5432, Redis 6379, AI ALB 8000)만 |
 | 계정 감사, 위협 탐지 | `bootstrap/audit.tf` | CloudTrail 관리 이벤트 + 학습, tfstate 버킷 S3 데이터 이벤트, GuardDuty + S3 보호 |
