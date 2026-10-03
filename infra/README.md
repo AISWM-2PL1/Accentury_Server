@@ -2506,6 +2506,10 @@ destroy는 리소스를 지우지만 개인정보가 담긴 **잔존물**을 전
   `CloudFront-Viewer-Address`를 넘기고, backend `ClientIps`가 신뢰 프록시 뒤에서 그 헤더를 먼저 읽는다
   (`modules/edge`의 `aws_cloudfront_origin_request_policy.api`). 대역 목록은 AWS가 바꾸면 조용히 같은
   문제로 돌아가지만, 헤더는 CloudFront가 직접 채우는 값이라 관리할 목록이 없다.
+  **실제 원인 (2026-10-03)**: 헤더를 넘긴 뒤에도 엣지 IP가 찍혔다. Spring Boot 4.1이 ECS(`AWS_EXECUTION_ENV`)를
+  감지해 `server.forward-headers-strategy`를 `NATIVE`로 켜고, Tomcat RemoteIpValve가 XFF로 `remoteAddr`를 엣지
+  IP로 먼저 바꿔 놓아 `ClientIps`가 신뢰 프록시 뒤라는 것을 몰랐다. backend `application.yml`에서 `none`으로
+  고정했다 (`ForwardHeadersBootTest`가 실제 Tomcat으로 재현한다).
 - **Spring 프로파일 이름은 `deploy`** (KAN-129): staging과 prod가 같은 이름을 쓴다.
   환경 이름을 프로파일로 쓰면 `application-staging.yml` 같은 환경별 파일이 생길 여지가
   남아 "환경 간 차이는 tfvars와 SSM 값뿐"이 깨진다.

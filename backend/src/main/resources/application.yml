@@ -5,6 +5,12 @@
 # ECS stopTimeout 120초) 안에 들어야 한다 - 셋 중 하나를 바꾸면 나머지도 같이 본다.
 server:
   shutdown: graceful    # 즉시 종료면 진행 중 업로드 요청이 끊긴다. 로컬과 배포가 같은 동작이어야 실증이 의미 있다.
+  # 접속자 IP 판정은 ClientIps 혼자 한다 (KAN-244). Spring Boot는 ECS(AWS_EXECUTION_ENV)를 감지하면 이 값을
+  # NATIVE로 켜고 Tomcat RemoteIpValve가 XFF로 remoteAddr를 먼저 바꾸는데, 그 Valve는 사설 대역만 내부 프록시로
+  # 봐서 CloudFront 엣지 공인 IP가 접속 IP가 된다. 그러면 ClientIps는 신뢰 프록시 뒤가 아니라고 보고
+  # CloudFront-Viewer-Address를 읽지 않는다 (2026-10-03 staging 실측, ForwardHeadersBootTest가 재현한다).
+  # 요청의 scheme과 host에 기대는 코드는 없다 - 리다이렉트와 절대 URL을 만들지 않는다.
+  forward-headers-strategy: none
 
 spring:
   lifecycle:
