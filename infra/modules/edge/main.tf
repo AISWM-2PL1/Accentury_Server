@@ -278,6 +278,8 @@ resource "aws_cloudfront_origin_request_policy" "api" {
 #   - nosniff, 프레이밍 전면 차단(DENY), strict-origin-when-cross-origin.
 #   - CSP는 Report-Only로 시작한다. 웹 번들이 쓰는 외부 출처(GA4, 광고)를 확인해 위반이 0건이 되면 강제로
 #     바꾸는 것은 후속이다 - 처음부터 강제하면 빠뜨린 출처 하나가 화면을 깨뜨린다.
+#     지금은 report-uri/report-to가 없어 위반이 각 사용자 브라우저 콘솔에만 찍힌다. 강제 전환 후속은 위반을
+#     모을 수집 지점(엔드포인트)을 먼저 만들고 여기에 붙이는 것부터다 (PR #18 리뷰).
 # override = true: backend나 S3가 같은 헤더를 보내도 이 값이 정본이다.
 resource "aws_cloudfront_response_headers_policy" "security" {
   name    = "${local.name}-security-headers"
