@@ -70,7 +70,7 @@ variable "ai_analysis_timeout_seconds" {
 
 variable "training_bucket_name" {
   type        = string
-  description = "staging 전용 학습 데이터 S3 버킷 이름 (KAN-201). 값이 있으면 ACCENTURY_TRAINING_CONSENTEDBUCKET 파라미터를 만들어 backend가 분석 종결마다 음성 WAV와 메타 JSON을 그 버킷에 남긴다 (accentury.training.consented-bucket). 값이 있으면 동의 테스터 목록(ACCENTURY_TRAINING_TESTERIDS, 자리 표시 값)과 가명 키(ACCENTURY_TRAINING_PSEUDONYMKEY)도 함께 만든다 (KAN-239). null이면 파라미터 자체가 없고 backend는 저장 코드를 만들지 않는다 - prod는 반드시 null이다 (FR-DP-01 그대로)."
+  description = "staging 전용 학습 데이터 S3 버킷 이름 (KAN-201). 값이 있으면 ACCENTURY_TRAINING_BUCKET 파라미터를 만들어 backend가 분석 종결마다 음성 WAV와 메타 JSON을 그 버킷에 남긴다 (accentury.training.bucket). null이면 파라미터 자체가 없고 backend는 저장 코드를 만들지 않는다 - prod는 반드시 null이다 (FR-DP-01 그대로)."
   default     = null
 }
 
