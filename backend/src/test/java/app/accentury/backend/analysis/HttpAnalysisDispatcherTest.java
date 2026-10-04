@@ -7,6 +7,7 @@ import app.accentury.backend.observability.ServiceMetrics;
 import app.accentury.backend.session.TestSessionRepository;
 import app.accentury.backend.training.TrainingSample;
 import app.accentury.backend.training.TrainingSampleStore;
+import app.accentury.backend.training.VoiceConsent;
 import ch.qos.logback.classic.Level;
 import ch.qos.logback.classic.Logger;
 import ch.qos.logback.classic.spi.ILoggingEvent;
@@ -45,6 +46,10 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * 오므로 한 번으로 끝낸다. 동기 실행기로 돌려 결과를 바로 검증한다.
  */
 class HttpAnalysisDispatcherTest extends IntegrationTest {
+
+    /** 음성 저장에 동의한 익명 세션 - 학습 샘플 테스트의 기본값이다 (KAN-269). */
+    private static final VoiceConsent CONSENT =
+            new VoiceConsent("2026-10-04", Instant.parse("2026-10-04T00:00:00Z"), null);
 
     @Autowired
     private AnalysisJobRepository repository;
@@ -659,6 +664,31 @@ class HttpAnalysisDispatcherTest extends IntegrationTest {
     }
 
     @Test
+    void 음성_저장_동의가_없는_요청은_성공해도_학습_샘플로_남지_않는다() {
+        // 동의는 선택이다 (KAN-269) - 분석과 상태 전이는 그대로 끝나고 음성만 어디에도 남지 않는다.
+        AnalysisJob job = saveProcessingJob();
+        RecordingStore store = new RecordingStore();
+        ScriptedClient client = new ScriptedClient()
+                .then(new AiAnalysisClient.Completed(78, "OK", "rmvpe-0.2", "sv-ai-0.1"));
+
+        dispatcher(client, 0, store).dispatch(request(job, "GYEONGNAM", null));
+
+        assertTrue(store.samples.isEmpty(), "동의 없는 세션의 음성이 저장소로 넘어갔다");
+        assertEquals(AnalysisJobStatus.COMPLETED, repository.findById(job.id()).orElseThrow().status());
+    }
+
+    @Test
+    void 샘플은_요청의_동의를_그대로_싣는다() {
+        RecordingStore store = new RecordingStore();
+        ScriptedClient client = new ScriptedClient()
+                .then(new AiAnalysisClient.Completed(78, "OK", "rmvpe-0.2", "sv-ai-0.1"));
+
+        dispatcher(client, 0, store).dispatch(request(saveProcessingJob()));
+
+        assertEquals(CONSENT, store.only().consent());
+    }
+
+    @Test
     void 지역_없는_세션의_샘플은_UNKNOWN이다() {
         RecordingStore store = new RecordingStore();
         ScriptedClient client = new ScriptedClient()
@@ -837,7 +867,12 @@ class HttpAnalysisDispatcherTest extends IntegrationTest {
 
     private static AnalysisDispatcher.AnalysisRequest request(AnalysisJob job,
                                                               @Nullable String region) {
+        return request(job, region, CONSENT);
+    }
+
+    private static AnalysisDispatcher.AnalysisRequest request(AnalysisJob job, @Nullable String region,
+                                                              @Nullable VoiceConsent consent) {
         return new AnalysisDispatcher.AnalysisRequest(job.id(), job.sessionId(), job.itemId(), null,
-                "gn-2026.08.1", "sv-0.3", region, 3000, new byte[] {1, 2, 3});
+                "gn-2026.08.1", "sv-0.3", region, 3000, consent, new byte[] {1, 2, 3});
     }
 }

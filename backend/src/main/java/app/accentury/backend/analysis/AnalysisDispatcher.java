@@ -1,5 +1,6 @@
 package app.accentury.backend.analysis;
 
+import app.accentury.backend.training.VoiceConsent;
 import org.jspecify.annotations.Nullable;
 
 import java.util.Arrays;
@@ -97,9 +98,11 @@ public interface AnalysisDispatcher {
      * @param scriptKey 정의의 실모델 참조 키 ("1|5" 형식, KAN-182) - 실모델이 문장을 찾는 값이다.
      *                  정의에 없는 문항(더미 정의)은 null이고 meta에서 생략된다. 스텁 엔진은
      *                  무시한다. 실모델 어댑터가 이 키로 문장을 찾는 부분은 KAN-22다.
-     * @param region    세션이 받은 출신 지역 코드 (KAN-201, {@code Region}) - AI에는 가지 않고 staging의
+     * @param region    세션이 받은 출신 지역 코드 (KAN-201, {@code Region}) - AI에는 가지 않고
      *                  학습 데이터 저장({@code TrainingSampleStore})만 읽는다. 보내지 않은 세션은 null이고
      *                  저장 쪽이 UNKNOWN으로 쓴다.
+     * @param voiceConsent 이 세션의 음성 저장 동의 (KAN-269, {@code VoiceConsents}) - AI에는 가지 않고 학습 데이터
+     *                  저장만 읽는다. null이면 동의가 없는 세션이고 음성은 어디에도 남지 않는다.
      * @param audio     WAV 원본 - 클라이언트 업로드를 그대로 패스스루한다 (§4.1).
      *                  소유권은 {@code dispatch()}로 넘어간다 (위 계약 참조).
      */
@@ -112,7 +115,16 @@ public interface AnalysisDispatcher {
             String scoreVersion,
             @Nullable String region,
             long durationMs,
+            @Nullable VoiceConsent voiceConsent,
             byte[] audio) {
+
+        /** 음성 저장 동의가 없는 요청 - 학습 샘플로 남지 않는다 (KAN-269). */
+        public AnalysisRequest(String analysisJobId, String sessionId, String itemId, @Nullable String scriptKey,
+                               String testVersion, String scoreVersion, @Nullable String region, long durationMs,
+                               byte[] audio) {
+            this(analysisJobId, sessionId, itemId, scriptKey, testVersion, scoreVersion, region, durationMs,
+                    null, audio);
+        }
 
         /**
          * 오디오 버퍼를 0으로 덮어쓴다 - 분석이 종결되는 즉시 호출한다 (KAN-27, NFR-PR-03).

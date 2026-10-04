@@ -3,17 +3,18 @@
 # 이 전에는 state 읽기, 학습 음성 다운로드, 시크릿 조회를 누가 했는지 남지 않았다. CloudTrail 이벤트 기록은
 # 90일만 콘솔에서 보이고 데이터 이벤트(S3 객체 읽기)는 아예 없다.
 #   - 관리 이벤트 trail 1개: 읽기와 쓰기 모두, 전 리전, 로그 파일 검증. 계정의 첫 관리 이벤트 trail은 무료다.
-#   - S3 데이터 이벤트: 학습 버킷(음성)과 tfstate 버킷(state)만. 객체 이벤트 10만 건당 0.10달러라 버킷을 좁힌다.
+#   - S3 데이터 이벤트: 음성 버킷(voice.tf), 옛 staging 학습 버킷, tfstate 버킷(state)만. 객체 이벤트 10만 건당 0.10달러라 버킷을 좁힌다.
 #   - GuardDuty: 서울 리전 detector + S3 데이터 이벤트 보호. 첫 30일 무료, 이후 이 규모에서 월 몇 달러로 추정한다.
 
 locals {
   audit_trail_name = "accentury-account-audit"
 
-  # 학습 버킷은 지금 staging에만 있다 (KAN-239). prod 이름도 미리 넣어 두면 그 버킷이 생기는 날 바로 기록된다 -
-  # 없는 버킷의 ARN은 selector에서 아무 것도 고르지 않을 뿐 오류가 아니다.
+  # 음성은 두 환경이 함께 쓰는 음성 전용 버킷 하나에 모인다 (KAN-269, voice.tf). 옛 staging 학습 버킷
+  # (accentury-staging-training)은 Terraform 관리에서 빠졌지만 음성이 남아 있어, 사람이 그 버킷을 정리할 때까지
+  # 객체 읽기를 계속 기록한다 (KAN-269 리뷰 P2). 정리된 뒤에 이 줄을 지운다. prod에는 옛 버킷이 없었다.
   audit_data_event_bucket_arns = [
+    aws_s3_bucket.voice.arn,
     "arn:aws:s3:::accentury-staging-training-${data.aws_caller_identity.current.account_id}",
-    "arn:aws:s3:::accentury-prod-training-${data.aws_caller_identity.current.account_id}",
     aws_s3_bucket.tfstate.arn,
   ]
 
@@ -161,7 +162,7 @@ resource "aws_cloudtrail" "audit" {
   }
 
   advanced_event_selector {
-    name = "S3 object events on training and tfstate buckets"
+    name = "S3 object events on voice and tfstate buckets"
 
     field_selector {
       field  = "eventCategory"

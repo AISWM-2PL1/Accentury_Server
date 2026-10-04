@@ -178,6 +178,22 @@ variable "log_retention_days" {
 
 variable "training_bucket_arn" {
   type        = string
-  description = "staging 전용 학습 데이터 S3 버킷 ARN (KAN-201). 값이 있으면 태스크 역할에 그 버킷 한 개로 한정한 s3:PutObject 문장이 생긴다 - Get, List, Delete는 없다 (backend는 쓰기만 한다). null이면 문장 자체가 없다 - prod는 반드시 null이다."
+  description = "음성 전용 S3 버킷 ARN (KAN-201, KAN-269 - bootstrap이 만든 accentury-voice-<계정 ID>). 값이 있으면 태스크 역할에 그 버킷의 training_key_prefix 접두사 아래로 한정한 s3:PutObject 문장이 생긴다 - Get, List, Delete는 없다 (backend는 쓰기만 한다). null이면 문장 자체가 없다."
   default     = null
+}
+
+variable "training_key_prefix" {
+  type        = string
+  description = "음성 버킷 안에서 이 환경이 쓰는 키 접두사 (KAN-269). 끝에 슬래시가 없는 환경 이름(staging, prod)이다. PutObject가 <버킷 ARN>/<이 값>/* 로만 열려 다른 환경의 접두사에는 쓰지 못한다. training_bucket_arn이 있으면 반드시 함께 넘긴다."
+  default     = null
+
+  validation {
+    condition     = var.training_key_prefix == null || can(regex("^[a-z0-9-]+$", var.training_key_prefix))
+    error_message = "training_key_prefix는 슬래시와 와일드카드가 없는 환경 이름이어야 합니다 (소문자, 숫자, 하이픈)."
+  }
+
+  validation {
+    condition     = var.training_bucket_arn == null || var.training_key_prefix != null
+    error_message = "training_bucket_arn이 있으면 training_key_prefix(환경 이름)도 있어야 합니다 (KAN-269)."
+  }
 }

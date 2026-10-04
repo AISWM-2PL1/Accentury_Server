@@ -152,6 +152,10 @@ public class SessionService {
         Region region = account != null
                 ? account.region()
                 : Region.fromRequest(request != null ? request.region() : null);
+        // 음성 저장 선택 동의 (KAN-269) - 익명 세션만 본문 값을 본다. 계정 세션은 계정의 동의를 업로드 시점에 본다.
+        // 검증은 저장보다 먼저다 - 버전이 틀린 동의를 조용히 미동의로 접으면 클라이언트가 낡은 문구로 동의를
+        // 받고 있다는 사실이 묻힌다.
+        String voiceConsentVersion = account == null ? voiceConsentVersion(request) : null;
         // 세트를 누가 골랐는지는 로그에만 쓴다 - 편중을 나중에 로그로 되짚으려면
         // 서버가 고른 세션과 클라이언트가 지정한 세션이 구분돼야 한다 (KAN-205).
         boolean voiceSetRequested = request != null && request.voiceSet() != null;
@@ -175,7 +179,7 @@ public class SessionService {
                         .map(this::purgeForRetake)
                         .orElse(null);
             }
-            repository.save(new TestSession(
+            TestSession created = new TestSession(
                     sessionId,
                     SessionTokens.hash(token),
                     testVersion,
@@ -188,7 +192,11 @@ public class SessionService {
                     traffic,
                     account != null ? account.userId() : null,
                     now,
-                    expiresAt));
+                    expiresAt);
+            if (voiceConsentVersion != null) {
+                created.withVoiceConsent(voiceConsentVersion, now);
+            }
+            repository.save(created);
             return summary;
         });
 
@@ -201,10 +209,11 @@ public class SessionService {
 
         // 토큰은 로그에 남기지 않는다 (§2.6, NFR-SC-07). 계정 id도 남기지 않고 계정 세션 여부만 남긴다 (KAN-240) -
         // 세션 행은 24시간 뒤 지워지지만 로그는 14일 남아, 한 줄에 sessionId와 userId가 같이 있으면 그동안 세션과
-        // 계정의 대응표가 된다. staging에서는 그 sessionId가 학습 음성의 가명 키까지 이어진다 (KAN-239).
-        log.info("세션 생성 sessionId={} platform={} testVersion={} voiceSet={} voiceSetBy={} region={} traffic={} account={}",
+        // 계정의 대응표가 된다. 음성 저장에 동의한 세션은 그 sessionId가 학습 버킷의 객체 키까지 이어진다 (KAN-269).
+        log.info("세션 생성 sessionId={} platform={} testVersion={} voiceSet={} voiceSetBy={} region={} traffic={} account={} voiceConsent={}",
                 sessionId, client != null ? client.platform() : null, testVersion, voiceSet,
-                voiceSetRequested ? "client" : "server", region, traffic, account != null);
+                voiceSetRequested ? "client" : "server", region, traffic, account != null,
+                voiceConsentVersion != null);
 
         // 응시 시도 1건 (KAN-106) - 폐기+생성 트랜잭션이 커밋된 뒤다.
         // 실패는 카운터 쪽에서 삼킨다 - 통계가 세션 생성을 막으면 안 된다 (FR-AN-10).
@@ -212,6 +221,25 @@ public class SessionService {
 
         return new SessionResponse(sessionId, token, testVersion, scoreVersion,
                 voiceSet, active.voiceSetCount(), expiresAt);
+    }
+
+    /**
+     * 익명 세션 생성 요청의 음성 저장 동의 버전 (KAN-269). 없거나 비어 있으면 미동의(null)이고, 값이 있으면 서버
+     * 게시 버전과 정확히 같아야 한다.
+     *
+     * @throws ApiException 400 {@code VALIDATION_FAILED} - 게시 버전과 다른 값
+     */
+    private @Nullable String voiceConsentVersion(@Nullable CreateSessionRequest request) {
+        String raw = request != null ? request.voiceConsentVersion() : null;
+        if (raw == null || raw.isBlank()) {
+            return null;
+        }
+        String published = properties.training().consentVersion();
+        if (!published.equals(raw)) {
+            throw new ApiException(ErrorCode.VALIDATION_FAILED,
+                    "voiceConsentVersion이 게시 중인 음성 저장 동의 버전과 다릅니다.");
+        }
+        return published;
     }
 
     /**

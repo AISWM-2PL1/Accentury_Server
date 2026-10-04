@@ -70,7 +70,13 @@ variable "ai_analysis_timeout_seconds" {
 
 variable "training_bucket_name" {
   type        = string
-  description = "staging 전용 학습 데이터 S3 버킷 이름 (KAN-201). 값이 있으면 ACCENTURY_TRAINING_BUCKET 파라미터를 만들어 backend가 분석 종결마다 음성 WAV와 메타 JSON을 그 버킷에 남긴다 (accentury.training.bucket). null이면 파라미터 자체가 없고 backend는 저장 코드를 만들지 않는다 - prod는 반드시 null이다 (FR-DP-01 그대로)."
+  description = "음성 전용 S3 버킷 이름 (KAN-201, KAN-269 - bootstrap이 만든 accentury-voice-<계정 ID>). 값이 있으면 ACCENTURY_TRAINING_BUCKET과 ACCENTURY_TRAINING_KEYPREFIX 파라미터를 만들어 backend가 음성 저장에 동의한 세션의 음성 WAV와 메타 JSON을 그 버킷에 남긴다 (accentury.training.bucket). null이면 두 파라미터 자체가 없고 backend는 저장 코드를 만들지 않는다."
+  default     = null
+}
+
+variable "training_key_prefix" {
+  type        = string
+  description = "음성 버킷 안에서 이 환경이 쓰는 키 접두사 (KAN-269). 끝에 슬래시가 없는 환경 이름(staging, prod)이고 ACCENTURY_TRAINING_KEYPREFIX의 값이 된다 (accentury.training.key-prefix). training_bucket_name이 있으면 반드시 함께 넘긴다 - fargate 모듈의 training_key_prefix와 같은 값이어야 한다."
   default     = null
 }
 

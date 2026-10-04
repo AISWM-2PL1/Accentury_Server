@@ -5,7 +5,8 @@ import org.jspecify.annotations.Nullable;
 /**
  * 학습 샘플 1건 - WAV 1개와 메타 JSON 1개가 된다 (KAN-201 객체 규약).
  * <p>
- * 사용자 식별 정보는 없다 (세션은 익명, §2.1). 값은 전부 분석 요청({@code AnalysisRequest})과 AI 응답
+ * 이름, 이메일 같은 개인 식별 정보는 없다. 다만 세션 ID와 작업 ID가 원문이고 계정 세션은 대응표
+ * ({@link TrainingVoiceOwners})로 계정까지 이어진다 (KAN-269). 값은 전부 분석 요청({@code AnalysisRequest})과 AI 응답
  * (§4.1)에서 그대로 온 것이고, 점수는 KAN-200의 계수 전처리와 sv-0.3의 20점 환산 <b>이전</b>의
  * AI 원점수다 - {@code analysis_job.intonation_score}와 같은 값이다.
  *
@@ -21,6 +22,7 @@ import org.jspecify.annotations.Nullable;
  * @param aiScoreVersion  AI 응답 §4.1의 scoreVersion - 성공에만 있다. 세션의 {@code scoreVersion}과 다른 값이다.
  * @param errorCode       판정 실패 코드(예: AUDIO_TOO_QUIET) - 판정 실패에만 있다.
  * @param correlationId   AI 호출 상관 ID - AI 로그와 대조용.
+ * @param consent         이 세션의 음성 저장 동의 (KAN-269) - 동의 없는 세션은 샘플이 되지 않으므로 null이 없다.
  * @param audio           업로드 받은 WAV 바이트 그대로 (16kHz Mono 16-bit PCM, 최대 1MB).
  */
 public record TrainingSample(
@@ -39,13 +41,18 @@ public record TrainingSample(
         @Nullable String aiScoreVersion,
         @Nullable String errorCode,
         String correlationId,
+        VoiceConsent consent,
         byte[] audio) {
 
     /** 분석 작업 종결 상태와 같은 세 값 ({@code AnalysisJobStatus}의 종결 상태). */
     public enum Outcome { COMPLETED, FAILED, RETRYABLE_FAILED }
 
-    /** 객체 키 접두 - WAV와 JSON이 이 뒤에 확장자만 다르게 나란히 놓인다. */
-    public String keyPrefix() {
-        return region + "/" + testVersion + "/" + sessionId + "/" + itemId + "/" + analysisJobId;
+    /**
+     * 객체 키 접두 - WAV와 JSON이 이 뒤에 확장자만 다르게 나란히 놓인다.
+     *
+     * @param envPrefix 환경 접두 ({@code staging} 또는 {@code prod}, KAN-269) - 두 환경이 버킷 하나를 나눠 쓴다.
+     */
+    public String keyPrefix(String envPrefix) {
+        return envPrefix + "/" + region + "/" + testVersion + "/" + sessionId + "/" + itemId + "/" + analysisJobId;
     }
 }

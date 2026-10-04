@@ -1,5 +1,6 @@
 package app.accentury.backend.auth;
 
+import app.accentury.backend.common.AccenturyProperties;
 import app.accentury.backend.common.ApiException;
 import app.accentury.backend.common.ErrorCode;
 import app.accentury.backend.session.Region;
@@ -15,6 +16,7 @@ import java.time.Instant;
 import java.time.LocalDate;
 import java.time.ZoneId;
 import java.time.format.DateTimeParseException;
+import java.util.function.Consumer;
 
 /**
  * 추가 정보 입력과 내 정보 (KAN-223, 명세서 §3.10, §3.11).
@@ -33,21 +35,25 @@ public class UserService {
     private final AppUserRepository users;
     private final TransactionTemplate transactionTemplate;
     private final Clock clock;
+    /** 게시 중인 음성 저장 동의 버전 (KAN-269) - 동의 등록은 요청 값이 이 값과 정확히 같아야 받는다. */
+    private final String voiceConsentVersion;
 
     @Autowired
-    UserService(AppUserRepository users, TransactionTemplate transactionTemplate) {
-        this(users, transactionTemplate, Clock.system(ZONE));
+    UserService(AppUserRepository users, TransactionTemplate transactionTemplate, AccenturyProperties properties) {
+        this(users, transactionTemplate, Clock.system(ZONE), properties.training().consentVersion());
     }
 
-    UserService(AppUserRepository users, TransactionTemplate transactionTemplate, Clock clock) {
+    UserService(AppUserRepository users, TransactionTemplate transactionTemplate, Clock clock,
+                String voiceConsentVersion) {
         this.users = users;
         this.transactionTemplate = transactionTemplate;
         this.clock = clock;
+        this.voiceConsentVersion = voiceConsentVersion;
     }
 
     /** 내 계정 (§3.11). */
     MeResponse me(AppUser user) {
-        return MeResponse.of(user);
+        return MeResponse.of(user, voiceConsentVersion);
     }
 
     /**
@@ -81,7 +87,50 @@ public class UserService {
         }
         // 값은 남기지 않는다 - 완료 여부만 (§2.6).
         log.info("프로필 저장 userId={} status={}", saved.id(), ProfileStatus.of(saved));
-        return MeResponse.of(saved);
+        return MeResponse.of(saved, voiceConsentVersion);
+    }
+
+    /**
+     * 음성 저장(학습 활용)에 동의한다 (§3.15, KAN-269). 선택 항목이다 - 부르지 않아도 서비스 이용에는 제한이 없다.
+     * 이미 동의한 계정이 다시 부르면 버전과 시각을 새로 덮고, 철회했던 계정이면 다시 유효해진다 (멱등).
+     *
+     * @throws ApiException 400 {@code VALIDATION_FAILED} - 버전이 없거나 게시 버전과 다름 / 401 {@code AUTH_TOKEN_INVALID}
+     */
+    MeResponse consentToVoice(AppUser user, @Nullable VoiceConsentRequest request) {
+        String version = request != null ? request.version() : null;
+        if (version == null || !voiceConsentVersion.equals(version)) {
+            throw new ApiException(ErrorCode.VALIDATION_FAILED,
+                    "version이 게시 중인 음성 저장 동의 버전과 다릅니다.");
+        }
+        AppUser saved = changeVoiceConsent(user, locked -> locked.consentToVoice(version, Instant.now(clock)));
+        log.info("음성 저장 동의 userId={} version={}", saved.id(), version);
+        return MeResponse.of(saved, voiceConsentVersion);
+    }
+
+    /**
+     * 음성 저장 동의를 철회한다 (§3.15, KAN-269). 이 뒤의 업로드부터 저장되지 않는다 - 진행 중인 세션도 다음
+     * 문항부터다 ({@code VoiceConsents}). 이미 저장된 음성은 여기서 건드리지 않는다. 동의한 적이 없어도 200이다 (멱등).
+     *
+     * @throws ApiException 401 {@code AUTH_TOKEN_INVALID}
+     */
+    MeResponse withdrawVoiceConsent(AppUser user) {
+        AppUser saved = changeVoiceConsent(user, locked -> locked.withdrawVoiceConsent(Instant.now(clock)));
+        log.info("음성 저장 동의 철회 userId={}", saved.id());
+        return MeResponse.of(saved, voiceConsentVersion);
+    }
+
+    private AppUser changeVoiceConsent(AppUser user, Consumer<AppUser> change) {
+        AppUser saved = transactionTemplate.execute(tx -> {
+            // 프로필 저장과 같은 규율이다 - 인증 단계에서 읽은 계정은 트랜잭션 밖이라 잠금과 함께 다시 읽는다.
+            AppUser locked = users.lockActive(user.id())
+                    .orElseThrow(() -> new ApiException(ErrorCode.AUTH_TOKEN_INVALID));
+            change.accept(locked);
+            return locked;
+        });
+        if (saved == null) {
+            throw new IllegalStateException("음성 저장 동의 트랜잭션이 결과 없이 끝났다");
+        }
+        return saved;
     }
 
     private static String email(@Nullable String raw) {

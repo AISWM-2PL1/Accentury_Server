@@ -197,6 +197,8 @@ terraform apply
 
 생성물: `accentury-tfstate-<account_id>` 버킷 (버전 관리, 암호화, 퍼블릭 차단, 이전 버전 30일 만료와
 TLS 강제 정책 - KAN-242),
+음성 전용 버킷 `accentury-voice-<account_id>` (KAN-269 - 버전 관리, 암호화, 퍼블릭 차단, 만료 규칙 없음,
+TLS 강제와 객체 읽기 주체 제한 정책. envs/*가 이 버킷에 쓰므로 bootstrap apply가 먼저다, "음성 전용 S3" 절),
 ECR 리포지토리 `accentury/backend`, `accentury/ai`, `accentury/ai-model` (IMMUTABLE,
 라이프사이클 정책: 태그 없는 이미지 1일, 최근 50개 유지), GitHub Actions OIDC 공급자
 (`token.actions.githubusercontent.com`, KAN-127 - 계정에 1개뿐이라 여기서 만든다.
@@ -271,13 +273,16 @@ terraform apply
   aws route53 list-resource-record-sets --hosted-zone-id "$(terraform output -raw private_zone_id)" \
     --query "ResourceRecordSets[?Type=='A'].[Name,AliasTarget.DNSName]" --output table
   ```
-- 학습 데이터 S3 (KAN-201, staging만): 버킷이 있고 퍼블릭 액세스가 차단됐는지. **이 apply가 backend 코드
-  배포보다 먼저다** - 태스크 정의 secrets에 `ACCENTURY_TRAINING_BUCKET`이 늘어 apply가 태스크 정의를 새
-  리비전으로 갈고, 그 파라미터가 없으면 파이프라인의 리비전 등록이 실패한다 (KAN-132 교훈, "staging 전용
-  학습 데이터 S3" 절).
+- 음성 전용 S3 (KAN-201, KAN-269, 두 환경): 버킷은 bootstrap이 만든다 - **bootstrap apply가 이 apply보다
+  먼저다.** 여기서는 버킷이 있고 퍼블릭 액세스가 차단됐는지, 두 파라미터가 생겼는지 본다. **이 apply가 backend
+  코드 배포보다 먼저다** - 태스크 정의 secrets에 `ACCENTURY_TRAINING_BUCKET`과 `ACCENTURY_TRAINING_KEYPREFIX`가
+  늘어 apply가 태스크 정의를 새 리비전으로 갈고, 그 파라미터가 없으면 파이프라인의 리비전 등록이 실패한다
+  (KAN-132 교훈, "음성 전용 S3" 절).
 
   ```
   aws s3api get-public-access-block --bucket "$(terraform output -raw training_bucket)"
+  aws s3api get-bucket-versioning --bucket "$(terraform output -raw training_bucket)"      # Status = Enabled
+  aws ssm get-parameters-by-path --path /accentury/staging --query "Parameters[?contains(Name, 'TRAINING')].[Name,Value]" --output table
   ```
 
 ### 2. prod
@@ -969,7 +974,8 @@ fargate 모듈이 config의 파라미터 이름 목록을 그대로 태스크 �
 | `ACCENTURY_SHARE_KAKAOADMINKEY` | 카카오디벨로퍼스 콘솔의 앱 Admin 키 (KAN-164). Terraform은 자리 표시 값으로 만들고(write-only `value_wo`라 state에 값이 남지 않는다) apply 뒤 `put-parameter --overwrite`로 넣는다 (아래 "카카오 공유 웹훅" 절). 두 환경 같은 값 | SecureString |
 | `ACCENTURY_FEEDBACK_SLACKWEBHOOKURL` | 이용 후기 알림이 나가는 슬랙 채널(`#feedback`)의 Incoming Webhook URL (KAN-211). 카카오 키와 같이 자리 표시 값으로 만들고 apply 뒤 `put-parameter`로 넣는다 (아래 "이용 후기 슬랙 알림" 절). **선택 값이다 - 없거나 자리 표시 값이면 backend가 알림만 끄고 그대로 기동한다** (`DeploymentConfigGuard` 밖이라 apply와 배포의 순서 제약이 없다). 채널이 하나라 두 환경 같은 값 | SecureString |
 | `ai/ACCENTURY_AI_INTERNAL_TOKEN` | `ACCENTURY_ANALYSIS_AITOKEN`과 같은 난수. ai 서버가 health를 뺀 모든 요청에서 대조한다 (KAN-36). ai 호스트 역할만 읽는다 | SecureString |
-| `ACCENTURY_TRAINING_BUCKET` | **staging에만 있다** (KAN-201). 학습 데이터 버킷 이름(`accentury-staging-training-<계정>`). tfvars `training_bucket_enabled`가 true인 환경에만 파라미터가 생기고, 그래서 prod 태스크 정의에는 이 변수가 없어 backend가 S3 클라이언트를 만들지 않는다 (아래 "staging 전용 학습 데이터 S3" 절) | String |
+| `ACCENTURY_TRAINING_BUCKET` | 음성 전용 버킷 이름(`accentury-voice-<계정>`, KAN-201, KAN-269). 두 환경이 같은 값이다. tfvars `training_bucket_enabled`가 true인 환경에만 파라미터가 생기고(지금은 두 환경 모두 true), 끈 환경의 태스크 정의에는 이 변수가 없어 backend가 S3 클라이언트를 만들지 않는다 (아래 "음성 전용 S3" 절) | String |
+| `ACCENTURY_TRAINING_KEYPREFIX` | 음성 버킷 안에서 이 환경이 쓰는 키 접두사 (KAN-269). 끝에 슬래시가 없는 환경 이름이다 - staging은 `staging`, prod는 `prod`. `ACCENTURY_TRAINING_BUCKET`과 함께 생기고 함께 사라진다. 태스크 역할의 PutObject가 같은 접두사 아래로만 열려 있어 값이 다르면 저장이 AccessDenied로 실패한다 | String |
 
 **DB 사용자 이름과 비밀번호 파라미터는 없다.** RDS 관리형 마스터 시크릿은 7일마다
 자동 회전되므로(AWS 문서, 일정 변경만 가능) 값을 SSM에 복사하면 첫 회전에서 접속이
@@ -1316,35 +1322,78 @@ KAN-57의 c7i.xlarge 실측(bf16 + MFA `align_one`, 1건 P50 10.1초, P95 11.1�
 이지 "전부 죽는다"가 아니다. 전역 한 건으로 묶는 일은 다중 인스턴스 상태를 다루는 KAN-167의
 몫이고, 프로토타입 트래픽(동시 응시 소수)에서는 태스크가 1개로 유지되므로 지금은 두고 본다.
 
-### staging 전용 학습 데이터 S3 (KAN-201)
+### 음성 전용 S3 (KAN-201, KAN-269)
 
-원본 음성은 요청 처리 중에만 메모리에 있고 영속 저장소에 남지 않는다 (SRS FR-DP-01). 그래서 모델을 다시
-학습시킬 실발화 데이터가 어디에도 없었고, 2026-09-08 결정으로 **staging에만** 버킷을 두고 내부 테스터의
-음성 WAV와 AI 원점수 메타 JSON을 보존한다. prod는 FR-DP-01 그대로다.
+모델을 다시 학습시킬 실발화 데이터를 모으려고, 음성 저장(선택 동의)에 동의한 세션의 음성 WAV와 AI 원점수 메타
+JSON을 S3에 남긴다. 동의하지 않은 세션의 음성은 요청 처리 중에만 메모리에 있고 어디에도 남지 않는다.
+KAN-201에서는 staging에만 환경별 버킷(`accentury-staging-training-<계정 ID>`)을 두었는데, KAN-269(2026-10-04
+결정)에서 **두 환경이 함께 쓰는 음성 전용 버킷 하나**로 옮기고 prod도 켰다.
 
 | 항목 | 값 |
 | --- | --- |
-| 버킷 | `accentury-staging-training-<계정 ID>` (envs main.tf, tfvars `training_bucket_enabled = true`인 환경만) |
-| 보호 | 퍼블릭 액세스 전면 차단, SSE-S3 기본 암호화, 버전 관리 없음, 수명주기 규칙 없음(학습 데이터라 자동 삭제하지 않는다) |
-| 권한 | backend 태스크 역할에 이 버킷 한 개로 한정한 `s3:PutObject`만 (fargate 모듈 `training_bucket_arn`). Get, List, Delete 없음 |
-| 스위치 | SSM `ACCENTURY_TRAINING_BUCKET` -> `accentury.training.bucket`. 없으면 backend는 S3 클라이언트도 저장 빈도 만들지 않는다 (`TrainingConfig`) |
+| 버킷 | `accentury-voice-<계정 ID>` 하나. **bootstrap 스택이 만든다** (`bootstrap/voice.tf`). envs는 같은 규칙으로 이름만 조립한다 |
+| 환경 구분 | 키 접두사 `staging/`, `prod/`. tfvars `training_bucket_enabled = true`인 환경만 쓴다 (두 환경 모두 true) |
+| 보호 | 퍼블릭 액세스 전면 차단, SSE-S3 기본 암호화, 버전 관리 켬, 수명주기(만료) 규칙 없음, `force_destroy` 없음, `prevent_destroy` |
+| 버킷 정책 | TLS가 아닌 요청 전부 거부. 객체 본문 읽기(`s3:GetObject`, `s3:GetObjectVersion`)는 `voice_reader_principal_arns`의 주체만 - 기본값은 학습 담당 IAM 사용자 `jaeyoung`과 학습용 EC2 역할 `accentury-track2-ec2-role`. 관리자 자격 증명도 본문은 못 읽는다. List, Put, Delete는 정책이 거부하지 않는다 (List를 거부하면 Terraform refresh가 잠긴다) |
+| 쓰기 권한 | backend 태스크 역할에 `arn:aws:s3:::accentury-voice-<계정 ID>/<환경>/*`로 한정한 `s3:PutObject`만 (fargate 모듈 `training_bucket_arn`, `training_key_prefix`). staging 태스크는 `prod/` 아래에 쓰지 못한다. Get, List, Delete 없음 |
+| 스위치 | SSM `ACCENTURY_TRAINING_BUCKET` -> `accentury.training.bucket`, `ACCENTURY_TRAINING_KEYPREFIX` -> `accentury.training.key-prefix`. 버킷 값이 없으면 backend는 S3 클라이언트도 저장 빈도 만들지 않는다 (`TrainingConfig`) |
+| 저장 대상 | 음성 저장에 동의한 세션만. 동의 판정은 backend가 한다 |
 | 저장 시점 | 분석 상태 전이가 끝난 뒤, 오디오 버퍼 파기 전 (`HttpAnalysisDispatcher`). 성공과 판정 실패 모두, 계약 위반과 AI 불가는 제외 |
-| 키 | `<region>/<testVersion>/<sessionId>/<itemId>/<analysisJobId>.wav` 와 `.json` (region은 세션 생성 요청의 출신 지역 코드 10개 중 하나 또는 `UNKNOWN`) |
+| 키 | `<환경>/<region>/<testVersion>/<sessionId>/<itemId>/<analysisJobId>.wav` 와 `.json` (region은 세션 생성 요청의 출신 지역 코드 10개 중 하나 또는 `UNKNOWN`) |
 | 실패 | 삼킨다 - WARN 로그 1줄 + 지표 `accentury.training.samples`(result=failed). 분석 결과와 상태 조회에 영향 없음 |
 
-**apply 순서.** 이 파라미터가 태스크 정의 secrets에 들어가므로 staging apply가 코드 배포보다 먼저다 (KAN-132
-교훈). 반대로 하면 파이프라인이 등록하는 리비전이 없는 파라미터를 가리켜 태스크가 뜨지 않는다. 두 환경의
-main.tf는 같고(KAN-140) 차이는 tfvars 한 줄이다 - prod plan에는 버킷도 정책도 파라미터도 없어야 한다.
+**음성은 Terraform이 지우지 않는다.** 버킷이 환경 스택 밖(bootstrap)에 있어 환경 destroy나 스위치 끄기가 버킷을
+건드리지 못하고, bootstrap에서도 `prevent_destroy`라 버킷을 지우는 plan은 실패한다. 만료 규칙이 없어 S3가 알아서
+지우는 일도 없다. 버전 관리가 켜져 있어 같은 키를 덮어쓰거나 지워도 이전 버전이 남는다. 음성을 지우는 일은
+사람이 판단해서 사람이 한다.
 
-**teardown.** 버킷은 `force_destroy`라 destroy가 객체째 지운다 - staging을 부수고 다시 지으면 모인 샘플이 사라진다.
-남겨야 하면 destroy 전에 `aws s3 sync s3://<버킷> <로컬>`로 내려받는다.
+**배포 전제 (KAN-269).** 이 변경은 방침 버전을 `2026-10-04`로 올린다. backend는 가입 요청의 방침 버전이 서버 값과
+정확히 같아야 받으므로(`AuthService`), 새 이미지가 뜬 환경에서는 옛 방침 버전 상수를 가진 앱 빌드의 신규 가입이
+400 `AUTH_CONSENT_REQUIRED`가 된다 (기존 회원 로그인은 영향 없다). 그래서 prod는 아래 셋을 같은 때에 맞춘다.
+
+- 새 방침 버전 상수를 가진 앱 빌드의 스토어 배포 (`Accentury_App` 레포)
+- prod `privacy.html` 게시 (`scripts/publish-privacy.sh prod`)
+- backend Release 승격
+
+**apply 순서 (KAN-269).** bootstrap, staging, prod 순이다.
+
+1. `infra/bootstrap` apply - 음성 버킷과 버킷 정책이 생기고 CloudTrail 데이터 이벤트 대상에 음성 버킷이 더해진다.
+   옛 staging 버킷은 대상에 남는다. 버킷이 없는 채로 환경을 먼저 적용하면 backend 저장이 NoSuchBucket으로
+   실패한다 (분석 결과에는 영향이 없지만 그동안의 음성은 남지 않는다).
+2. `infra/envs/staging` apply - plan에 옛 버킷 리소스 6개(버킷, 퍼블릭 차단, 암호화, 버킷 정책, 읽기 역할과 그
+   정책)가 **"will no longer be managed by Terraform, but will not be destroyed"**로 나와야 한다.
+   `aws_s3_bucket.training`이 "will be destroyed"로 보이면 apply하지 않는다. destroy로 나오는 것은 옛 버킷의
+   수명주기 규칙과 테스터 ID, 가명 키 파라미터 셋이다. **이 apply는 2026-12-31 전에 끝나야 한다** - 옛 버킷에는
+   KAN-239가 건 만료 규칙(2026-12-31에 객체 삭제)이 아직 실물로 살아 있고 버전 관리가 꺼져 있어, 그날을 넘기면
+   남은 음성이 복구할 수 없이 지워진다. 이 apply가 그 규칙을 없앤다.
+3. `infra/envs/prod` apply - 이 티켓의 몫은 두 파라미터와 태스크 역할 문장, 태스크 정의 교체뿐이다. 다만 prod에는
+   아직 적용하지 않은 앞선 변경(KAN-242 write-only 시크릿, KAN-244 WAF, KAN-245 엣지와 backend 아웃바운드)이
+   쌓여 있어 plan에 함께 나온다 (2026-10-04 plan: 11 add, 11 change, 6 destroy). 그 변경들의 순서 제약이 그대로
+   적용된다 - 이미지가 먼저이고, backend 아웃바운드는 좁은 규칙을 `-target`으로 먼저 만든다 (아래 "JDBC 서버
+   인증서 검증의 적용 순서", "backend 아웃바운드 축소의 적용 순서").
+
+이미지 배포와 환경 apply의 앞뒤는 어느 쪽이든 안전하다. 새 이미지는 두 파라미터가 없으면 저장 빈을 만들지 않고
+그대로 뜬다 (`TrainingConfig`). 반대로 apply가 먼저이고 옛 이미지가 떠 있는 동안에는 옛 이미지가 접두 없는 키로
+저장을 시도해 분석마다 AccessDenied WARN과 `accentury.training.samples{result=failed}`가 남는다. 태스크 역할이
+자기 접두에만 쓸 수 있어 막히는 것이고 의도한 동작이니, 역할을 넓혀서 고치지 않는다. 새 이미지가 뜨면 사라진다.
+두 환경의 main.tf는 같다 (KAN-140).
+
+**옛 버킷 `accentury-staging-training-<계정 ID>`.** KAN-269 적용 뒤로는 Terraform이 관리하지 않는다
+(envs main.tf의 `removed` 블록, `destroy = false`). 버킷과 그 안의 음성은 그대로 남고 새 객체는 쌓이지 않는다.
+KAN-239 때 붙은 버킷 정책(GetObject 제한)과 읽기 역할도 지우지 않고 관리에서만 빼므로 읽기 제한은 그대로이고,
+CloudTrail 데이터 이벤트도 버킷이 정리될 때까지 계속 기록한다 (`bootstrap/audit.tf`). 만료 규칙만 staging
+apply가 없앤다. 이 버킷을 옮기거나 비우거나 지우는 일은 사람만 한다 - Terraform과 자동화는 손대지 않는다.
+
+**teardown.** 환경 destroy는 음성 버킷을 지우지 않는다. 그 환경의 두 파라미터와 태스크 역할 문장만 사라지고
+`staging/`, `prod/` 아래 객체는 그대로다.
 
 확인:
 
 ```
-aws s3 ls "s3://$(terraform output -raw training_bucket)/" --recursive | tail        # 지역/버전/세션/문항/작업.wav|.json
-aws s3 cp "s3://$(terraform output -raw training_bucket)/<키>.json" -                  # intonationScore = analysis_job.intonation_score
+aws s3 ls "s3://$(terraform output -raw training_bucket)/$(terraform output -raw training_key_prefix)/" --recursive | tail   # 환경/지역/버전/세션/문항/작업.wav|.json
 ```
+
+객체 본문(`aws s3 cp`)은 `voice_reader_principal_arns`의 주체로만 읽힌다 - 그 밖의 자격 증명은 AccessDenied다.
 
 ### 이미 있는 SSM 파라미터 (재구축, 수동 생성분)
 
@@ -1496,11 +1545,11 @@ staging부터 true로 apply하고 prod가 뒤따른다.
 
 | 항목 | 어디 | 내용 |
 | --- | --- | --- |
-| S3 TLS 강제 | `modules/edge`(web), `modules/ai-host`(boot), bootstrap(tfstate, KAN-242와 audit). 학습 버킷은 KAN-239 되돌림(2026-10-04)으로 버킷 정책이 없다 | `aws:SecureTransport = false` 요청 전부 거부 |
+| S3 TLS 강제 | `modules/edge`(web), `modules/ai-host`(boot), bootstrap(tfstate, KAN-242와 audit, 음성 버킷 voice는 KAN-269). 옛 학습 버킷(`accentury-staging-training`)은 Terraform 관리 밖이고 KAN-239의 버킷 정책이 실물로 남아 있다 | `aws:SecureTransport = false` 요청 전부 거부 |
 | 보안 응답 헤더 | `modules/edge`의 `aws_cloudfront_response_headers_policy.security`, 세 동작 모두 | HSTS 1년 + includeSubDomains(preload 없음), nosniff, `X-Frame-Options: DENY`, `strict-origin-when-cross-origin`, CSP는 Report-Only. 수집 지점(`report-uri`/`report-to`)이 아직 없어 위반은 브라우저 콘솔에만 찍힌다 - enforce 전환 후속은 수집 엔드포인트부터 |
 | JDBC 서버 인증서 검증 | `modules/config`의 `SPRING_DATASOURCE_URL`, `backend/Dockerfile` | `sslmode=verify-full` + 이미지 안 RDS 전역 CA 번들. 서버 쪽 `rds.force_ssl`은 PG16 기본 파라미터 그룹에서 이미 1 |
 | backend 아웃바운드 | `modules/network` | 443(IPv4, IPv6)과 SG 참조 3개(RDS 5432, Redis 6379, AI ALB 8000)만 |
-| 계정 감사, 위협 탐지 | `bootstrap/audit.tf` | CloudTrail 관리 이벤트 + 학습, tfstate 버킷 S3 데이터 이벤트, GuardDuty + S3 보호 |
+| 계정 감사, 위협 탐지 | `bootstrap/audit.tf` | CloudTrail 관리 이벤트 + 음성, tfstate 버킷 S3 데이터 이벤트, GuardDuty + S3 보호 |
 
 ### JDBC 서버 인증서 검증의 적용 순서
 
@@ -1537,11 +1586,11 @@ VPC DNS, ECS 태스크 메타데이터, Time Sync는 SG가 거르지 않으므�
 ### CloudTrail과 GuardDuty
 
 trail은 계정에 하나다(`accentury-account-audit`, 전 리전, 로그 파일 검증). 관리 이벤트는 읽기와 쓰기를 모두
-남겨 SSM `GetParameter`, Secrets Manager `GetSecretValue`도 기록된다. S3 데이터 이벤트는 학습 버킷과 tfstate
-버킷 객체만 남긴다. 로그는 `accentury-cloudtrail-<account_id>`에 1년 보관한다.
+남겨 SSM `GetParameter`, Secrets Manager `GetSecretValue`도 기록된다. S3 데이터 이벤트는 음성 버킷(`accentury-voice-<account_id>`, KAN-269)과 tfstate
+버킷 객체만 남긴다. 옛 staging 학습 버킷(`accentury-staging-training`)도 사람이 정리할 때까지 대상에 남긴다. 로그는 `accentury-cloudtrail-<account_id>`에 1년 보관한다.
 
 ```
-# 최근 학습 버킷 객체 읽기 (CloudTrail 콘솔 이벤트 기록은 데이터 이벤트를 보여 주지 않는다 - 버킷의 로그를 본다)
+# 최근 음성 버킷 객체 읽기 (CloudTrail 콘솔 이벤트 기록은 데이터 이벤트를 보여 주지 않는다 - 버킷의 로그를 본다)
 aws s3 ls s3://accentury-cloudtrail-<account_id>/AWSLogs/<account_id>/CloudTrail/ap-northeast-2/ --recursive | tail
 # 관리 이벤트 (90일)
 aws cloudtrail lookup-events --lookup-attributes AttributeKey=EventName,AttributeValue=GetParameter --max-results 5
@@ -2238,7 +2287,7 @@ Terraform 입력의 차이는 `diff -r infra/envs/staging infra/envs/prod`가 �
 | 내부 호출 토큰 (KAN-36) | 환경별 난수 | 환경별 난수 | `ACCENTURY_ANALYSIS_AITOKEN`, `ai/ACCENTURY_AI_INTERNAL_TOKEN` |
 | AI 호스트 (KAN-36) | c7i.xlarge, 루트 40GiB | 같은 값 | `ai_instance_type`, `ai_root_volume_size` (B단계 2026-09-10에 20에서 40으로) |
 | AI 호스트 오토스케일링 (KAN-201) | max 3 | 같은 값 | `ai_max_size` - ai-host 모듈 ASG `max_size`. min 1은 모듈 기본값 |
-| 학습 데이터 S3 (KAN-201) | 켬 | 끔 | `training_bucket_enabled` - 버킷, 태스크 역할 PutObject, SSM `ACCENTURY_TRAINING_BUCKET`(secrets 14개째) |
+| 음성 저장 S3 (KAN-201, KAN-269) | 켬, 접두사 `staging/` | 켬, 접두사 `prod/` | `training_bucket_enabled` - 태스크 역할 PutObject(자기 접두사만), SSM `ACCENTURY_TRAINING_BUCKET`과 `ACCENTURY_TRAINING_KEYPREFIX`. 버킷은 bootstrap의 음성 전용 버킷 하나를 함께 쓴다 |
 | RDS 삭제 보호, 최종 스냅샷 | 없음, 생략 | 켬, 남김 | RDS |
 | 배포 역할 ECR push | 허용 | 불가 | `modules/deploy` image-deploy 정책 (KAN-128 승격 모델) |
 
@@ -2282,6 +2331,8 @@ terraform destroy
 - CloudFront 배포 삭제는 비활성화 전파 때문에 수 분 걸린다.
 - bootstrap의 state 버킷은 `prevent_destroy`로 보호된다. 두 환경 state가
   전부 필요 없어진 것이 확실할 때만 코드에서 보호를 풀고 지운다.
+- bootstrap의 음성 버킷(`accentury-voice-<account_id>`, KAN-269)도 `prevent_destroy`이고 `force_destroy`가 없다.
+  음성은 Terraform으로 지우지 않는다 ("음성 전용 S3" 절).
 - destroy 뒤에는 그 환경의 GitHub environment 변수 `DEPLOY_PAUSED`를 `true`로
   둔다. 환경이 없는데 `web/**` 변경이 병합되면 Web Deploy가 역할 부재로
   `AssumeRoleWithWebIdentity` 거부라는 헷갈리는 메시지로 실패하기 때문이다
@@ -2305,7 +2356,7 @@ terraform destroy
 - 프라이빗 영역의 `ai.accentury.internal` A 레코드는 KAN-201부터 Terraform 소유(ALB alias)라
   destroy가 함께 지운다. KAN-36 시절 인스턴스가 만든 레코드가 남아 있어도 영역이
   `force_destroy = true`라 레코드째 지운다. ASG는 인스턴스를 먼저 종료한 뒤 삭제된다.
-  학습 데이터 버킷(KAN-201, staging)도 `force_destroy`라 샘플째 사라진다 - 남길 것은 미리 내려받는다. ai 컨테이너 로그 그룹 `/accentury/{env}/ai`(KAN-203)도
+  음성 전용 버킷(KAN-269)은 bootstrap 소유라 환경 destroy로 지워지지 않고, 옛 학습 버킷(`accentury-staging-training`)은 Terraform 관리 밖이라 그대로 남는다 - 둘 다 사람만 지운다. ai 컨테이너 로그 그룹 `/accentury/{env}/ai`(KAN-203)도
   Terraform 소유라 로그째 지워진다 - 스트림은 인스턴스마다 쌓이지만 그룹 하나에 딸려 있다.
 - 미확인 SNS 이메일 구독은 AWS가 지워 주지 않아 state에서만 빠지지만, 토픽이
   삭제되면 딸린 구독도 함께 사라져 잔존물이 남지 않는다 (KAN-134). 재구축 때는
