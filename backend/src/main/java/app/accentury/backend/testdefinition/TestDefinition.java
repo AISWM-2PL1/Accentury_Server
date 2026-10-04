@@ -12,18 +12,22 @@ import java.util.List;
  * 클라이언트 응답은 정답을 뺀 {@link TestDefinitionResponse}로 변환해서 나간다 -
  * 이 타입을 직접 직렬화해 응답하면 안 된다 (KAN-13 정오 미노출).
  * <p>
- * 발행본 하나는 <b>음성 문장 풀</b>(N개, N >= 5)과 <b>어휘 풀</b>(M개, M >= 5)을 담는다
- * (KAN-182 · 어휘 풀은 2026-09-04 확장). 세션이 실제로 응시하는 것은 두 풀에서 유도한
- * <b>세트</b>(음성 5 + 어휘 5 = 10문항) 하나이고, 세트는 발행본에 손으로 나열하지 않고
- * {@link VoiceSets}가 규칙으로 유도한다. 그래서 같은 타입이 두 뜻으로 쓰인다 - 발행본
- * 전체(풀 정의, seq 1..N+M)와 세션이 보는 세트 정의(seq 1..10).
+ * 발행본 하나는 <b>음성 문장 풀</b>(N개)과 <b>어휘 풀</b>(M개)을 담는다 (KAN-182, 어휘 풀은
+ * 2026-09-04 확장). 세션이 실제로 응시하는 것은 두 풀에서 유도한 <b>세트</b> 하나이고, 세트는
+ * 발행본에 손으로 나열하지 않고 {@link VoiceSets}가 규칙으로 유도한다. 세트의 구성은
+ * {@code setLayout}이 정한다 - 없으면 음성 5 + 어휘 5 = 10문항 교차, {@code gn-2026.10.1}부터
+ * 음성 3 + 어휘 4 = 7문항이다 (KAN-260). 그래서 같은 타입이 두 뜻으로 쓰인다 - 발행본
+ * 전체(풀 정의, seq 1..N+M)와 세션이 보는 세트 정의(seq 1..세트 문항 수).
  * 어느 쪽인지는 그 값을 준 {@link TestDefinitionRegistry} 메서드가 말한다.
  *
  * @param testVersion          정의 버전 (예: gn-2026.08.1) - 발행 후 불변 (§5.4)
  * @param scoreVersion         이 정의를 채점할 점수 버전 (sv-0.3, KAN-21)
  * @param dialect              대상 방언 - MVP는 GYEONGNAM 고정 (KAN-8 범위 제외)
  * @param estimatedDurationSec 예상 소요 시간 (§3.2)
- * @param items                풀 정의는 VOICE N + VOCABULARY M, 세트 정의는 VOICE 5 + VOCABULARY 5.
+ * @param setLayout            세트 하나의 구성과 출제 순서 (KAN-260, {@link SetLayout}). optional이고
+ *                             없으면 {@link SetLayout#LEGACY}(음성 5 + 어휘 5 교차)로 읽는다 -
+ *                             {@code gn-2026.09.4}까지의 발행본에는 이 필드가 없다.
+ * @param items                풀 정의는 VOICE N + VOCABULARY M, 세트 정의는 {@code setLayout}의 구성.
  *                             어느 쪽이든 seq 순서 고정.
  */
 public record TestDefinition(
@@ -31,7 +35,14 @@ public record TestDefinition(
         String scoreVersion,
         String dialect,
         int estimatedDurationSec,
+        @Nullable String setLayout,
         List<Item> items) {
+
+    /** {@code setLayout} 없는 정의 - 기존 발행본과 같은 모양이다. 테스트 픽스처가 쓴다. */
+    public TestDefinition(String testVersion, String scoreVersion, String dialect,
+                          int estimatedDurationSec, List<Item> items) {
+        this(testVersion, scoreVersion, dialect, estimatedDurationSec, null, items);
+    }
 
     /**
      * VOICE 문항의 최대 녹음 길이 (ms) - 전 문항 공통 고정값이다 (§3.2, §3.3, KAN-23).

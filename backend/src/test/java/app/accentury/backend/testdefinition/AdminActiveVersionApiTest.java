@@ -280,9 +280,10 @@ class AdminActiveVersionApiTest extends IntegrationTest {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.activeVersion").value(BASELINE))
                 .andExpect(jsonPath("$.previousVersion").value(OLDER))
-                // 구버전(V900) + 더미 baseline(V899) + 풀 픽스처 둘(V901, KAN-182) + 운영 정본 gn-2026.09.4(V1).
-                // gn-2026.09.1~09.3은 KAN-220 재베이스라인으로 파일과 DB 행이 함께 사라졌다.
-                .andExpect(jsonPath("$.definitions.length()").value(5))
+                // 구버전(V900) + 더미 baseline(V899) + 풀 픽스처 둘(V901, KAN-182) + 운영 정본 gn-2026.09.4(V1)
+                // + 7문항 정의 gn-2026.10.1(V5, KAN-260). gn-2026.09.1~09.3은 KAN-220 재베이스라인으로 파일과
+                // DB 행이 함께 사라졌다.
+                .andExpect(jsonPath("$.definitions.length()").value(6))
                 // 발행 시각 오름차순 - 구버전이 먼저다.
                 .andExpect(jsonPath("$.definitions[0].testVersion").value(OLDER))
                 .andExpect(jsonPath("$.definitions[0].dialect").value("GYEONGNAM"))
@@ -306,6 +307,12 @@ class AdminActiveVersionApiTest extends IntegrationTest {
                 .andExpect(jsonPath("$.definitions[4].voicePoolSize").value(145))
                 .andExpect(jsonPath("$.definitions[4].voiceSetCount").value(29))
                 .andExpect(jsonPath("$.definitions[4].active").value(false))
+                // 7문항 정의 (V5, KAN-260) - 같은 풀을 음성 3 + 어휘 4로 나눠 세트 49개다.
+                .andExpect(jsonPath("$.definitions[5].testVersion").value("gn-2026.10.1"))
+                .andExpect(jsonPath("$.definitions[5].scoreVersion").value("sv-0.5"))
+                .andExpect(jsonPath("$.definitions[5].voicePoolSize").value(145))
+                .andExpect(jsonPath("$.definitions[5].voiceSetCount").value(49))
+                .andExpect(jsonPath("$.definitions[5].active").value(false))
                 // 13KB짜리 본문은 목록에 싣지 않는다 - 문항은 공개 엔드포인트(§3.2)에서 본다.
                 .andExpect(jsonPath("$.definitions[0].body").doesNotExist())
                 .andExpect(header().string("Cache-Control", containsString("no-store")));
@@ -329,14 +336,15 @@ class AdminActiveVersionApiTest extends IntegrationTest {
         try {
             mockMvc.perform(get(DEFINITIONS_URL).header(AdminAuth.TOKEN_HEADER, TOKEN))
                     .andExpect(status().isOk())
-                    // 발행본 5개(V900, 더미 baseline V899, 풀 픽스처 둘, 운영 정본 gn-2026.09.4) + 이 행 하나.
-                    .andExpect(jsonPath("$.definitions.length()").value(6))
-                    .andExpect(jsonPath("$.definitions[5].testVersion").value(unknown))
+                    // 발행본 6개(V900, 더미 baseline V899, 풀 픽스처 둘, 운영 정본 gn-2026.09.4, 7문항
+                    // gn-2026.10.1) + 이 행 하나.
+                    .andExpect(jsonPath("$.definitions.length()").value(7))
+                    .andExpect(jsonPath("$.definitions[6].testVersion").value(unknown))
                     // 사본 컬럼에서 오는 값은 그대로 나온다 - 모르는 것은 세트 관련 두 값뿐이다.
-                    .andExpect(jsonPath("$.definitions[5].dialect").value("GYEONGNAM"))
-                    .andExpect(jsonPath("$.definitions[5].active").value(false))
-                    .andExpect(jsonPath("$.definitions[5].voicePoolSize").value(nullValue()))
-                    .andExpect(jsonPath("$.definitions[5].voiceSetCount").value(nullValue()))
+                    .andExpect(jsonPath("$.definitions[6].dialect").value("GYEONGNAM"))
+                    .andExpect(jsonPath("$.definitions[6].active").value(false))
+                    .andExpect(jsonPath("$.definitions[6].voicePoolSize").value(nullValue()))
+                    .andExpect(jsonPath("$.definitions[6].voiceSetCount").value(nullValue()))
                     // 아는 버전은 종전대로 답한다 - 한 행의 공백이 나머지를 비우지 않는다.
                     .andExpect(jsonPath("$.definitions[1].voicePoolSize").value(5))
                     .andExpect(jsonPath("$.definitions[1].voiceSetCount").value(1));

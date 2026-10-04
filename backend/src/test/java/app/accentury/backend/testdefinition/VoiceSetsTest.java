@@ -20,54 +20,54 @@ class VoiceSetsTest {
 
     @Test
     void 세트_수는_5로_올림_나눗셈이다() {
-        assertEquals(1, VoiceSets.setCount(5, 5));
-        assertEquals(2, VoiceSets.setCount(6, 5));
-        assertEquals(2, VoiceSets.setCount(7, 5));
-        assertEquals(2, VoiceSets.setCount(10, 5));
-        assertEquals(7, VoiceSets.setCount(34, 5));
+        assertEquals(1, VoiceSets.setCount(SetLayout.LEGACY, 5, 5));
+        assertEquals(2, VoiceSets.setCount(SetLayout.LEGACY, 6, 5));
+        assertEquals(2, VoiceSets.setCount(SetLayout.LEGACY, 7, 5));
+        assertEquals(2, VoiceSets.setCount(SetLayout.LEGACY, 10, 5));
+        assertEquals(7, VoiceSets.setCount(SetLayout.LEGACY, 34, 5));
     }
 
     @Test
     void N이_5면_세트_하나로_현행과_같다() {
         // 하위 호환 - 기존 더미 정의(gn-2026.08.1)는 세트 1 하나이고 그 세트가 풀 전체다.
-        assertEquals(List.of(1, 2, 3, 4, 5), VoiceSets.poolIndexes(5, 1));
+        assertEquals(List.of(1, 2, 3, 4, 5), VoiceSets.poolIndexes(5, 5, 1));
     }
 
     @Test
     void 마지막_세트의_부족분은_풀의_처음부터_채운다() {
         // N = 6: 세트 2 = 6 + 1, 2, 3, 4
-        assertEquals(List.of(6, 1, 2, 3, 4), VoiceSets.poolIndexes(6, 2));
+        assertEquals(List.of(6, 1, 2, 3, 4), VoiceSets.poolIndexes(6, 5, 2));
         // N = 7: 세트 2 = 6, 7 + 1, 2, 3
-        assertEquals(List.of(1, 2, 3, 4, 5), VoiceSets.poolIndexes(7, 1));
-        assertEquals(List.of(6, 7, 1, 2, 3), VoiceSets.poolIndexes(7, 2));
+        assertEquals(List.of(1, 2, 3, 4, 5), VoiceSets.poolIndexes(7, 5, 1));
+        assertEquals(List.of(6, 7, 1, 2, 3), VoiceSets.poolIndexes(7, 5, 2));
     }
 
     @Test
     void N이_5의_배수면_채우지_않는다() {
-        assertEquals(List.of(1, 2, 3, 4, 5), VoiceSets.poolIndexes(10, 1));
-        assertEquals(List.of(6, 7, 8, 9, 10), VoiceSets.poolIndexes(10, 2));
+        assertEquals(List.of(1, 2, 3, 4, 5), VoiceSets.poolIndexes(10, 5, 1));
+        assertEquals(List.of(6, 7, 8, 9, 10), VoiceSets.poolIndexes(10, 5, 2));
     }
 
     @Test
     void N이_34면_세트_7개이고_세트_7은_31_32_33_34_1이다() {
         // 티켓의 예시 표 그대로다.
-        assertEquals(7, VoiceSets.setCount(34, 5));
-        assertEquals(List.of(1, 2, 3, 4, 5), VoiceSets.poolIndexes(34, 1));
-        assertEquals(List.of(6, 7, 8, 9, 10), VoiceSets.poolIndexes(34, 2));
+        assertEquals(7, VoiceSets.setCount(SetLayout.LEGACY, 34, 5));
+        assertEquals(List.of(1, 2, 3, 4, 5), VoiceSets.poolIndexes(34, 5, 1));
+        assertEquals(List.of(6, 7, 8, 9, 10), VoiceSets.poolIndexes(34, 5, 2));
         for (int set = 3; set <= 6; set++) {
             int first = (set - 1) * 5 + 1;
             assertEquals(List.of(first, first + 1, first + 2, first + 3, first + 4),
-                    VoiceSets.poolIndexes(34, set));
+                    VoiceSets.poolIndexes(34, 5, set));
         }
-        assertEquals(List.of(31, 32, 33, 34, 1), VoiceSets.poolIndexes(34, 7));
+        assertEquals(List.of(31, 32, 33, 34, 1), VoiceSets.poolIndexes(34, 5, 7));
     }
 
     @Test
     void 채움_문항은_같은_세트_안에서_중복되지_않는다() {
         // N >= 5면 채움 수(5 - r)가 마지막 세트의 첫 poolIndex보다 작다 - 어느 N이든 세트 안 중복이 없다.
         for (int poolSize = 5; poolSize <= 40; poolSize++) {
-            for (int set = 1; set <= VoiceSets.setCount(poolSize, 5); set++) {
-                List<Integer> indexes = VoiceSets.poolIndexes(poolSize, set);
+            for (int set = 1; set <= VoiceSets.setCount(SetLayout.LEGACY, poolSize, 5); set++) {
+                List<Integer> indexes = VoiceSets.poolIndexes(poolSize, 5, set);
                 assertEquals(5, indexes.size());
                 assertEquals(5, indexes.stream().distinct().count(),
                         "N=" + poolSize + " 세트 " + set + "에 중복이 있다: " + indexes);
@@ -77,15 +77,15 @@ class VoiceSetsTest {
 
     @Test
     void N이_5_미만이면_거부한다() {
-        assertThrows(IllegalArgumentException.class, () -> VoiceSets.setCount(4, 5));
-        assertThrows(IllegalArgumentException.class, () -> VoiceSets.poolIndexes(4, 1));
+        assertThrows(IllegalArgumentException.class, () -> VoiceSets.setCount(SetLayout.LEGACY, 4, 5));
+        assertThrows(IllegalArgumentException.class, () -> VoiceSets.poolIndexes(4, 5, 1));
         assertThrows(IllegalArgumentException.class, () -> VoiceSets.derive(pool(4)));
     }
 
     @Test
     void 세트_번호가_1_미만이면_거부한다() {
-        assertThrows(IllegalArgumentException.class, () -> VoiceSets.poolIndexes(7, 0));
-        assertThrows(IllegalArgumentException.class, () -> VoiceSets.poolIndexes(7, -1));
+        assertThrows(IllegalArgumentException.class, () -> VoiceSets.poolIndexes(7, 5, 0));
+        assertThrows(IllegalArgumentException.class, () -> VoiceSets.poolIndexes(7, 5, -1));
     }
 
     @Test
@@ -93,20 +93,20 @@ class VoiceSetsTest {
         // 세트 수는 큰 쪽 풀이 정하므로(2026-09-04), 작은 풀은 되풀이해서 채우는 것이 정상이다.
         // 어휘 5 + 음성 34면 세트가 7개인데 어휘 풀은 자기만 보면 세트가 1개뿐이다.
         for (int set = 1; set <= 7; set++) {
-            assertEquals(List.of(1, 2, 3, 4, 5), VoiceSets.poolIndexes(5, set),
+            assertEquals(List.of(1, 2, 3, 4, 5), VoiceSets.poolIndexes(5, 5, set),
                     "어휘 5는 세트 " + set + "에서도 같은 5문항이다");
         }
         // 세트 3의 자리는 10..14이고 7로 나눈 나머지가 3..0이라 poolIndex는 4, 5, 6, 7, 1이다.
-        assertEquals(List.of(4, 5, 6, 7, 1), VoiceSets.poolIndexes(7, 3));
+        assertEquals(List.of(4, 5, 6, 7, 1), VoiceSets.poolIndexes(7, 5, 3));
     }
 
     // === 어휘 풀 다중화 (2026-09-04) ===
 
     @Test
     void 세트_수는_음성과_어휘_중_큰_풀이_정한다() {
-        assertEquals(7, VoiceSets.setCount(34, 5), "음성이 크면 음성이 정한다");
-        assertEquals(7, VoiceSets.setCount(5, 34), "어휘가 크면 어휘가 정한다");
-        assertEquals(29, VoiceSets.setCount(145, 145), "정본 발행본 - 양쪽 145면 29세트다");
+        assertEquals(7, VoiceSets.setCount(SetLayout.LEGACY, 34, 5), "음성이 크면 음성이 정한다");
+        assertEquals(7, VoiceSets.setCount(SetLayout.LEGACY, 5, 34), "어휘가 크면 어휘가 정한다");
+        assertEquals(29, VoiceSets.setCount(SetLayout.LEGACY, 145, 145), "정본 발행본 - 양쪽 145면 29세트다");
     }
 
     @Test
@@ -135,7 +135,7 @@ class VoiceSetsTest {
 
     @Test
     void 어휘_풀이_5_미만이면_거부한다() {
-        assertThrows(IllegalArgumentException.class, () -> VoiceSets.setCount(10, 4));
+        assertThrows(IllegalArgumentException.class, () -> VoiceSets.setCount(SetLayout.LEGACY, 10, 4));
         assertThrows(IllegalArgumentException.class, () -> VoiceSets.derive(pool(10, 4)));
     }
 
@@ -158,7 +158,7 @@ class VoiceSetsTest {
         return set.items().stream().map(TestDefinition.Item::itemId).toList();
     }
 
-    // === 세트 정의 유도 - 문항은 풀의 원본 그대로, seq만 1..10 교차 ===
+    // === 세트 정의 유도 - 문항은 풀의 원본 그대로, seq만 1..10 교차 (구성 없음) ===
 
     @Test
     void 세트_정의는_음성과_어휘를_교차하고_seq를_1부터_다시_매긴다() {
@@ -196,6 +196,79 @@ class VoiceSetsTest {
         assertEquals("sv-0.3", set.scoreVersion());
         assertEquals("GYEONGNAM", set.dialect());
         assertEquals(240, set.estimatedDurationSec());
+    }
+
+    // === 세트 구성 버전화 (KAN-260, 2026-10-04) ===
+
+    private static final SetLayout SEVEN = new SetLayout("VVWVWWW");
+
+    @Test
+    void 구성이_없으면_기존_5_더하기_5_교차와_같다() {
+        // 기존 발행본(setLayout 없음)의 세트가 바이트 단위로 그대로여야 한다 - 같은 풀을 LEGACY로
+        // 명시해도 세트 정의가 같다.
+        List<TestDefinition> implicit = VoiceSets.derive(pool(12, 9));
+        List<TestDefinition> explicit = VoiceSets.derive(withLayout(pool(12, 9), "VWVWVWVWVW"));
+        assertEquals(implicit.size(), explicit.size());
+        for (int i = 0; i < implicit.size(); i++) {
+            assertEquals(implicit.get(i).items(), explicit.get(i).items());
+        }
+        assertEquals(5, SetLayout.LEGACY.voiceCount());
+        assertEquals(5, SetLayout.LEGACY.vocabularyCount());
+    }
+
+    @Test
+    void 일곱_문항_세트는_구성_순서대로_놓고_seq를_1부터_7까지_매긴다() {
+        List<TestDefinition> sets = VoiceSets.derive(withLayout(pool(6, 8), "VVWVWWW"));
+        assertEquals(2, sets.size());
+        assertEquals(List.of("v1", "v2", "w1", "v3", "w2", "w3", "w4"), itemIds(sets.get(0)));
+        assertEquals(List.of("v4", "v5", "w5", "v6", "w6", "w7", "w8"), itemIds(sets.get(1)));
+        for (int i = 0; i < 7; i++) {
+            assertEquals(i + 1, sets.get(1).items().get(i).seq());
+        }
+        assertEquals("VVWVWWW", sets.get(0).setLayout(), "세트 정의도 구성을 물려받는다");
+    }
+
+    @Test
+    void 일곱_문항_세트_수는_세트가_더_많이_필요한_풀이_정한다() {
+        // 음성은 3개씩, 어휘는 4개씩 - 같은 크기면 음성 쪽이 세트를 더 요구한다.
+        assertEquals(49, VoiceSets.setCount(SEVEN, 145, 145), "gn-2026.10.1 - 145 + 145면 49세트다");
+        assertEquals(2, VoiceSets.setCount(SEVEN, 3, 8), "어휘가 더 많이 요구하면 어휘가 정한다");
+        assertEquals(1, VoiceSets.setCount(SEVEN, 3, 4));
+    }
+
+    @Test
+    void 정본_풀을_일곱_문항으로_나누면_마지막_세트와_어휘가_순환한다() {
+        // 음성: 세트 49 = 145, 1, 2 / 어휘: 세트 37 = 145, 1, 2, 3 (자리 144..147), 세트 49 = 48..51
+        assertEquals(List.of(145, 1, 2), VoiceSets.poolIndexes(145, 3, 49));
+        assertEquals(List.of(145, 1, 2, 3), VoiceSets.poolIndexes(145, 4, 37));
+        assertEquals(List.of(48, 49, 50, 51), VoiceSets.poolIndexes(145, 4, 49));
+        for (int set = 1; set <= 49; set++) {
+            assertEquals(3, VoiceSets.poolIndexes(145, 3, set).stream().distinct().count());
+            assertEquals(4, VoiceSets.poolIndexes(145, 4, set).stream().distinct().count());
+        }
+    }
+
+    @Test
+    void 풀이_세트가_가져오는_수보다_작으면_거부한다() {
+        assertThrows(IllegalArgumentException.class, () -> VoiceSets.setCount(SEVEN, 2, 4));
+        assertThrows(IllegalArgumentException.class, () -> VoiceSets.setCount(SEVEN, 3, 3));
+        // 5 미만이어도 구성이 요구하는 수 이상이면 된다 - 최소 크기는 5가 아니라 v와 w다.
+        assertEquals(1, VoiceSets.derive(withLayout(pool(3, 4), "VVWVWWW")).size());
+    }
+
+    @Test
+    void 구성_문자열은_V와_W만_각각_하나_이상이어야_한다() {
+        assertThrows(IllegalArgumentException.class, () -> new SetLayout(""));
+        assertThrows(IllegalArgumentException.class, () -> new SetLayout("VVX"));
+        assertThrows(IllegalArgumentException.class, () -> new SetLayout("vvw"));
+        assertThrows(IllegalArgumentException.class, () -> new SetLayout("VVV"));
+        assertThrows(IllegalArgumentException.class, () -> new SetLayout("WWW"));
+        assertEquals(SetLayout.LEGACY, SetLayout.of(null));
+    }
+
+    private static TestDefinition withLayout(TestDefinition pool, String layout) {
+        return new TestDefinition(pool.testVersion(), pool.scoreVersion(), pool.dialect(),
+                pool.estimatedDurationSec(), layout, pool.items());
     }
 
     /** 음성 N + 어휘 5 풀 - 어휘를 늘리지 않던 KAN-182 때의 모양이다. */

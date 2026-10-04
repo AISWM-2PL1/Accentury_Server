@@ -17,6 +17,7 @@ import java.util.function.Supplier;
 import java.util.function.UnaryOperator;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -86,6 +87,34 @@ class TestDefinitionRegistryTest {
         items.removeIf(item -> item.itemId().equals("w5"));
         items.add(voice("v6", 10));
         assertRejected(withItems(valid(), items), "문항 구성");
+    }
+
+    // === 세트 구성 (KAN-260, 2026-10-04) - 최소 풀 크기는 setLayout의 v와 w다 ===
+
+    @Test
+    void 일곱_문항_구성은_음성_3_어휘_4부터_발행된다() {
+        TestDefinitionRegistry.validate(pool(3, 4, "VVWVWWW"));
+        TestDefinitionRegistry.validate(pool(145, 145, "VVWVWWW"));
+    }
+
+    @Test
+    void 일곱_문항_구성인데_풀이_모자라면_발행_거부다() {
+        assertRejected(pool(2, 4, "VVWVWWW"), "음성 3개 이상 + 어휘 4개 이상");
+        assertRejected(pool(2, 5, "VVWVWWW"), "문항 구성이 음성 3 이상, 어휘 4 이상이 아니다");
+        assertRejected(pool(5, 3, "VVWVWWW"), "문항 구성이 음성 3 이상, 어휘 4 이상이 아니다");
+    }
+
+    @Test
+    void 구성이_없으면_종전대로_음성_5_어휘_5가_최소다() {
+        assertRejected(pool(4, 6, null), "문항 구성이 음성 5 이상, 어휘 5 이상이 아니다");
+        assertRejected(pool(3, 4, null), "음성 5개 이상");
+    }
+
+    @Test
+    void 세트_구성_문자열이_틀리면_어느_버전인지와_함께_발행_거부다() {
+        assertRejected(withLayout(valid(), "VVX"), "V(음성)와 W(어휘)만");
+        assertRejected(withLayout(valid(), "VVVVV"), "하나 이상");
+        assertRejected(withLayout(valid(), ""), "gn-2026.08.1");
     }
 
     @Test
@@ -416,6 +445,28 @@ class TestDefinitionRegistryTest {
         }
 
         @Test
+        void 일곱_문항_구성_정의는_세트마다_7문항이고_응답에_구성_필드를_싣지_않는다() throws Exception {
+            // KAN-260 - 구성은 서버 내부 규칙이다. 클라이언트는 items의 순서와 개수만 본다.
+            TestDefinition seven = pool(6, 8, "VVWVWWW");
+            StoredTestDefinition stored = new StoredTestDefinition("gn-2026.10.t", "GYEONGNAM", "sv-0.3",
+                    DefinitionFixtures.body(seven), Instant.EPOCH);
+            TestDefinitionRegistry registry = registry(List.of(stored, row("gn-2026.08.1")), "gn-2026.08.1");
+            TestDefinitionRegistry.PublishedDefinition published = registry.get("gn-2026.10.t");
+
+            assertEquals(2, published.voiceSetCount());
+            assertEquals(List.of("v4", "v5", "w5", "v6", "w6", "w7", "w8"),
+                    published.voiceSet(2).response().items().stream()
+                            .map(TestDefinitionResponse.Item::itemId).toList());
+            assertEquals(7, registry.sessionDefinition("gn-2026.10.t", 1).items().size());
+            assertEquals(180, published.voiceSet(1).response().estimatedDurationSec());
+            String json = JsonMapper.builder().build().writeValueAsString(published.voiceSet(1).response());
+            assertFalse(json.contains("setLayout"), "공개 응답에 구성 필드가 새면 안 된다: " + json);
+
+            // 구성이 없는 발행본은 같은 레지스트리에서 종전대로 10문항 교차다.
+            assertEquals(10, registry.sessionDefinition("gn-2026.08.1", 1).items().size());
+        }
+
+        @Test
         void 발행본이_하나도_없으면_기동에_실패한다() {
             // 마이그레이션이 적용되지 않은 DB에 붙었을 때다 - 세션을 만들 수 없으므로 기동을 멈춘다.
             IllegalStateException rejected = assertThrows(IllegalStateException.class,
@@ -607,12 +658,30 @@ class TestDefinitionRegistryTest {
 
     private static TestDefinition withVersions(TestDefinition base, String testVersion, String scoreVersion) {
         return new TestDefinition(testVersion, scoreVersion, base.dialect(),
-                base.estimatedDurationSec(), base.items());
+                base.estimatedDurationSec(), base.setLayout(), base.items());
     }
 
     private static TestDefinition withItems(TestDefinition base, @Nullable List<TestDefinition.Item> items) {
         return new TestDefinition(base.testVersion(), base.scoreVersion(), base.dialect(),
-                base.estimatedDurationSec(), items);
+                base.estimatedDurationSec(), base.setLayout(), items);
+    }
+
+    private static TestDefinition withLayout(TestDefinition base, @Nullable String setLayout) {
+        return new TestDefinition(base.testVersion(), base.scoreVersion(), base.dialect(),
+                base.estimatedDurationSec(), setLayout, base.items());
+    }
+
+    /** 음성 N + 어휘 M 풀 (seq 오름차순, 음성 뒤에 어휘) - 세트 구성 검증용 */
+    private static TestDefinition pool(int voiceCount, int vocabularyCount, @Nullable String setLayout) {
+        List<TestDefinition.Item> items = new ArrayList<>();
+        int seq = 1;
+        for (int i = 1; i <= voiceCount; i++) {
+            items.add(voice("v" + i, seq++));
+        }
+        for (int i = 1; i <= vocabularyCount; i++) {
+            items.add(vocabulary("w" + i, seq++));
+        }
+        return new TestDefinition("gn-2026.10.t", "sv-0.3", "GYEONGNAM", 180, setLayout, items);
     }
 
     private static TestDefinition withItem(TestDefinition base, String itemId,
