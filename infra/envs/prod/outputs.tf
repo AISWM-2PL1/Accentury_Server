@@ -118,6 +118,11 @@ output "dashboard_url" {
 }
 
 output "training_bucket" {
-  value       = one(aws_s3_bucket.training[*].bucket)
-  description = "staging 전용 학습 데이터 S3 버킷 (KAN-201). prod는 null이다. 샘플 확인: aws s3 ls s3://<이 값>/ --recursive"
+  value       = var.training_bucket_enabled ? local.voice_bucket_name : null
+  description = "이 환경이 음성을 저장하는 음성 전용 S3 버킷 (KAN-269, bootstrap이 만든다). 음성 저장을 끈 환경은 null이다. 이 환경의 객체는 training_key_prefix 출력의 접두사 아래에 있다."
+}
+
+output "training_key_prefix" {
+  value       = var.training_bucket_enabled ? var.env : null
+  description = "음성 버킷 안에서 이 환경이 쓰는 키 접두사 (KAN-269). 샘플 확인: aws s3 ls s3://<training_bucket>/<이 값>/ --recursive"
 }

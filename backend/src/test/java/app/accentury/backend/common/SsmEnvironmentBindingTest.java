@@ -59,6 +59,7 @@ class SsmEnvironmentBindingTest {
             "ACCENTURY_ANALYSIS_PROCESSINGTIMEOUT",
             "ACCENTURY_ANALYSIS_DISPATCHCONCURRENCY",
             "ACCENTURY_TRAINING_BUCKET",
+            "ACCENTURY_TRAINING_KEYPREFIX",
             "ACCENTURY_FEEDBACK_SLACKWEBHOOKURL",
             "ACCENTURY_AUTH_APPLETEAMID",
             "ACCENTURY_AUTH_APPLEKEYID",
@@ -116,7 +117,8 @@ class SsmEnvironmentBindingTest {
                 Map.of("ACCENTURY_ANALYSIS_AITIMEOUT", "100s",
                         "ACCENTURY_ANALYSIS_PROCESSINGTIMEOUT", "400s",
                         "ACCENTURY_ANALYSIS_DISPATCHCONCURRENCY", "2",
-                        "ACCENTURY_TRAINING_BUCKET", "accentury-staging-training-123456789012",
+                        "ACCENTURY_TRAINING_BUCKET", "accentury-voice-123456789012",
+                        "ACCENTURY_TRAINING_KEYPREFIX", "staging",
                         "ACCENTURY_FEEDBACK_SLACKWEBHOOKURL",
                         "https://hooks.slack.com/services/T000/B000/binding-check",
                         "ACCENTURY_AUTH_APPLETEAMID", "TEAM012345",
@@ -126,9 +128,11 @@ class SsmEnvironmentBindingTest {
         assertEquals("100s", tunedBinder.bind("accentury.analysis.ai-timeout", String.class).get());
         assertEquals("400s", tunedBinder.bind("accentury.analysis.processing-timeout", String.class).get());
         assertEquals(2, tunedBinder.bind("accentury.analysis.dispatch-concurrency", Integer.class).get());
-        // 학습 데이터 버킷 (KAN-201) - staging에만 오는 optional 값. 이름이 어긋나면 staging에서 샘플이 조용히 안 쌓인다.
-        assertEquals("accentury-staging-training-123456789012",
+        // 학습 음성 버킷과 환경 접두 (KAN-201, KAN-269) - 수집을 켠 환경에만 오는 optional 값. 이름이 어긋나면
+        // 버킷은 샘플이 조용히 안 쌓이고, 접두는 기동이 실패한다.
+        assertEquals("accentury-voice-123456789012",
                 tunedBinder.bind("accentury.training.bucket", String.class).get());
+        assertEquals("staging", tunedBinder.bind("accentury.training.key-prefix", String.class).get());
         // 후기 슬랙 웹훅 URL (KAN-211) - 이름이 어긋나면 값을 넣어도 알림이 조용히 꺼진 채로 뜬다.
         // 대시가 셋이라(slack-web-hook이 아니라 slack-webhook-url) relaxed binding 이름이 특히 헷갈린다.
         assertEquals("https://hooks.slack.com/services/T000/B000/binding-check",

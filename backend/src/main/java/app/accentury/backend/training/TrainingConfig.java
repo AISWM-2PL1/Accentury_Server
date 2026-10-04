@@ -15,14 +15,16 @@ import tools.jackson.databind.ObjectMapper;
 import java.time.Clock;
 import java.time.Duration;
 import java.util.Objects;
+import java.util.regex.Pattern;
 
 /**
- * 학습 샘플 저장의 배선 (KAN-201) - {@code accentury.training.bucket}이 있을 때만 전부 만들어진다.
+ * 학습 샘플 저장의 배선 (KAN-201, KAN-269) - {@code accentury.training.bucket}이 있을 때만 전부 만들어진다.
  * <p>
- * 없으면(로컬, 테스트, prod) 이 클래스의 빈은 하나도 없다. S3 클라이언트도 없다 - 소비자
+ * 없으면(로컬, 테스트, 수집을 끈 환경) 이 클래스의 빈은 하나도 없다. S3 클라이언트도 없다 - 소비자
  * ({@code AnalysisDispatchConfig})가 {@link TrainingSampleStore#NONE}으로 자리를 채운다. 값이 있는데
- * 비어 있는 것("")은 설정 실수라 뜨지 않는다 - 조용히 no-op으로 접으면 staging에서 샘플이 안 쌓이는
- * 원인이 묻힌다.
+ * 비어 있는 것("")은 설정 실수라 뜨지 않는다 - 조용히 no-op으로 접으면 샘플이 안 쌓이는
+ * 원인이 묻힌다. 환경 접두({@code key-prefix})도 같다 - 태스크 역할이 자기 접두에만 쓸 수 있어, 없거나 틀리면
+ * 저장이 전부 AccessDenied로 삼켜진다.
  */
 @Configuration(proxyBeanMethods = false)
 @ConditionalOnProperty(prefix = "accentury.training", name = "bucket")
@@ -40,7 +42,7 @@ class TrainingConfig {
     static final Duration CONNECTION_TIMEOUT = Duration.ofSeconds(2);
 
     /**
-     * 자격 증명은 기본 제공자 체인이 태스크 역할에서 받는다 - 버킷 하나에 PutObject만 허용된 역할이다
+     * 자격 증명은 기본 제공자 체인이 태스크 역할에서 받는다 - 버킷의 자기 환경 접두에 PutObject만 허용된 역할이다
      * (fargate 모듈). 리전은 설정({@code accentury.training.region})이 있으면 그 값이고, 없으면 SDK 기본
      * 체인(태스크의 {@code AWS_REGION})이다. 동기 클라이언트(apache)이고 타임아웃은 위 상수다.
      */
@@ -66,9 +68,22 @@ class TrainingConfig {
 
     @Bean
     TrainingSampleStore trainingSampleStore(S3Client trainingS3Client, AccenturyProperties properties,
+                                            TrainingVoiceOwners owners, VoiceConsents consents,
                                             ObjectMapper objectMapper, MeterRegistry meterRegistry) {
-        return new S3TrainingSampleStore(trainingS3Client, requireBucket(properties), objectMapper,
-                Clock.systemUTC(), meterRegistry);
+        return new S3TrainingSampleStore(trainingS3Client, requireBucket(properties), requireKeyPrefix(properties),
+                owners, consents, objectMapper, Clock.systemUTC(), meterRegistry);
+    }
+
+    /** 환경 접두는 소문자 영숫자와 하이픈만이다 - 슬래시가 섞이면 태스크 역할의 접두 조건과 어긋난다. */
+    private static final Pattern KEY_PREFIX = Pattern.compile("[a-z0-9][a-z0-9-]{0,31}");
+
+    private static String requireKeyPrefix(AccenturyProperties properties) {
+        String keyPrefix = properties.training().keyPrefix();
+        if (keyPrefix == null || !KEY_PREFIX.matcher(keyPrefix).matches()) {
+            throw new IllegalStateException("accentury.training.key-prefix가 없거나 형식이 틀렸다 - 버킷이 있으면 "
+                    + "환경 접두(staging 또는 prod, 슬래시 없이)가 필요하다 (SSM ACCENTURY_TRAINING_KEYPREFIX, KAN-269)");
+        }
+        return keyPrefix;
     }
 
     private static String requireBucket(AccenturyProperties properties) {

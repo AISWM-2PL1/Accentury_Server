@@ -56,7 +56,7 @@ variable "ai_max_size" {
 
 variable "training_bucket_enabled" {
   type        = bool
-  description = "staging 전용 학습 데이터 S3 버킷과 그 접근 권한, SSM ACCENTURY_TRAINING_BUCKET을 만들지 (KAN-201). staging true, prod false - prod는 FR-DP-01 그대로라 반드시 false다. 값을 바꾸면 태스크 정의 secrets가 바뀌어 backend 태스크가 새로 뜬다."
+  description = "이 환경에서 음성 저장을 켤지 (KAN-201, KAN-269). true면 SSM ACCENTURY_TRAINING_BUCKET(음성 전용 버킷 accentury-voice-<계정 ID>)과 ACCENTURY_TRAINING_KEYPREFIX(환경 이름)가 생기고 태스크 역할이 그 버킷의 자기 환경 접두사 아래로 PutObject를 얻는다. 버킷 자체는 bootstrap 스택이 만들며 이 스위치와 무관하게 남는다. 저장 대상은 음성 저장에 동의한 세션뿐이다. 두 환경 모두 true다 (2026-10-04 결정). 값을 바꾸면 태스크 정의 secrets가 바뀌어 backend 태스크가 새로 뜬다."
   default     = false
 }
 

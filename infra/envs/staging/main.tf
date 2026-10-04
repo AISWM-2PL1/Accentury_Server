@@ -59,44 +59,77 @@ module "data" {
   skip_final_snapshot = var.db_skip_final_snapshot
 }
 
-# ---- staging 전용 학습 데이터 S3 (KAN-201) ----
+# ---- 음성 저장 S3 (KAN-201, KAN-269) ----
 
-# 원본 음성은 영속 저장소에 남지 않는다는 FR-DP-01의 staging 예외다 (2026-09-08 결정). backend가 분석 종결마다
-# 내부 테스터의 음성 WAV와 AI 원점수 메타 JSON을 여기 남긴다 - 모델 재학습용이고, 학습 데이터라 자동 삭제하지
-# 않는다(수명주기 규칙 없음). 두 환경의 main.tf는 같아야 하므로(KAN-140) 스위치는 tfvars의
-# training_bucket_enabled이고, prod는 false라 버킷도 정책도 파라미터도 생기지 않아 prod plan에 이 이름이 없다.
-# 이름은 web 버킷 규약(edge 모듈)대로 계정 ID를 붙인다. force_destroy는 web 버킷과 같이 teardown을 위해서다 -
-# staging을 부수고 다시 지으면 모인 샘플도 함께 사라진다 (README).
+# 음성 저장(선택 동의)에 동의한 세션의 음성 WAV와 AI 원점수 메타 JSON은 두 환경이 함께 쓰는 음성 전용 버킷에
+# 남는다 (KAN-269). 버킷은 bootstrap 스택이 만들고(bootstrap/voice.tf) 이 스택은 이름만 같은 규칙으로 조립한다 -
+# 버킷이 환경 스택 밖에 있어 환경을 부수거나 스위치를 꺼도 음성은 그대로다. 환경은 키 접두사(환경 이름)로 나뉘고,
+# 태스크 역할의 PutObject가 자기 접두사 아래로만 열린다 (fargate 모듈). 두 환경의 main.tf는 같아야 하므로(KAN-140)
+# 스위치는 tfvars의 training_bucket_enabled이고, 끄면 파라미터도 권한도 생기지 않는다.
+# 적용 순서: bootstrap이 먼저다 - 버킷이 없는 채로 이 스택만 적용하면 backend 저장이 NoSuchBucket으로 실패한다.
 data "aws_caller_identity" "current" {}
 
-resource "aws_s3_bucket" "training" {
-  count = var.training_bucket_enabled ? 1 : 0
-
-  bucket        = "accentury-${var.env}-training-${data.aws_caller_identity.current.account_id}"
-  force_destroy = true
+locals {
+  voice_bucket_name = "accentury-voice-${data.aws_caller_identity.current.account_id}"
 }
 
-resource "aws_s3_bucket_public_access_block" "training" {
-  count = var.training_bucket_enabled ? 1 : 0
+# 옛 환경별 학습 버킷(accentury-<env>-training-<계정 ID>, KAN-201)을 지우지 않고 Terraform 관리에서만 뺀다.
+# 음성은 다시 만들 수 없는 데이터라 Terraform이 지워서는 안 된다. 이 버킷은 force_destroy = true로 만들어져 있어서
+# resource 블록을 그냥 지우면 다음 apply가 모인 음성째 버킷을 지운다. removed 블록의 destroy = false는 state에서만
+# 빼고 실제 버킷과 객체는 그대로 둔다 - plan에 "will no longer be managed"로 보여야 하고, "will be destroyed"로
+# 보이면 apply하지 않는다. 남은 옛 버킷을 옮길지 비울지는 사람이 정하고 사람이 한다.
+# count가 붙어 있던 리소스라 from에는 인덱스 없이 주소만 적는다 (인스턴스 전부가 대상). state에 인스턴스가 없는
+# 환경(prod)에서는 아무 일도 하지 않는다. 두 환경에 한 번씩 적용된 뒤에는 이 블록들을 지워도 된다.
+removed {
+  from = aws_s3_bucket.training
 
-  bucket = aws_s3_bucket.training[0].id
-
-  block_public_acls       = true
-  block_public_policy     = true
-  ignore_public_acls      = true
-  restrict_public_buckets = true
+  lifecycle {
+    destroy = false
+  }
 }
 
-# SSE-S3 기본 암호화. 버전 관리는 켜지 않는다 - 키에 분석 작업 ID가 들어 덮어쓰기가 없다 (객체 규약).
-resource "aws_s3_bucket_server_side_encryption_configuration" "training" {
-  count = var.training_bucket_enabled ? 1 : 0
+removed {
+  from = aws_s3_bucket_public_access_block.training
 
-  bucket = aws_s3_bucket.training[0].id
+  lifecycle {
+    destroy = false
+  }
+}
 
-  rule {
-    apply_server_side_encryption_by_default {
-      sse_algorithm = "AES256"
-    }
+removed {
+  from = aws_s3_bucket_server_side_encryption_configuration.training
+
+  lifecycle {
+    destroy = false
+  }
+}
+
+# 옛 버킷의 읽기 제한(KAN-239의 버킷 정책과 학습 읽기 역할)도 지우지 않고 관리에서만 뺀다. 이 둘은 PR #21에서
+# 코드가 먼저 지워졌는데 staging에는 실물이 남아 있어, 그대로 apply하면 삭제되고 옛 버킷의 음성이 S3 읽기 권한을
+# 가진 모든 주체에게 열린다 (KAN-269 리뷰 P2). 버킷을 사람이 정리할 때까지 정책과 역할을 그대로 둔다.
+# 수명주기 만료 규칙(2026-12-31 자동 삭제)은 여기 없다 - 그 규칙은 지워져야 음성이 삭제되지 않으므로 apply가
+# 삭제하도록 둔다.
+removed {
+  from = aws_s3_bucket_policy.training
+
+  lifecycle {
+    destroy = false
+  }
+}
+
+removed {
+  from = aws_iam_role.training_reader
+
+  lifecycle {
+    destroy = false
+  }
+}
+
+removed {
+  from = aws_iam_role_policy.training_reader
+
+  lifecycle {
+    destroy = false
   }
 }
 
@@ -119,8 +152,9 @@ module "config" {
   auth_naver_client_id  = var.auth_naver_client_id
   auth_apple_team_id    = var.auth_apple_team_id
   auth_apple_key_id     = var.auth_apple_key_id
-  # 학습 데이터 버킷이 있는 환경(staging)에만 ACCENTURY_TRAINING_BUCKET 파라미터가 생긴다 (KAN-201).
-  training_bucket_name = one(aws_s3_bucket.training[*].bucket)
+  # 음성 저장을 켠 환경에만 ACCENTURY_TRAINING_BUCKET, ACCENTURY_TRAINING_KEYPREFIX 파라미터가 생긴다 (KAN-269).
+  training_bucket_name = var.training_bucket_enabled ? local.voice_bucket_name : null
+  training_key_prefix  = var.training_bucket_enabled ? var.env : null
 }
 
 # 커스텀 지표 네임스페이스 (KAN-36). 지표를 올리는 역할의 PutMetricData 조건과 경보가 같은 이름을 봐야 하므로
@@ -181,8 +215,9 @@ module "fargate" {
   target_group_arn_suffix = module.edge.target_group_arn_suffix
   # 태스크 정의 secrets로 전부 주입한다 - 실행 역할도 이 목록만 읽는다.
   config_parameter_names = module.config.parameter_names
-  # 학습 데이터 버킷이 있는 환경(staging)에만 태스크 역할에 PutObject 문장이 생긴다 (KAN-201).
-  training_bucket_arn = one(aws_s3_bucket.training[*].arn)
+  # 음성 저장을 켠 환경에만 태스크 역할에 PutObject 문장이 생긴다 - 음성 버킷의 자기 환경 접두사 아래로만이다 (KAN-269).
+  training_bucket_arn = var.training_bucket_enabled ? "arn:aws:s3:::${local.voice_bucket_name}" : null
+  training_key_prefix = var.training_bucket_enabled ? var.env : null
 }
 
 # ai 호스트 - 내부 ALB 뒤 ASG(min 1, max = tfvars ai_max_size)의 전용 추론 EC2 (KAN-36, ALB와 오토스케일링은

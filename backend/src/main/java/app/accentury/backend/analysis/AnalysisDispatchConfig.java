@@ -134,7 +134,7 @@ class AnalysisDispatchConfig {
                 new RestAiAnalysisClient(restClient, healthRestClient, objectMapper,
                         properties.analysis().aiToken()),
                 analysisExecutor, transitions, backlog, circuitBreaker, metrics,
-                // 학습 샘플 저장소는 staging에만 빈이 있다 (KAN-201, TrainingConfig) - 없으면 no-op이다.
+                // 학습 샘플 저장소는 수집을 켠 환경에만 빈이 있다 (KAN-201, TrainingConfig) - 없으면 no-op이다.
                 trainingSamples.getIfAvailable(() -> TrainingSampleStore.NONE),
                 properties.analysis().aiRetries(), HttpAnalysisDispatcher.RETRY_BACKOFF_MS);
     }

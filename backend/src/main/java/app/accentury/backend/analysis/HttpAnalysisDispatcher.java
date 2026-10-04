@@ -5,6 +5,7 @@ import app.accentury.backend.common.ErrorCode;
 import app.accentury.backend.session.Region;
 import app.accentury.backend.training.TrainingSample;
 import app.accentury.backend.training.TrainingSampleStore;
+import app.accentury.backend.training.VoiceConsent;
 import org.jspecify.annotations.Nullable;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -48,8 +49,8 @@ import java.util.concurrent.atomic.AtomicReference;
  * 기다린다 - 순서는 {@link AnalysisDrainLifecycle}이 잡는다. 그래서 제출한 작업을 큐 안에서도
  * 알아볼 수 있게 {@link Task}로 감싸 추적한다.
  * <p>
- * staging에서는 종결 뒤, 버퍼를 지우기 전에 학습 샘플을 남긴다 (KAN-201, {@link TrainingSampleStore}) -
- * AI가 계약대로 답한 건(성공과 판정 실패)만이고, 계약 위반과 AI 불가는 원점수도 판정도 없어 남기지
+ * 음성 저장에 동의한 세션이면 종결 뒤, 버퍼를 지우기 전에 학습 샘플을 남긴다 (KAN-201, KAN-269,
+ * {@link TrainingSampleStore}) - AI가 계약대로 답한 건(성공과 판정 실패)만이고, 계약 위반과 AI 불가는 원점수도 판정도 없어 남기지
  * 않는다. 저장 실패는 분석 결과에 영향을 주지 않는다.
  */
 class HttpAnalysisDispatcher implements AnalysisDispatcher {
@@ -254,7 +255,7 @@ class HttpAnalysisDispatcher implements AnalysisDispatcher {
             AiAnalysisClient.Outcome outcome = analyzeWithRetry(request, correlationId);
             apply(request.analysisJobId(), outcome, acceptedNanos);
             // 상태 전이가 끝난 뒤, 아래 finally의 wipeAudio() 전이다 (KAN-201). 사용자는 이미 종결을 볼 수
-            // 있고, 워커 점유 시간만 저장 왕복만큼 늘어난다 (staging 한정 - 그 밖은 NONE이라 즉시 돌아온다).
+            // 있고, 워커 점유 시간만 저장 왕복만큼 늘어난다 (수집을 켠 환경의 동의 세션 한정 - 그 밖은 즉시 돌아온다).
             keepTrainingSample(request, outcome, correlationId);
         } catch (RuntimeException e) {
             // 종결을 놓치면 사용자는 타임아웃 스위퍼까지 대기 화면에 묶인다 - 어떤 예외도 종결로 바꾼다.
@@ -405,7 +406,9 @@ class HttpAnalysisDispatcher implements AnalysisDispatcher {
     }
 
     /**
-     * 학습 샘플로 남길 건이면 저장소에 넘긴다 (KAN-201). AI가 계약대로 답한 건 전부다 - 성공
+     * 학습 샘플로 남길 건이면 저장소에 넘긴다 (KAN-201). 음성 저장에 동의한 세션의 요청만이다 (KAN-269) - 동의가
+     * 없으면({@code voiceConsent}가 null) 샘플을 만들지 않고 음성은 이 뒤의 파기로 사라진다. 그중 AI가 계약대로
+     * 답한 건 전부다 - 성공
      * ({@link AiAnalysisClient.Completed})과 판정 실패({@link AiAnalysisClient.Rejected}의 JUDGED, 부정 샘플도
      * 학습에 쓴다). 계약 위반은 원점수도 판정도 없고, null(재전송 예산 소진, 타임아웃, 회로 열림, 종료 중)은
      * AI에 닿지 못했거나 답을 못 받은 것이라 남기지 않는다.
@@ -416,13 +419,18 @@ class HttpAnalysisDispatcher implements AnalysisDispatcher {
      */
     private void keepTrainingSample(AnalysisRequest request, AiAnalysisClient.@Nullable Outcome outcome,
                                     String correlationId) {
+        VoiceConsent consent = request.voiceConsent();
+        if (consent == null) {
+            return;
+        }
         TrainingSample sample = switch (outcome) {
             case AiAnalysisClient.Completed completed -> new TrainingSample(
                     request.analysisJobId(), request.sessionId(), request.itemId(),
                     Region.forStorage(request.region()).name(), request.scriptKey(),
                     request.testVersion(), request.scoreVersion(), request.durationMs(),
                     TrainingSample.Outcome.COMPLETED, completed.intonationScore(), completed.qualityCode(),
-                    completed.modelVersion(), completed.scoreVersion(), null, correlationId, request.audio());
+                    completed.modelVersion(), completed.scoreVersion(), null, correlationId, consent,
+                    request.audio());
             case AiAnalysisClient.Rejected rejected when rejected.cause() == AiAnalysisClient.Rejected.Cause.JUDGED ->
                     new TrainingSample(
                             request.analysisJobId(), request.sessionId(), request.itemId(),
@@ -430,7 +438,8 @@ class HttpAnalysisDispatcher implements AnalysisDispatcher {
                             request.testVersion(), request.scoreVersion(), request.durationMs(),
                             rejected.retryable() ? TrainingSample.Outcome.RETRYABLE_FAILED
                                     : TrainingSample.Outcome.FAILED,
-                            null, null, null, null, rejected.errorCode(), correlationId, request.audio());
+                            null, null, null, null, rejected.errorCode(), correlationId, consent,
+                            request.audio());
             case AiAnalysisClient.Rejected ignored -> null;   // CONTRACT_VIOLATION
             case null -> null;
         };

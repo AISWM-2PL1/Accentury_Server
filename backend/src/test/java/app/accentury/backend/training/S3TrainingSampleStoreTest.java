@@ -17,6 +17,7 @@ import java.time.Instant;
 import java.time.ZoneOffset;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.UUID;
 
 import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
@@ -24,13 +25,18 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-/** S3 왕복 없이 객체 규약(키, Content-Type, 메타 필드)과 실패 삼킴을 본다 (KAN-201). */
+/** S3 왕복 없이 객체 규약(키, Content-Type, 메타 필드), 대응표 기록 순서, 실패 삼킴을 본다 (KAN-201, KAN-269). */
 class S3TrainingSampleStoreTest {
 
     private static final Instant SAVED_AT = Instant.parse("2026-09-11T06:00:00Z");
+    private static final Instant CONSENTED_AT = Instant.parse("2026-09-11T05:00:00Z");
+    private static final UUID OWNER = UUID.fromString("11111111-2222-3333-4444-555555555555");
+    private static final VoiceConsent ANONYMOUS = new VoiceConsent("2026-10-04", CONSENTED_AT, null);
 
     private final SimpleMeterRegistry registry = new SimpleMeterRegistry();
     private final ObjectMapper objectMapper = new ObjectMapper();
+    private final RecordingOwners owners = new RecordingOwners();
+    private final ToggleConsents consents = new ToggleConsents();
 
     @Test
     void WAV와_JSON이_같은_키_접두에_나란히_놓인다() throws IOException {
@@ -41,10 +47,10 @@ class S3TrainingSampleStoreTest {
         Put wav = s3.puts.get(0);
         Put json = s3.puts.get(1);
         assertEquals("training-bucket", wav.request().bucket());
-        assertEquals("GYEONGNAM/gn-2026.09.2/s_1/v3/a_9.wav", wav.request().key());
+        assertEquals("staging/GYEONGNAM/gn-2026.09.2/s_1/v3/a_9.wav", wav.request().key());
         assertEquals("audio/wav", wav.request().contentType());
         assertArrayEquals(new byte[] {82, 73, 70, 70}, wav.body(), "업로드 받은 바이트 그대로다");
-        assertEquals("GYEONGNAM/gn-2026.09.2/s_1/v3/a_9.json", json.request().key());
+        assertEquals("staging/GYEONGNAM/gn-2026.09.2/s_1/v3/a_9.json", json.request().key());
         assertEquals("application/json", json.request().contentType());
         assertEquals(1.0, registry.get("accentury.training.samples").tag("result", "saved").counter().count());
     }
@@ -71,6 +77,61 @@ class S3TrainingSampleStoreTest {
         assertFalse(meta.has("errorCode"));
         assertEquals("c_abc", meta.get("correlationId").asString());
         assertEquals("2026-09-11T06:00:00Z", meta.get("savedAt").asString());
+        // 동의 증빙 (KAN-269) - 익명 세션의 동의 기록은 세션 행과 함께 사라지므로 음성 옆에 남긴다.
+        assertEquals("2026-10-04", meta.get("voiceConsentVersion").asString());
+        assertEquals("2026-09-11T05:00:00Z", meta.get("voiceConsentAt").asString());
+        assertFalse(meta.has("ownerId"), "소유 계정은 라벨에 싣지 않는다 - 대응표에만 있다");
+    }
+
+    @Test
+    void 익명_세션의_샘플은_대응표를_남기지_않는다() {
+        RecordingS3 s3 = new RecordingS3();
+        store(s3).save(completed());
+
+        assertTrue(owners.records.isEmpty());
+    }
+
+    @Test
+    void 계정_세션의_샘플은_음성을_올리기_전에_대응표부터_남긴다() {
+        RecordingS3 s3 = new RecordingS3() {
+            @Override
+            public PutObjectResponse putObject(PutObjectRequest request, RequestBody body) {
+                assertEquals(List.of("s_1=" + OWNER), owners.records, "대응표보다 음성이 먼저 올라갔다");
+                return super.putObject(request, body);
+            }
+        };
+        store(s3).save(completed(new VoiceConsent("2026-10-04", CONSENTED_AT, OWNER)));
+
+        assertEquals(2, s3.puts.size());
+        assertFalse(s3.puts.get(0).request().key().contains(OWNER.toString()), "객체 키에 계정 id가 들어갔다");
+        assertFalse(new String(s3.puts.get(1).body(), java.nio.charset.StandardCharsets.UTF_8)
+                .contains(OWNER.toString()), "라벨에 계정 id가 들어갔다");
+    }
+
+    @Test
+    void 저장_직전에_동의가_철회돼_있으면_대응표도_음성도_남기지_않는다() {
+        // 동의는 업로드 때 판정하고 저장은 분석 뒤다 (KAN-269) - 그 사이의 철회와 탈퇴를 저장 직전에 거른다.
+        consents.inEffect = false;
+        RecordingS3 s3 = new RecordingS3();
+
+        store(s3).save(completed(new VoiceConsent("2026-10-04", CONSENTED_AT, OWNER)));
+
+        assertTrue(s3.puts.isEmpty());
+        assertTrue(owners.records.isEmpty());
+        assertEquals(1.0, registry.get("accentury.training.samples").tag("result", "skipped").counter().count());
+        assertEquals(0.0, registry.get("accentury.training.samples").tag("result", "failed").counter().count());
+    }
+
+    @Test
+    void 대응표_기록이_실패하면_음성을_올리지_않는다() {
+        // 누구 것인지 찾을 수 없는 음성을 남기지 않는다 - 음성 없는 대응표 행은 해가 없지만 그 반대는 아니다.
+        owners.failing = true;
+        RecordingS3 s3 = new RecordingS3();
+
+        assertDoesNotThrow(() -> store(s3).save(completed(new VoiceConsent("2026-10-04", CONSENTED_AT, OWNER))));
+
+        assertTrue(s3.puts.isEmpty());
+        assertEquals(1.0, registry.get("accentury.training.samples").tag("result", "failed").counter().count());
     }
 
     @Test
@@ -78,7 +139,7 @@ class S3TrainingSampleStoreTest {
         RecordingS3 s3 = new RecordingS3();
         store(s3).save(new TrainingSample("a_9", "s_1", "v3", "UNKNOWN", null, "gn-2026.09.2", "sv-0.4",
                 2450, TrainingSample.Outcome.RETRYABLE_FAILED, null, null, null, null, "AUDIO_TOO_QUIET",
-                "c_abc", new byte[] {82, 73, 70, 70}));
+                "c_abc", ANONYMOUS, new byte[] {82, 73, 70, 70}));
 
         JsonNode meta = objectMapper.readTree(s3.puts.get(1).body());
         assertEquals("RETRYABLE_FAILED", meta.get("outcome").asString());
@@ -88,7 +149,7 @@ class S3TrainingSampleStoreTest {
         assertFalse(meta.has("modelVersion"));
         assertFalse(meta.has("aiScoreVersion"));
         assertFalse(meta.has("scriptKey"), "더미 정의의 문항은 대본 키가 없다");
-        assertTrue(s3.puts.get(0).request().key().startsWith("UNKNOWN/"));
+        assertTrue(s3.puts.get(0).request().key().startsWith("staging/UNKNOWN/"));
     }
 
     @Test
@@ -107,14 +168,50 @@ class S3TrainingSampleStoreTest {
     }
 
     private S3TrainingSampleStore store(S3Client s3) {
-        return new S3TrainingSampleStore(s3, "training-bucket", objectMapper,
+        return new S3TrainingSampleStore(s3, "training-bucket", "staging", owners, consents, objectMapper,
                 Clock.fixed(SAVED_AT, ZoneOffset.UTC), registry);
     }
 
     private static TrainingSample completed() {
+        return completed(ANONYMOUS);
+    }
+
+    private static TrainingSample completed(VoiceConsent consent) {
         return new TrainingSample("a_9", "s_1", "v3", "GYEONGNAM", "1|3", "gn-2026.09.2", "sv-0.4",
                 2450, TrainingSample.Outcome.COMPLETED, 78, "OK", "rmvpe-0.2", "sv-ai-0.1", null,
-                "c_abc", new byte[] {82, 73, 70, 70});
+                "c_abc", consent, new byte[] {82, 73, 70, 70});
+    }
+
+    /** 저장 직전의 동의 재확인을 흉내 낸다 - 실제 판정은 {@code VoiceConsentApiTest}와 {@code VoiceConsentsTest}가 본다. */
+    private static final class ToggleConsents extends VoiceConsents {
+        boolean inEffect = true;
+
+        ToggleConsents() {
+            super(null);
+        }
+
+        @Override
+        public boolean stillInEffect(VoiceConsent consent) {
+            return inEffect;
+        }
+    }
+
+    /** DB 없이 대응표 기록을 받아 적는다 - 실제 SQL은 {@code VoiceConsentApiTest}가 본다. */
+    private static final class RecordingOwners extends TrainingVoiceOwners {
+        final List<String> records = new ArrayList<>();
+        boolean failing;
+
+        RecordingOwners() {
+            super(null);
+        }
+
+        @Override
+        public void record(String sessionId, UUID userId, Instant now) {
+            if (failing) {
+                throw new IllegalStateException("DB 불가");
+            }
+            records.add(sessionId + "=" + userId);
+        }
     }
 
     private record Put(PutObjectRequest request, byte[] body) {

@@ -26,6 +26,10 @@ import org.jspecify.annotations.Nullable;
  *                      않는다. 코드 10개 밖의 값은 400 {@code VALIDATION_FAILED}이고 검증은
  *                      {@link SessionService}가 한다 (campaignToken의 형식 검증과 같은 결과). 응답에는
  *                      실리지 않는다. 계정 세션(KAN-223)은 이 값을 무시하고 계정의 출신지역을 쓴다.
+ * @param voiceConsentVersion 음성 저장(학습 활용) 선택 동의 (KAN-269, §3.1). 동의한 응시자만 게시 중인 동의 버전을
+ *                      싣고, 동의하지 않으면 필드를 보내지 않는다 - 어느 쪽이든 세션은 만들어진다. 값이 있는데
+ *                      서버 게시 버전과 다르면 400 {@code VALIDATION_FAILED}다. 계정 세션은 이 값을 무시하고
+ *                      계정의 동의를 쓴다 ({@code PUT /v0/users/me/voice-consent}).
  * @param previousSessionToken 재응시 때 폐기할 이전 세션 토큰 ({@code st_...}, KAN-223, §3.1). 헤더 자리를 Access 토큰이
  *                      차지하는 로그인한 앱이 쓴다. 웹과 로그인 전 앱은 지금처럼 헤더로 보낸다. 무효면 조용히 무시된다.
  */
@@ -42,13 +46,24 @@ public record CreateSessionRequest(
 
         @Nullable
         @Size(max = 128, message = "최대 128자입니다")
-        String previousSessionToken
+        String previousSessionToken,
+
+        @Nullable
+        @Size(max = 32, message = "최대 32자입니다")
+        String voiceConsentVersion
 ) {
 
     /** 재응시 본문 필드가 없는 요청 - KAN-223 이전 모양이다. */
     public CreateSessionRequest(@Nullable String campaignToken, @Nullable Client client,
                                 @Nullable Integer voiceSet, @Nullable String region) {
-        this(campaignToken, client, voiceSet, region, null);
+        this(campaignToken, client, voiceSet, region, null, null);
+    }
+
+    /** 음성 저장 동의 필드가 없는 요청 - KAN-269 이전 모양이다. */
+    public CreateSessionRequest(@Nullable String campaignToken, @Nullable Client client,
+                                @Nullable Integer voiceSet, @Nullable String region,
+                                @Nullable String previousSessionToken) {
+        this(campaignToken, client, voiceSet, region, previousSessionToken, null);
     }
 
     /**

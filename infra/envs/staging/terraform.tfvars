@@ -28,8 +28,9 @@ ai_root_volume_size = 40
 # 15분 연속이면 -1. 내부 ALB(least_outstanding_requests)가 backend 태스크 3개의 동시 호출을 빈 인스턴스로 나눈다.
 ai_max_size = 3
 
-# staging 전용 학습 데이터 S3 (KAN-201, 2026-09-08 결정). 내부 테스터의 음성 WAV와 AI 원점수를 모델 재학습용으로
-# 보존한다 - FR-DP-01(원본 음성 미보존)의 staging 예외다. prod는 false로 버킷도 권한도 파라미터도 없다.
+# 음성 저장 (KAN-201, KAN-269). 음성 저장에 동의한 세션의 음성 WAV와 AI 원점수를 모델 재학습용으로 음성 전용 버킷
+# (accentury-voice-<계정 ID>, bootstrap이 만든다)의 staging/ 접두사 아래에 남긴다. 두 환경 모두 true다
+# (2026-10-04 결정). 끄면 파라미터와 권한만 사라지고 버킷과 모인 음성은 그대로다.
 training_bucket_enabled = true
 
 ssm_prefix = "/accentury/staging"

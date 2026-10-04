@@ -4,6 +4,8 @@ import app.accentury.backend.common.AccenturyProperties;
 import io.micrometer.core.instrument.MeterRegistry;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.boot.test.context.runner.ApplicationContextRunner;
 import org.springframework.context.annotation.Bean;
@@ -33,11 +35,30 @@ class TrainingConfigTest {
 
     @Test
     void 버킷이_있으면_S3_저장_빈이_뜬다() {
-        runner.withPropertyValues("accentury.training.bucket=accentury-staging-training-123456789012",
+        runner.withPropertyValues("accentury.training.bucket=accentury-voice-123456789012",
+                        "accentury.training.key-prefix=staging",
                         "accentury.training.region=ap-northeast-2")
                 .run(context -> {
                     assertTrue(context.containsBean("trainingS3Client"));
                     assertInstanceOf(S3TrainingSampleStore.class, context.getBean(TrainingSampleStore.class));
+                });
+    }
+
+    /**
+     * 환경 접두가 없거나 형식이 틀리면 뜨지 않는다 (KAN-269) - 태스크 역할이 자기 접두에만 쓸 수 있어, 조용히
+     * 뜨면 저장이 전부 AccessDenied로 삼켜지고 샘플이 안 쌓이는 원인이 묻힌다.
+     */
+    @ParameterizedTest
+    @ValueSource(strings = {"", "accentury.training.key-prefix=", "accentury.training.key-prefix=staging/",
+            "accentury.training.key-prefix=Prod", "accentury.training.key-prefix=a/b"})
+    void 버킷이_있는데_환경_접두가_없거나_틀리면_기동을_세운다(String keyPrefixProperty) {
+        ApplicationContextRunner withBucket = runner.withPropertyValues(
+                "accentury.training.bucket=accentury-voice-123456789012", "accentury.training.region=ap-northeast-2");
+        (keyPrefixProperty.isEmpty() ? withBucket : withBucket.withPropertyValues(keyPrefixProperty))
+                .run(context -> {
+                    Throwable failure = context.getStartupFailure();
+                    assertTrue(failure != null && rootMessage(failure).contains("accentury.training.key-prefix"),
+                            () -> "기동 실패 사유가 다르다: " + failure);
                 });
     }
 
@@ -55,6 +76,17 @@ class TrainingConfigTest {
     @Configuration(proxyBeanMethods = false)
     @EnableConfigurationProperties(AccenturyProperties.class)
     static class Collaborators {
+        @Bean
+        TrainingVoiceOwners trainingVoiceOwners() {
+            // 빈 배선만 본다 - DB를 부르는 경로는 여기서 타지 않는다.
+            return new TrainingVoiceOwners(null);
+        }
+
+        @Bean
+        VoiceConsents voiceConsents() {
+            return new VoiceConsents(null);
+        }
+
         @Bean
         ObjectMapper objectMapper() {
             return new ObjectMapper();

@@ -135,7 +135,10 @@ class SessionServiceTest extends IntegrationTest {
                 "traffic",
                 // 계정 id 하나 (KAN-223, §3.1) - 앱 로그인 세션만 값이 있다. 계정 정보(이메일, 이름, 생년월일)는
                 // app_user에만 있고 세션에는 복사하지 않는다. 웹 세션은 null이라 익명이다.
-                "userId");
+                "userId",
+                // 익명 세션의 음성 저장 선택 동의 (KAN-269) - 동의한 문구의 버전과 시각뿐이다. 누구인지가 아니라
+                // 이 세션의 음성을 저장해도 되는지를 적는다.
+                "voiceConsentVersion", "voiceConsentAt");
 
         Set<String> actual = Stream.of(TestSession.class.getDeclaredFields())
                 // @Transient는 컬럼이 아니다 - 이 검사는 저장소에 남는 것만 본다 (예: Persistable의 isNew 플래그).

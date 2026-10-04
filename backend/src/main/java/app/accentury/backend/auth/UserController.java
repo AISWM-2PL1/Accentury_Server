@@ -3,6 +3,7 @@ package app.accentury.backend.auth;
 import org.jspecify.annotations.Nullable;
 import org.springframework.http.CacheControl;
 import org.springframework.http.ResponseEntity;
+import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.PutMapping;
@@ -45,6 +46,29 @@ class UserController {
                                              @RequestBody(required = false) @Nullable ProfileRequest request) {
         return ResponseEntity.ok().cacheControl(CacheControl.noStore())
                 .body(userService.updateProfile(user, request));
+    }
+
+    /**
+     * 음성 저장(학습 활용) 선택 동의 (§3.15, KAN-269). 본문의 {@code version}이 게시 중인 동의 버전과 같아야 한다.
+     * <p>
+     * 200 / 400 {@code VALIDATION_FAILED} / 401 {@code AUTH_TOKEN_INVALID}.
+     */
+    @PutMapping("/voice-consent")
+    ResponseEntity<MeResponse> consentToVoice(@AuthenticatedUser AppUser user,
+                                              @RequestBody(required = false) @Nullable VoiceConsentRequest request) {
+        return ResponseEntity.ok().cacheControl(CacheControl.noStore())
+                .body(userService.consentToVoice(user, request));
+    }
+
+    /**
+     * 음성 저장 동의 철회 (§3.15, KAN-269). 이 뒤의 업로드부터 저장되지 않는다. 동의한 적이 없어도 200이다.
+     * <p>
+     * 200 / 401 {@code AUTH_TOKEN_INVALID}.
+     */
+    @DeleteMapping("/voice-consent")
+    ResponseEntity<MeResponse> withdrawVoiceConsent(@AuthenticatedUser AppUser user) {
+        return ResponseEntity.ok().cacheControl(CacheControl.noStore())
+                .body(userService.withdrawVoiceConsent(user));
     }
 
     /**

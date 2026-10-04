@@ -350,15 +350,35 @@ resource "aws_ssm_parameter" "apple_private_key" {
   value_wo_version = 1
 }
 
-# ---- staging 전용 학습 데이터 S3 (KAN-201) ----
+# ---- 음성 저장 S3 (KAN-201, KAN-269) ----
 
-# 값이 있는 환경에만 파라미터가 생긴다 - prod 태스크 정의에는 이 환경 변수가 아예 없어 backend가 S3 클라이언트도
-# 저장 빈도 만들지 않는다 (TrainingConfig의 조건이 이 프로퍼티다). 두 환경이 같은 deploy 프로파일을 쓰므로
-# 환경별 yml 없이 이 파라미터 하나가 스위치다. 이름은 Spring 프로퍼티 규칙(accentury.training.bucket)이다.
+# 버킷 이름이 있는 환경에만 두 파라미터가 생긴다 - 없는 환경의 태스크 정의에는 이 환경 변수가 아예 없어 backend가
+# S3 클라이언트도 저장 빈도 만들지 않는다 (TrainingConfig의 조건이 버킷 프로퍼티다). 두 환경이 같은 deploy
+# 프로파일을 쓰므로 환경별 yml 없이 이 파라미터가 스위치다. 이름은 Spring 프로퍼티 규칙이다
+# (accentury.training.bucket, accentury.training.key-prefix).
+#
+# 버킷은 두 환경이 함께 쓰는 음성 전용 버킷 하나다 (KAN-269, bootstrap/voice.tf). 환경은 키 접두사로 나뉘고, 그
+# 접두사가 KEYPREFIX다 - 끝에 슬래시가 없는 환경 이름(staging, prod)이다. 태스크 역할의 PutObject가 같은 접두사
+# 아래로만 열려 있어(fargate 모듈) 이 값이 환경 이름과 다르면 저장이 AccessDenied로 실패한다.
 resource "aws_ssm_parameter" "training_bucket" {
   count = var.training_bucket_name == null ? 0 : 1
 
   name  = "${var.ssm_prefix}/ACCENTURY_TRAINING_BUCKET"
   type  = "String"
   value = var.training_bucket_name
+}
+
+resource "aws_ssm_parameter" "training_key_prefix" {
+  count = var.training_bucket_name == null ? 0 : 1
+
+  name  = "${var.ssm_prefix}/ACCENTURY_TRAINING_KEYPREFIX"
+  type  = "String"
+  value = var.training_key_prefix
+
+  lifecycle {
+    precondition {
+      condition     = var.training_key_prefix != null
+      error_message = "training_bucket_name이 있으면 training_key_prefix(환경 이름)도 있어야 합니다 (KAN-269)."
+    }
+  }
 }

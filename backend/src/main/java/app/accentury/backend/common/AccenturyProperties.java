@@ -300,16 +300,27 @@ public record AccenturyProperties(Session session,
     }
 
     /**
-     * staging 전용 학습 데이터 수집 (KAN-201, {@code training} 패키지).
+     * 학습 음성 수집 (KAN-201, KAN-269, {@code training} 패키지). 두 환경이 음성 전용 버킷 하나를 접두로 나눠 쓰고,
+     * 음성 저장에 선택 동의한 세션만 남긴다.
      *
-     * @param bucket 음성 WAV와 메타 JSON을 넣을 S3 버킷 이름. <b>미설정이 기본값이고, 그러면 S3 클라이언트도
-     *               저장 빈도 만들어지지 않는다</b> - 로컬, 테스트, prod 전부 이 상태다 (FR-DP-01 그대로).
-     *               staging에서만 SSM {@code ACCENTURY_TRAINING_BUCKET}으로 들어온다 (config 모듈의
-     *               optional 파라미터). 빈 문자열은 설정 실수로 보고 기동을 세운다 ({@code TrainingConfig}).
-     * @param region 그 버킷의 리전. 비우면 SDK 기본 체인(태스크의 {@code AWS_REGION})이다 - 배포 프로파일은
-     *               CloudWatch 레지스트리와 같은 값을 명시한다 (application-deploy.yml).
+     * @param bucket         음성 WAV와 라벨 JSON을 넣을 S3 버킷 이름. <b>미설정이 기본값이고, 그러면 S3 클라이언트도
+     *                       저장 빈도 만들어지지 않는다</b> - 로컬과 테스트가 이 상태다. 배포에서는 SSM
+     *                       {@code ACCENTURY_TRAINING_BUCKET}으로 들어온다 (config 모듈, 수집을 켠 환경에만 있다).
+     *                       빈 문자열은 설정 실수로 보고 기동을 세운다 ({@code TrainingConfig}).
+     * @param region         그 버킷의 리전. 비우면 SDK 기본 체인(태스크의 {@code AWS_REGION})이다 - 배포 프로파일은
+     *                       CloudWatch 레지스트리와 같은 값을 명시한다 (application-deploy.yml).
+     * @param keyPrefix      객체 키의 환경 접두 ({@code staging} 또는 {@code prod}, 슬래시 없이). 버킷이 있으면 필수다 -
+     *                       태스크 역할이 자기 접두에만 쓸 수 있어, 없으면 저장이 전부 AccessDenied로 삼켜진다.
+     *                       SSM {@code ACCENTURY_TRAINING_KEYPREFIX}가 넣는다. 없거나 형식이 틀리면 기동을 세운다.
+     * @param consentVersion 게시 중인 음성 저장 동의 버전. 세션 생성(§3.1)과 계정 동의 등록의 요청 값이 이 값과
+     *                       정확히 같아야 받는다 - 방침 버전({@code Auth#privacyPolicyVersion})과 같은 규율이다.
+     *                       버킷이 없는 환경에서도 동의는 기록한다(저장만 하지 않는다).
      */
-    public record Training(@Nullable String bucket, @Nullable String region) {
+    public record Training(@Nullable String bucket, @Nullable String region, @Nullable String keyPrefix,
+                           @DefaultValue(Training.VOICE_CONSENT_VERSION) String consentVersion) {
+
+        /** 게시 중인 음성 저장 동의 버전 - 동의 문구를 고칠 때 앱과 웹의 상수와 함께 올린다 (KAN-269). */
+        public static final String VOICE_CONSENT_VERSION = "2026-10-04";
     }
 
     /**
@@ -387,7 +398,7 @@ public record AccenturyProperties(Session session,
                        @DefaultValue(Auth.PRIVACY_POLICY_VERSION) String privacyPolicyVersion) {
 
         /** 게시 중인 개인정보처리방침 버전 - privacy.html의 {@code accentury-policy-version} 메타와 같은 값이다 (KAN-240). */
-        public static final String PRIVACY_POLICY_VERSION = "2026-09-29";
+        public static final String PRIVACY_POLICY_VERSION = "2026-10-04";
     }
 
     /**
