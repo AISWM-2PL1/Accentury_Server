@@ -271,17 +271,13 @@ terraform apply
   aws route53 list-resource-record-sets --hosted-zone-id "$(terraform output -raw private_zone_id)" \
     --query "ResourceRecordSets[?Type=='A'].[Name,AliasTarget.DNSName]" --output table
   ```
-- 학습 데이터 S3 (KAN-201, KAN-239, staging만): 버킷이 있고 퍼블릭 액세스가 차단됐는지, 수명주기 만료일이
-  tfvars `training_retention_until`과 같은지, 버킷 정책이 붙었는지. **이 apply가 backend 코드 배포보다 먼저다** -
-  태스크 정의 secrets에 `ACCENTURY_TRAINING_CONSENTEDBUCKET`, `ACCENTURY_TRAINING_TESTERIDS`,
-  `ACCENTURY_TRAINING_PSEUDONYMKEY`가 늘어 apply가 태스크 정의를 새 리비전으로 갈고, 그 파라미터가 없으면
-  파이프라인의 리비전 등록이 실패한다 (KAN-132 교훈, "staging 전용 학습 데이터 S3" 절).
+- 학습 데이터 S3 (KAN-201, staging만): 버킷이 있고 퍼블릭 액세스가 차단됐는지. **이 apply가 backend 코드
+  배포보다 먼저다** - 태스크 정의 secrets에 `ACCENTURY_TRAINING_BUCKET`이 늘어 apply가 태스크 정의를 새
+  리비전으로 갈고, 그 파라미터가 없으면 파이프라인의 리비전 등록이 실패한다 (KAN-132 교훈, "staging 전용
+  학습 데이터 S3" 절).
 
   ```
-  B="$(terraform output -raw training_bucket)"
-  aws s3api get-public-access-block --bucket "$B"
-  aws s3api get-bucket-lifecycle-configuration --bucket "$B" --query 'Rules[].Expiration.Date'
-  aws s3api get-bucket-policy --bucket "$B" --query Policy --output text | jq '.Statement[].Sid'
+  aws s3api get-public-access-block --bucket "$(terraform output -raw training_bucket)"
   ```
 
 ### 2. prod
@@ -973,9 +969,7 @@ fargate 모듈이 config의 파라미터 이름 목록을 그대로 태스크 �
 | `ACCENTURY_SHARE_KAKAOADMINKEY` | 카카오디벨로퍼스 콘솔의 앱 Admin 키 (KAN-164). Terraform은 자리 표시 값으로 만들고(write-only `value_wo`라 state에 값이 남지 않는다) apply 뒤 `put-parameter --overwrite`로 넣는다 (아래 "카카오 공유 웹훅" 절). 두 환경 같은 값 | SecureString |
 | `ACCENTURY_FEEDBACK_SLACKWEBHOOKURL` | 이용 후기 알림이 나가는 슬랙 채널(`#feedback`)의 Incoming Webhook URL (KAN-211). 카카오 키와 같이 자리 표시 값으로 만들고 apply 뒤 `put-parameter`로 넣는다 (아래 "이용 후기 슬랙 알림" 절). **선택 값이다 - 없거나 자리 표시 값이면 backend가 알림만 끄고 그대로 기동한다** (`DeploymentConfigGuard` 밖이라 apply와 배포의 순서 제약이 없다). 채널이 하나라 두 환경 같은 값 | SecureString |
 | `ai/ACCENTURY_AI_INTERNAL_TOKEN` | `ACCENTURY_ANALYSIS_AITOKEN`과 같은 난수. ai 서버가 health를 뺀 모든 요청에서 대조한다 (KAN-36). ai 호스트 역할만 읽는다 | SecureString |
-| `ACCENTURY_TRAINING_CONSENTEDBUCKET` | **staging에만 있다** (KAN-201). 학습 데이터 버킷 이름(`accentury-staging-training-<계정>`). tfvars `training_bucket_enabled`가 true인 환경에만 파라미터가 생기고, 그래서 prod 태스크 정의에는 이 변수가 없어 backend가 S3 클라이언트를 만들지 않는다 (아래 "staging 전용 학습 데이터 S3" 절) | String |
-| `ACCENTURY_TRAINING_TESTERIDS` | **staging에만 있다** (KAN-239). 학습 활용에 동의한 테스터의 `app_user.id`를 쉼표로 이은 값. backend는 이 계정들의 세션만 저장한다. Terraform은 자리 표시 값(write-only `value_wo`)으로 자리만 만들고 운영자가 `put-parameter`로 채운다 - 자리 표시 값인 동안은 아무것도 저장하지 않는다 | StringList |
-| `ACCENTURY_TRAINING_PSEUDONYMKEY` | **staging에만 있다** (KAN-239). 학습 샘플의 세션 ID를 가명(HMAC-SHA256)으로 바꾸는 키. ephemeral 난수를 write-only로 넣어 state에 값이 없다. 버킷이 있는데 이 값이 없으면 backend가 기동하지 않는다 | SecureString |
+| `ACCENTURY_TRAINING_BUCKET` | **staging에만 있다** (KAN-201). 학습 데이터 버킷 이름(`accentury-staging-training-<계정>`). tfvars `training_bucket_enabled`가 true인 환경에만 파라미터가 생기고, 그래서 prod 태스크 정의에는 이 변수가 없어 backend가 S3 클라이언트를 만들지 않는다 (아래 "staging 전용 학습 데이터 S3" 절) | String |
 
 **DB 사용자 이름과 비밀번호 파라미터는 없다.** RDS 관리형 마스터 시크릿은 7일마다
 자동 회전되므로(AWS 문서, 일정 변경만 가능) 값을 SSM에 복사하면 첫 회전에서 접속이
@@ -1325,61 +1319,31 @@ KAN-57의 c7i.xlarge 실측(bf16 + MFA `align_one`, 1건 P50 10.1초, P95 11.1�
 ### staging 전용 학습 데이터 S3 (KAN-201)
 
 원본 음성은 요청 처리 중에만 메모리에 있고 영속 저장소에 남지 않는다 (SRS FR-DP-01). 그래서 모델을 다시
-학습시킬 실발화 데이터가 어디에도 없었고, 2026-09-08 결정으로 **staging에만** 버킷을 두고 음성 WAV와 AI 원점수
-메타 JSON을 보존한다. prod는 FR-DP-01 그대로다.
-
-**대상은 학습 활용에 동의한 테스터 계정의 세션뿐이다 (KAN-239).** staging은 CloudFront와 WAF로 인터넷에 공개돼
-있어 "staging이니 내부 테스터"가 성립하지 않았다 - KAN-201의 첫 구현은 버킷 설정 하나만 보고 누구의 음성이든,
-익명 웹 세션이든 저장했다. 2026-09-28에 수집을 멈추고 그때까지의 382개 객체를 전량 파기한 뒤(동의 여부를 확인할
-수 없어서) 아래 한정 장치를 넣었다. 테스터 동의(목적, 항목, 보유 기간, 철회 방법)를 받는 것은 운영 절차이고,
-동의를 받기 전에는 테스터 목록이 비어 있어 켜져 있어도 아무것도 쌓이지 않는다.
+학습시킬 실발화 데이터가 어디에도 없었고, 2026-09-08 결정으로 **staging에만** 버킷을 두고 내부 테스터의
+음성 WAV와 AI 원점수 메타 JSON을 보존한다. prod는 FR-DP-01 그대로다.
 
 | 항목 | 값 |
 | --- | --- |
 | 버킷 | `accentury-staging-training-<계정 ID>` (envs main.tf, tfvars `training_bucket_enabled = true`인 환경만) |
-| 보호 | 퍼블릭 액세스 전면 차단, SSE-S3 기본 암호화, 버전 관리 없음 |
-| 보유 기간 | 수명주기 만료일 = tfvars `training_retention_until`(UTC 자정 RFC3339, 동의서의 보유 기간 끝날). 켜져 있는데 값이 없으면 plan이 precondition으로 실패한다. 만료는 비동기라 그날 즉시 삭제를 보장하지 않으므로, 그날이 오면 아래 "환경 teardown 파기 런북"대로 버킷을 비운다 |
-| 버킷 정책 | `aws:SecureTransport = false` 요청 전부 거부. 객체 본문(`GetObject`)은 학습 읽기 역할(`accentury-staging-training-reader`, 출력 `training_reader_role_arn`) 외에는 거부 - 관리자 자격 증명도 거부된다. `ListBucket`은 거부하지 않는다 - `HeadBucket`이 그 권한으로 판정돼 거부하면 Terraform refresh와 파기 apply가 잠긴다. 키에는 가명과 지역, 문항 ID뿐이다 |
-| 권한 | backend 태스크 역할에 이 버킷 한 개로 한정한 `s3:PutObject`만 (fargate 모듈 `training_bucket_arn`). Get, List, Delete 없음. 읽기는 학습 읽기 역할만(신뢰 대상 tfvars `training_reader_principals`, 비우면 계정 루트) |
-| 스위치 | SSM `ACCENTURY_TRAINING_CONSENTEDBUCKET` -> `accentury.training.consented-bucket`. 없으면 backend는 S3 클라이언트도 저장 빈도 만들지 않는다 (`TrainingConfig`). KAN-201의 이름(`ACCENTURY_TRAINING_BUCKET`)에서 KAN-239가 바꿨다 - KAN-239 이전 SHA로 롤백(`deploy.yml` 수동 실행이나 반영 실패 시 자동 롤백)돼도 옛 이미지는 이 이름을 모르므로 수집이 꺼진 채 뜬다. 한정 없는 옛 코드가 다시 수집하는 길이 이름으로 막혀 있으니 이 이름을 옛 이름으로 되돌리지 않는다 |
-| 대상 | SSM `ACCENTURY_TRAINING_TESTERIDS` -> `accentury.training.tester-ids`. 세션 소유 계정(`test_session.user_id`)이 이 목록에 있을 때만 저장한다. 익명 세션(웹)과 목록 밖 계정은 저장하지 않고 지표 `result=skipped`만 오른다. 목록이 비거나 자리 표시 값이면 아무것도 저장하지 않는다 (`TrainingSpeakers`) |
-| 가명 | SSM `ACCENTURY_TRAINING_PSEUDONYMKEY` -> `accentury.training.pseudonym-key`. `speaker = HMAC-SHA256(sessionId, 키)`, `sampleId = HMAC-SHA256(analysisJobId, 키)`의 hex. 같은 세션의 문항은 한 접두에 모이고 DB와 로그의 세션 ID, 작업 ID와는 이어지지 않는다(작업 ID 원문은 `analysis_job.session_id`로 계정까지 조인되므로 함께 가린다). 로그에는 작업 ID와 객체 키를 한 줄에 남기지 않는다. 키 회전은 config 모듈 `value_wo_version` 증가 + apply + backend 재배포이고, 회전 전후의 speaker는 이어지지 않는다 |
+| 보호 | 퍼블릭 액세스 전면 차단, SSE-S3 기본 암호화, 버전 관리 없음, 수명주기 규칙 없음(학습 데이터라 자동 삭제하지 않는다) |
+| 권한 | backend 태스크 역할에 이 버킷 한 개로 한정한 `s3:PutObject`만 (fargate 모듈 `training_bucket_arn`). Get, List, Delete 없음 |
+| 스위치 | SSM `ACCENTURY_TRAINING_BUCKET` -> `accentury.training.bucket`. 없으면 backend는 S3 클라이언트도 저장 빈도 만들지 않는다 (`TrainingConfig`) |
 | 저장 시점 | 분석 상태 전이가 끝난 뒤, 오디오 버퍼 파기 전 (`HttpAnalysisDispatcher`). 성공과 판정 실패 모두, 계약 위반과 AI 불가는 제외 |
-| 키 | `<region>/<testVersion>/<speaker>/<itemId>/<sampleId>.wav` 와 `.json` (region은 세션 생성 요청의 출신 지역 코드 10개 중 하나 또는 `UNKNOWN`). 메타 JSON도 `sessionId`, `analysisJobId` 대신 `speaker`, `sampleId`를 싣고 `correlationId`와 계정 정보는 없다 (KAN-239) |
+| 키 | `<region>/<testVersion>/<sessionId>/<itemId>/<analysisJobId>.wav` 와 `.json` (region은 세션 생성 요청의 출신 지역 코드 10개 중 하나 또는 `UNKNOWN`) |
 | 실패 | 삼킨다 - WARN 로그 1줄 + 지표 `accentury.training.samples`(result=failed). 분석 결과와 상태 조회에 영향 없음 |
 
 **apply 순서.** 이 파라미터가 태스크 정의 secrets에 들어가므로 staging apply가 코드 배포보다 먼저다 (KAN-132
 교훈). 반대로 하면 파이프라인이 등록하는 리비전이 없는 파라미터를 가리켜 태스크가 뜨지 않는다. 두 환경의
-main.tf는 같고(KAN-140) 차이는 tfvars다 - prod plan에는 버킷도 정책도 역할도 파라미터도 없어야 한다.
+main.tf는 같고(KAN-140) 차이는 tfvars 한 줄이다 - prod plan에는 버킷도 정책도 파라미터도 없어야 한다.
 
-**테스터 추가와 철회.** 동의를 받은 테스터의 `app_user.id`를 목록에 넣고 backend를 새로 띄운다 (secrets는 태스크
-시작 때 한 번 읽힌다). 철회도 같은 명령으로 목록에서 빼고 새로 띄운다. 기동 로그 `학습 샘플 저장 켜짐 - 동의
-테스터 N명`으로 반영을 확인한다.
+**teardown.** 버킷은 `force_destroy`라 destroy가 객체째 지운다 - staging을 부수고 다시 지으면 모인 샘플이 사라진다.
+남겨야 하면 destroy 전에 `aws s3 sync s3://<버킷> <로컬>`로 내려받는다.
 
-```
-aws ssm put-parameter --overwrite --type StringList \
-  --name /accentury/staging/ACCENTURY_TRAINING_TESTERIDS --value '<app_user.id>,<app_user.id>'
-aws ecs update-service --cluster accentury-staging --service backend --force-new-deployment
-```
-
-**넘길 때.** 로컬로 내려받지 않는다 - 노트북에 사본이 생기면 보유 기간 만료와 파기가 그 사본에 닿지 않는다.
-학습 담당에게 넘길 때는 학습 읽기 역할로 학습 쪽 버킷에 버킷 간 복사를 하고, 반출 기록(날짜, 대상 버킷, 객체 수,
-그 사본의 파기 예정일 = 이 버킷의 만료일)을 KAN-239에 코멘트로 남긴다. 학습 쪽 버킷도 같은 만료일을 가져야 한다.
-
-**teardown.** 버킷은 `force_destroy`라 destroy가 객체째 지운다. 파기 순서와 기록은 아래 "환경 teardown 파기 런북"
-절을 따른다.
-
-확인 (본문은 학습 읽기 역할로 - 다른 자격 증명의 GetObject는 버킷 정책이 거부한다):
+확인:
 
 ```
-# terraform output은 역할을 맡기 전에 읽는다 - 학습 읽기 역할은 state 버킷을 못 읽어 맡은 뒤에는 output이 403이다.
-B="$(terraform output -raw training_bucket)"; R="$(terraform output -raw training_reader_role_arn)"
-eval "$(aws sts assume-role --role-arn "$R" --role-session-name training-check \
-  --query 'Credentials.[AccessKeyId,SecretAccessKey,SessionToken]' --output text \
-  | awk '{print "export AWS_ACCESS_KEY_ID="$1" AWS_SECRET_ACCESS_KEY="$2" AWS_SESSION_TOKEN="$3}')"
-aws s3 ls "s3://$B/" --recursive | tail        # 지역/버전/speaker/문항/sampleId.wav|.json
-aws s3 cp "s3://$B/<키>.json" -                  # AI 원점수, 결과, 버전 (작업 ID와는 조인되지 않는다)
-unset AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY AWS_SESSION_TOKEN
+aws s3 ls "s3://$(terraform output -raw training_bucket)/" --recursive | tail        # 지역/버전/세션/문항/작업.wav|.json
+aws s3 cp "s3://$(terraform output -raw training_bucket)/<키>.json" -                  # intonationScore = analysis_job.intonation_score
 ```
 
 ### 이미 있는 SSM 파라미터 (재구축, 수동 생성분)
@@ -1532,7 +1496,7 @@ staging부터 true로 apply하고 prod가 뒤따른다.
 
 | 항목 | 어디 | 내용 |
 | --- | --- | --- |
-| S3 TLS 강제 | `modules/edge`(web), `modules/ai-host`(boot), envs(training, KAN-239), bootstrap(tfstate, KAN-242와 audit) | `aws:SecureTransport = false` 요청 전부 거부 |
+| S3 TLS 강제 | `modules/edge`(web), `modules/ai-host`(boot), bootstrap(tfstate, KAN-242와 audit). 학습 버킷은 KAN-239 되돌림(2026-10-04)으로 버킷 정책이 없다 | `aws:SecureTransport = false` 요청 전부 거부 |
 | 보안 응답 헤더 | `modules/edge`의 `aws_cloudfront_response_headers_policy.security`, 세 동작 모두 | HSTS 1년 + includeSubDomains(preload 없음), nosniff, `X-Frame-Options: DENY`, `strict-origin-when-cross-origin`, CSP는 Report-Only. 수집 지점(`report-uri`/`report-to`)이 아직 없어 위반은 브라우저 콘솔에만 찍힌다 - enforce 전환 후속은 수집 엔드포인트부터 |
 | JDBC 서버 인증서 검증 | `modules/config`의 `SPRING_DATASOURCE_URL`, `backend/Dockerfile` | `sslmode=verify-full` + 이미지 안 RDS 전역 CA 번들. 서버 쪽 `rds.force_ssl`은 PG16 기본 파라미터 그룹에서 이미 1 |
 | backend 아웃바운드 | `modules/network` | 443(IPv4, IPv6)과 SG 참조 3개(RDS 5432, Redis 6379, AI ALB 8000)만 |
@@ -2274,7 +2238,7 @@ Terraform 입력의 차이는 `diff -r infra/envs/staging infra/envs/prod`가 �
 | 내부 호출 토큰 (KAN-36) | 환경별 난수 | 환경별 난수 | `ACCENTURY_ANALYSIS_AITOKEN`, `ai/ACCENTURY_AI_INTERNAL_TOKEN` |
 | AI 호스트 (KAN-36) | c7i.xlarge, 루트 40GiB | 같은 값 | `ai_instance_type`, `ai_root_volume_size` (B단계 2026-09-10에 20에서 40으로) |
 | AI 호스트 오토스케일링 (KAN-201) | max 3 | 같은 값 | `ai_max_size` - ai-host 모듈 ASG `max_size`. min 1은 모듈 기본값 |
-| 학습 데이터 S3 (KAN-201, KAN-239) | 켬, 만료일 있음 | 끔 | `training_bucket_enabled` - 버킷, 수명주기 만료(`training_retention_until`), 버킷 정책, 학습 읽기 역할, 태스크 역할 PutObject, SSM `ACCENTURY_TRAINING_CONSENTEDBUCKET`, `ACCENTURY_TRAINING_TESTERIDS`, `ACCENTURY_TRAINING_PSEUDONYMKEY` |
+| 학습 데이터 S3 (KAN-201) | 켬 | 끔 | `training_bucket_enabled` - 버킷, 태스크 역할 PutObject, SSM `ACCENTURY_TRAINING_BUCKET`(secrets 14개째) |
 | RDS 삭제 보호, 최종 스냅샷 | 없음, 생략 | 켬, 남김 | RDS |
 | 배포 역할 ECR push | 허용 | 불가 | `modules/deploy` image-deploy 정책 (KAN-128 승격 모델) |
 
@@ -2341,37 +2305,11 @@ terraform destroy
 - 프라이빗 영역의 `ai.accentury.internal` A 레코드는 KAN-201부터 Terraform 소유(ALB alias)라
   destroy가 함께 지운다. KAN-36 시절 인스턴스가 만든 레코드가 남아 있어도 영역이
   `force_destroy = true`라 레코드째 지운다. ASG는 인스턴스를 먼저 종료한 뒤 삭제된다.
-  학습 데이터 버킷(KAN-201, staging)도 `force_destroy`라 샘플째 사라진다 - 로컬로 내려받지 않는다 (아래 파기 런북). ai 컨테이너 로그 그룹 `/accentury/{env}/ai`(KAN-203)도
+  학습 데이터 버킷(KAN-201, staging)도 `force_destroy`라 샘플째 사라진다 - 남길 것은 미리 내려받는다. ai 컨테이너 로그 그룹 `/accentury/{env}/ai`(KAN-203)도
   Terraform 소유라 로그째 지워진다 - 스트림은 인스턴스마다 쌓이지만 그룹 하나에 딸려 있다.
 - 미확인 SNS 이메일 구독은 AWS가 지워 주지 않아 state에서만 빠지지만, 토픽이
   삭제되면 딸린 구독도 함께 사라져 잔존물이 남지 않는다 (KAN-134). 재구축 때는
   토픽이 새로 생기므로 확인 메일이 다시 오고 다시 눌러야 한다.
-
-## 환경 teardown 파기 런북 (KAN-239)
-
-destroy는 리소스를 지우지만 개인정보가 담긴 **잔존물**을 전부 지우지는 않는다. 환경을 내리거나 학습 데이터의
-보유 기간이 끝났을 때는 아래 순서를 밟고, 마지막에 기록을 남긴다. 학습 데이터만 파기하는 경우(보유 기간 만료)는
-1, 2단계에서 멈추고 4단계로 간다.
-
-1. **수집 중지.** tfvars `training_bucket_enabled = false`로 apply한다. 학습 파라미터 셋과 태스크 정의 secrets가
-   빠지고 backend가 새로 뜬다 - 파라미터만 지우면 태스크 정의가 없는 파라미터를 가리켜 기동에 실패하므로 이
-   경로여야 한다. 버킷은 `force_destroy`라 객체째 사라진다(버킷 정책은 객체 본문 읽기만 거부해 목록과 삭제는
-   막지 않는다). apply 전에 객체 수를 세 둔다 - 목록은 관리자 자격 증명으로도 된다
-   (`aws s3 ls s3://<버킷> --recursive --summarize | tail -2`).
-2. **학습 쪽 사본 파기.** 반출 기록(KAN-239 코멘트)에 있는 버킷 간 복사본을 학습 담당이 지운다.
-3. **destroy와 잔존물 삭제** (환경을 내릴 때만). `terraform destroy`(위 "teardown 절차") 뒤에 남는 것:
-
-   | 잔존물 | 개인정보 | 지우는 법 |
-   | --- | --- | --- |
-   | RDS 최종 스냅샷 `accentury-prod-final-<suffix>` | **있다** - prod는 `skip_final_snapshot = false`라 destroy가 `app_user`(이름, 이메일, 생년월일, 성별)가 담긴 스냅샷을 남긴다 | 보관 이유가 없으면 `aws rds delete-db-snapshot --db-snapshot-identifier <이름>` |
-   | CloudWatch 로그 그룹 | 세션 ID, 계정 id(`세션 생성` 로그) | 모듈 소유 그룹은 destroy가 지운다. `aws logs describe-log-groups --log-group-name-prefix /accentury`로 남은 것을 확인해 `delete-log-group` |
-   | Terraform state 옛 버전 | Redis AUTH 토큰 등 시크릿 (KAN-242 전) | state 버킷은 버전 관리가 켜져 있어 옛 버전이 남는다. 환경을 영구히 내릴 때만 그 환경 키의 옛 버전을 지운다 |
-   | ECR 이미지 | 없다 (코드와 모델) | 필요 없으면 `aws ecr batch-delete-image` |
-   | SSM `/accentury/{env}/IMAGE_TAG` | 없다 | 재구축할 거면 남긴다 (위 "teardown 절차") |
-
-4. **파기 기록.** KAN-239(또는 그 시점의 담당 티켓)에 코멘트로 남긴다: 날짜와 시각(UTC), 대상(버킷 이름, 스냅샷
-   이름 등), 파기 전 객체 수, 방법(apply, delete 명령), 확인 결과(`head-bucket` 404 등). 2026-09-28 첫 파기(382개)가
-   그 양식의 첫 예다.
 
 ## 설계 결정 기록
 

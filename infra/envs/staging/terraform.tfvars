@@ -28,13 +28,9 @@ ai_root_volume_size = 40
 # 15분 연속이면 -1. 내부 ALB(least_outstanding_requests)가 backend 태스크 3개의 동시 호출을 빈 인스턴스로 나눈다.
 ai_max_size = 3
 
-# staging 전용 학습 데이터 S3 (KAN-201, 2026-09-08 결정). 학습 활용에 동의한 테스터 계정의 음성 WAV와 AI 원점수를
-# 모델 재학습용으로 보존한다 - FR-DP-01(원본 음성 미보존)의 staging 예외다. prod는 false로 버킷도 권한도 파라미터도 없다.
-# 대상 계정은 SSM ACCENTURY_TRAINING_TESTERIDS를 put-parameter로 채운다(자리 표시 값이면 아무것도 저장하지 않는다, KAN-239).
+# staging 전용 학습 데이터 S3 (KAN-201, 2026-09-08 결정). 내부 테스터의 음성 WAV와 AI 원점수를 모델 재학습용으로
+# 보존한다 - FR-DP-01(원본 음성 미보존)의 staging 예외다. prod는 false로 버킷도 권한도 파라미터도 없다.
 training_bucket_enabled = true
-
-# 보유 기간 만료일 (KAN-239). 동의서가 아직 없어 자리 표시 날짜다 - 동의서의 보유 기간이 정해지면 그 끝날로 바꾼다.
-training_retention_until = "2026-12-31T00:00:00Z"
 
 ssm_prefix = "/accentury/staging"
 

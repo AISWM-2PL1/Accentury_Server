@@ -659,22 +659,6 @@ class HttpAnalysisDispatcherTest extends IntegrationTest {
     }
 
     @Test
-    void 세션_ID와_소유_계정이_샘플에_실려_저장소가_대상을_가른다() {
-        // 동의 테스터인지는 저장소(TrainingSpeakers)가 가른다 (KAN-239) - 디스패처는 둘 다 그대로 넘긴다.
-        AnalysisJob job = saveProcessingJob();
-        UUID owner = UUID.randomUUID();
-        RecordingStore store = new RecordingStore();
-        ScriptedClient client = new ScriptedClient()
-                .then(new AiAnalysisClient.Completed(78, "OK", "rmvpe-0.2", "sv-0.3"));
-
-        dispatcher(client, 0, store).dispatch(request(job, "GYEONGNAM", owner));
-
-        TrainingSample sample = store.only();
-        assertEquals(job.sessionId(), sample.sessionId());
-        assertEquals(owner, sample.ownerId());
-    }
-
-    @Test
     void 지역_없는_세션의_샘플은_UNKNOWN이다() {
         RecordingStore store = new RecordingStore();
         ScriptedClient client = new ScriptedClient()
@@ -853,12 +837,7 @@ class HttpAnalysisDispatcherTest extends IntegrationTest {
 
     private static AnalysisDispatcher.AnalysisRequest request(AnalysisJob job,
                                                               @Nullable String region) {
-        return request(job, region, null);
-    }
-
-    private static AnalysisDispatcher.AnalysisRequest request(AnalysisJob job, @Nullable String region,
-                                                              @Nullable UUID ownerId) {
         return new AnalysisDispatcher.AnalysisRequest(job.id(), job.sessionId(), job.itemId(), null,
-                "gn-2026.08.1", "sv-0.3", region, ownerId, 3000, new byte[] {1, 2, 3});
+                "gn-2026.08.1", "sv-0.3", region, 3000, new byte[] {1, 2, 3});
     }
 }

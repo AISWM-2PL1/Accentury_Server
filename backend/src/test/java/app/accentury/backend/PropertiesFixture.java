@@ -138,7 +138,7 @@ public final class PropertiesFixture {
                 // 저장은 그대로 돈다.
                 new AccenturyProperties.Feedback(10, Duration.ofDays(365), null),
                 // 학습 데이터 버킷 없음 - 기본 상태다 (KAN-201). 저장 코드가 호출되지 않는다.
-                new AccenturyProperties.Training(null, null, null, null),
+                new AccenturyProperties.Training(null, null),
                 auth(),
                 trustedProxies);
     }

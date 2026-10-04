@@ -62,10 +62,8 @@ module "data" {
 # ---- staging 전용 학습 데이터 S3 (KAN-201) ----
 
 # 원본 음성은 영속 저장소에 남지 않는다는 FR-DP-01의 staging 예외다 (2026-09-08 결정). backend가 분석 종결마다
-# 음성 WAV와 AI 원점수 메타 JSON을 여기 남긴다 - 모델 재학습용이다. 대상은 학습 활용에 동의한 테스터 계정의 세션뿐이고
-# (SSM ACCENTURY_TRAINING_TESTERIDS), 세션 ID는 가명(HMAC)으로 바뀐다 (KAN-239, backend TrainingSpeakers).
-# 보존은 동의서의 보유 기간까지다 - 수명주기 만료일이 tfvars training_retention_until이고, 없으면 plan이 실패한다.
-# 두 환경의 main.tf는 같아야 하므로(KAN-140) 스위치는 tfvars의
+# 내부 테스터의 음성 WAV와 AI 원점수 메타 JSON을 여기 남긴다 - 모델 재학습용이고, 학습 데이터라 자동 삭제하지
+# 않는다(수명주기 규칙 없음). 두 환경의 main.tf는 같아야 하므로(KAN-140) 스위치는 tfvars의
 # training_bucket_enabled이고, prod는 false라 버킷도 정책도 파라미터도 생기지 않아 prod plan에 이 이름이 없다.
 # 이름은 web 버킷 규약(edge 모듈)대로 계정 ID를 붙인다. force_destroy는 web 버킷과 같이 teardown을 위해서다 -
 # staging을 부수고 다시 지으면 모인 샘플도 함께 사라진다 (README).
@@ -76,14 +74,6 @@ resource "aws_s3_bucket" "training" {
 
   bucket        = "accentury-${var.env}-training-${data.aws_caller_identity.current.account_id}"
   force_destroy = true
-
-  lifecycle {
-    # 기한 없는 보존을 막는다 (KAN-239) - 켜는 순간 동의서의 보유 기간이 함께 정해져 있어야 한다.
-    precondition {
-      condition     = var.training_retention_until != null
-      error_message = "training_bucket_enabled = true이면 training_retention_until(동의서의 보유 기간 만료일)이 있어야 한다 (KAN-239)."
-    }
-  }
 }
 
 resource "aws_s3_bucket_public_access_block" "training" {
@@ -110,107 +100,6 @@ resource "aws_s3_bucket_server_side_encryption_configuration" "training" {
   }
 }
 
-# 보유 기간 만료 (KAN-239). 동의서의 보유 기간 끝날과 같은 날이다. S3의 만료는 비동기라 그날 즉시 지워진다는 보장이
-# 없다 - 그날이 오면 README "환경 teardown 파기 런북" 절대로 버킷을 비우고 기록을 남긴다. 이 규칙은 그 뒤의 안전망이다.
-resource "aws_s3_bucket_lifecycle_configuration" "training" {
-  count = var.training_bucket_enabled ? 1 : 0
-
-  bucket = aws_s3_bucket.training[0].id
-
-  rule {
-    id     = "consent-retention"
-    status = "Enabled"
-
-    filter {}
-
-    expiration {
-      date = var.training_retention_until
-    }
-  }
-}
-
-# 학습 데이터를 읽는 유일한 역할 (KAN-239). 학습 담당이 이 역할을 맡아(AssumeRole) 읽는다 - 계정 안의 다른 주체는
-# s3:GetObject 권한이 있어도 아래 버킷 정책이 거부한다. 신뢰 대상은 tfvars training_reader_principals이고,
-# 비우면 이 계정 루트다(= 계정 안에서 sts:AssumeRole을 허용받은 IAM 주체).
-resource "aws_iam_role" "training_reader" {
-  count = var.training_bucket_enabled ? 1 : 0
-
-  name = "accentury-${var.env}-training-reader"
-
-  assume_role_policy = jsonencode({
-    Version = "2012-10-17"
-    Statement = [{
-      Effect = "Allow"
-      Action = "sts:AssumeRole"
-      Principal = {
-        AWS = coalescelist(var.training_reader_principals,
-        ["arn:aws:iam::${data.aws_caller_identity.current.account_id}:root"])
-      }
-    }]
-  })
-}
-
-resource "aws_iam_role_policy" "training_reader" {
-  count = var.training_bucket_enabled ? 1 : 0
-
-  name = "read-training-bucket"
-  role = aws_iam_role.training_reader[0].id
-
-  policy = jsonencode({
-    Version = "2012-10-17"
-    Statement = [
-      {
-        Effect   = "Allow"
-        Action   = "s3:ListBucket"
-        Resource = aws_s3_bucket.training[0].arn
-      },
-      {
-        Effect   = "Allow"
-        Action   = "s3:GetObject"
-        Resource = "${aws_s3_bucket.training[0].arn}/*"
-      },
-    ]
-  })
-}
-
-# 버킷 정책 (KAN-239). 두 문장 다 Deny라 IAM 쪽 허용이 넓어도 이긴다.
-# 1) TLS가 아닌 요청은 전부 거부한다.
-# 2) 객체 본문(GetObject)은 학습 읽기 역할만 - 관리자 자격 증명도 거부된다. ListBucket은 거부하지 않는다: HeadBucket이
-#    s3:ListBucket 권한으로 판정되므로 거부하면 Terraform의 버킷 refresh가 막혀 이후 plan, apply와 파기 apply까지 잠긴다
-#    (Codex astra 리뷰 P1). 키에는 가명(speaker, sampleId)과 지역, 문항 ID만 있어 목록이 보여도 음성과 점수는 못 읽는다.
-#    버킷을 비울 때는 training_bucket_enabled = false apply다 (force_destroy, README "환경 teardown 파기 런북" 절).
-resource "aws_s3_bucket_policy" "training" {
-  count = var.training_bucket_enabled ? 1 : 0
-
-  bucket = aws_s3_bucket.training[0].id
-
-  policy = jsonencode({
-    Version = "2012-10-17"
-    Statement = [
-      {
-        Sid       = "DenyInsecureTransport"
-        Effect    = "Deny"
-        Principal = "*"
-        Action    = "s3:*"
-        Resource  = [aws_s3_bucket.training[0].arn, "${aws_s3_bucket.training[0].arn}/*"]
-        Condition = { Bool = { "aws:SecureTransport" = "false" } }
-      },
-      {
-        Sid       = "ObjectReadOnlyByTrainingReader"
-        Effect    = "Deny"
-        Principal = "*"
-        Action    = "s3:GetObject"
-        Resource  = "${aws_s3_bucket.training[0].arn}/*"
-        Condition = { ArnNotEquals = { "aws:PrincipalArn" = aws_iam_role.training_reader[0].arn } }
-      },
-    ]
-  })
-
-  # 퍼블릭 차단이 먼저 서야 한다 - 정책을 먼저 붙이면 차단 설정 전 잠깐이라도 정책이 평가된다(여기서는 Deny뿐이라
-  # 무해하지만, 이후 문장이 늘 때를 위해 순서를 고정한다).
-  depends_on = [aws_s3_bucket_public_access_block.training]
-}
-
 # backend, ai 컨테이너 환경 변수 (KAN-129, KAN-36). 값이 network, data 모듈 출력이라 여기서 조립한다.
 module "config" {
   source = "../../modules/config"
@@ -230,7 +119,7 @@ module "config" {
   auth_naver_client_id  = var.auth_naver_client_id
   auth_apple_team_id    = var.auth_apple_team_id
   auth_apple_key_id     = var.auth_apple_key_id
-  # 학습 데이터 버킷이 있는 환경(staging)에만 ACCENTURY_TRAINING_CONSENTEDBUCKET 파라미터가 생긴다 (KAN-201).
+  # 학습 데이터 버킷이 있는 환경(staging)에만 ACCENTURY_TRAINING_BUCKET 파라미터가 생긴다 (KAN-201).
   training_bucket_name = one(aws_s3_bucket.training[*].bucket)
 }
 
