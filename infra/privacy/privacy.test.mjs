@@ -111,6 +111,16 @@ test('임시 파일 청소 기준 30분이 적혀 있다 (KAN-27, ai temp-retent
   assert.ok(html.includes('30분'), '30분 기준이 없다');
 });
 
+test('합본 분석 전 음성의 임시 메모리 보관이 적혀 있다 (KAN-261, KAN-262 Redis 문항별 칸)', () => {
+  // 음성 3문항을 한 번에 분석하므로 앞 문항 음성이 Redis(영속화 꺼짐)에 세션 만료(30분)까지 머문다.
+  // 이 보관을 빼거나 「디스크에 기록」 쪽으로 바뀌면 「영속 저장소에 저장하지 않는다」가 거짓이 된다.
+  const voice = section('<h3>음성 녹음</h3>', '<h3>테스트 세션</h3>').replace(/\s+/g, ' ');
+  assert.ok(voice.includes('임시 메모리 저장소'), '음성 임시 메모리 보관 문구가 없다');
+  assert.ok(voice.includes('디스크에 기록하지 않는 메모리 전용'), '메모리 전용(디스크 미기록) 문구가 없다');
+  assert.ok(voice.includes('세션이 만료되는 30분 뒤에 자동으로 삭제'), '미완주 시 30분 뒤 삭제 문구가 없다');
+  assert.ok(voice.includes('이전 녹음은 그 자리에서 새 녹음으로 바뀝니다'), '재녹음 시 교체 문구가 없다');
+});
+
 test('세션·결과 보유 기간 24시간이 적혀 있다 (KAN-25, backend retention: 24h)', () => {
   assert.ok(html.includes('24시간'), '24시간 보유 기간이 없다');
 });
