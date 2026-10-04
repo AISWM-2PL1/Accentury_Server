@@ -57,7 +57,7 @@ public class TestSession implements Persistable<String> {
 
     /**
      * 생성 시점에 고정되는 음성 문항 세트 번호 (1부터, KAN-182, §5.4). 세션의 유효 문항은
-     * {@code testVersion}과 이 번호로 정해지는 세트 하나(음성 5 + 어휘 5)뿐이다 -
+     * {@code testVersion}과 이 번호로 정해지는 세트 하나(구성은 정의의 setLayout, KAN-260)뿐이다 -
      * 제출 검증, 상태 조회, 완주 판정, 집계가 전부 이 세트만 본다. 기본 1이라 세트를
      * 모르는 클라이언트는 현행과 같다.
      */

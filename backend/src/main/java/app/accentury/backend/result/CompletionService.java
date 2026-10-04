@@ -145,7 +145,7 @@ public class CompletionService {
      * 판정 자체는 {@code /result}(KAN-25)와 공용이다 ({@link CompletionJudge}).
      */
     private Outcome verifyAndFinalize(TestSession session, long pollAfterMs) {
-        // 판정과 집계는 세션 세트의 10문항 기준이다 (KAN-182) - 미제출(missingItems)도 세트 기준이다.
+        // 판정과 집계는 세션 세트의 문항 기준이다 (KAN-182, 구성은 KAN-260 setLayout) - 미제출(missingItems)도 세트 기준이다.
         TestDefinition definition = registry.sessionDefinition(session.testVersion(), session.voiceSet());
         CompletionJudge.Judgment judgment = judge.judge(session.id(), definition);
 

@@ -29,8 +29,9 @@ public class ScoreAggregator {
     /**
      * 세션 전체 문항 결과를 종합 점수와 등급으로 접는다. {@code /complete} 시점에 1회 호출된다 (§4.3).
      * <ul>
-     *   <li>억양 점수 = 음성 5문항 점수의 합 x 계수. 문항 점수는 AI 원점수(0~100) ÷ 5(20점 만점)라
-     *       합은 원점수 평균과 같은 값이다 (2026-08-09 확정 - AI 계약 무변경, KAN-22). 계수는
+     *   <li>억양 점수 = 세트 음성 문항 원점수(0~100)의 평균 x 계수. 5문항 세트에서는 평균이
+     *       "문항당 20점 만점 환산 점수의 합"과 같은 값이다 (2026-08-09 확정 - AI 계약 무변경,
+     *       KAN-22). 음성 문항 수는 세트 구성마다 다르다 (5 또는 3, KAN-260). 계수는
      *       정책의 전처리 규칙이 그 <b>평균</b>의 구간으로 정한다 (sv-0.4, KAN-200) - 문항별로
      *       곱하지 않고, 규칙이 없는 정책(sv-0.3)은 계수 1이다. 원점수는 {@code analysis_job}에
      *       그대로 남고 전처리 값은 저장되지 않는다 - 재현과 감사는 scoreVersion 하나로 한다.</li>
@@ -46,7 +47,7 @@ public class ScoreAggregator {
      * 오르면 종합 점수와 등급도 절대 내려가지 않는다 (AC - 단조성).
      *
      * @param scoreVersion           세션이 생성 시점에 고정한 점수 버전 (§5.4)
-     * @param definition             세션의 세트 정의 (음성 5 + 어휘 5) - 문항 구성과 어휘 정답표의
+     * @param definition             세션의 세트 정의 (구성은 정의의 setLayout, KAN-260) - 문항 구성과 어휘 정답표의
      *                               출처. 풀 정의가 아니라 {@code TestDefinitionRegistry#sessionDefinition}이
      *                               준 세트여야 한다 (KAN-182) - 점수 규칙은 세트 도입 전과 같다.
      * @param intonationScoreByItem  음성 itemId → AI 원점수 0~100. 채점 대상은 문항당 최신 성공
@@ -97,13 +98,13 @@ public class ScoreAggregator {
                 }
             }
         }
-        // 정의 밖 itemId가 섞이면 "음성 5문항인데 결과 7개" 부류의 집계 버그다 (§5.1).
+        // 정의 밖 itemId가 섞이면 "음성 3문항인데 결과 5개" 부류의 집계 버그다 (§5.1).
         require(intonationScoreByItem.size() == voiceCount,
                 "정의에 없는 음성 점수가 있다: " + intonationScoreByItem.keySet());
         require(chosenChoiceIdByItem.size() == vocabularyCount,
                 "정의에 없는 어휘 답안이 있다: " + chosenChoiceIdByItem.keySet());
 
-        // 문항 구성(5+5)의 정본 검증은 레지스트리 몫이다 - 여기서는 0문항 정의가 아래
+        // 문항 구성(setLayout)의 정본 검증은 레지스트리 몫이다 - 여기서는 0문항 정의가 아래
         // 나눗셈을 0으로 나누지 않게 존재만 강제한다.
         require(voiceCount > 0, "음성 문항이 없는 정의다: " + definition.testVersion());
         require(vocabularyCount > 0, "어휘 문항이 없는 정의다: " + definition.testVersion());

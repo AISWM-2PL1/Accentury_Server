@@ -42,13 +42,13 @@ public class TestResult {
     private String scoreVersion;
 
     /**
-     * 세션이 응시한 음성 문항 세트 번호 (KAN-182) - testVersion과 함께 "어느 10문항으로 이
+     * 세션이 응시한 음성 문항 세트 번호 (KAN-182) - testVersion과 함께 "어느 문항으로 이
      * 점수가 나왔는가"를 재현하는 값이다. §3.7 응답에는 아직 싣지 않는다 (FE 요구가 나오면 정한다).
      */
     @Column(name = "voice_set", nullable = false)
     private int voiceSet;
 
-    /** 억양 점수 0~100 - 음성 5문항 20점 환산 점수의 합 (§4.3, 반올림 정수) */
+    /** 억양 점수 0~100 - 세트 음성 문항 원점수의 평균에 전처리 계수를 곱한 값 (§4.3, 반올림 정수) */
     @Column(nullable = false)
     private int intonation;
 

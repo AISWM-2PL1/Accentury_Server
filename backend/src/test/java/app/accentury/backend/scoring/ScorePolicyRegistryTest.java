@@ -85,6 +85,31 @@ class ScorePolicyRegistryTest {
         assertEquals(0, rule.coefficientPercent(0, 5));        // 평균 0
     }
 
+    // === KAN-260 - sv-0.5는 sv-0.4와 값이 같고 7문항 세트(음성 3)에서도 단조다 ===
+
+    @Test
+    void sv05_seed는_sv04와_값이_같다() {
+        ScorePolicy sv04 = registry().get("sv-0.4");
+        ScorePolicy sv05 = registry().get("sv-0.5");
+
+        assertEquals(sv04.intonationWeight(), sv05.intonationWeight());
+        assertEquals(sv04.vocabularyWeight(), sv05.vocabularyWeight());
+        assertEquals(sv04.tiers(), sv05.tiers());
+        assertEquals(sv04.intonationPreprocess(), sv05.intonationPreprocess());
+    }
+
+    @Test
+    void 음성_3문항에서도_계수는_평균의_구간으로_정해진다() {
+        // 평균이 같으면 문항 수와 무관하게 계수가 같다 - 3문항 합 285 = 평균 95, 286 = 평균 95.33.
+        ScorePolicy.IntonationPreprocess rule = registry().get("sv-0.5").intonationPreprocess();
+        assertEquals(100, rule.coefficientPercent(300, 3));    // 평균 100
+        assertEquals(100, rule.coefficientPercent(286, 3));    // 평균 95.33
+        assertEquals(95, rule.coefficientPercent(285, 3));     // 평균 95
+        assertEquals(rule.coefficientPercent(475, 5), rule.coefficientPercent(285, 3));
+        assertEquals(5, rule.coefficientPercent(1, 3));        // 평균 0.33
+        assertEquals(0, rule.coefficientPercent(0, 3));
+    }
+
     // === KAN-200 AC - 잘못된 전처리 규칙은 기동 실패다 ===
 
     @Test

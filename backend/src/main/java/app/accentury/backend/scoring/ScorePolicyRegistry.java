@@ -54,11 +54,13 @@ public class ScorePolicyRegistry {
     static final int MAX_WEIGHT = 100;
 
     /**
-     * 억양 전처리의 단조성을 전수 검사할 원점수 합의 범위 - 음성 문항 수 x 100. 5는 세션의 음성
-     * 문항 수다 ({@code VoiceSets.SET_SIZE}, 문항 구성 확정 2026-07-27). 계수 규칙 자체는
-     * seed에만 있고 이 값은 규칙이 아니라 검사 범위다 (KAN-200 AC - 합 0~500 전 구간).
+     * 억양 전처리의 단조성을 전수 검사할 음성 문항 수의 상한 - 1문항부터 이 수까지 각각 원점수 합
+     * 0~(문항 수 x 100) 전 구간을 본다. 정책은 어느 정의가 자기를 선언할지 모르고 세트의 음성 문항
+     * 수는 정의마다 다르므로(10문항 정의는 5, {@code gn-2026.10.1}부터 3, KAN-260), 검사 범위를 한
+     * 값에 묶지 않는다. 계수 규칙 자체는 seed에만 있고 이 값은 규칙이 아니라 검사 범위다
+     * (KAN-200 AC - 합 0~500 전 구간이 이 범위에 들어 있다).
      */
-    static final int VOICE_ITEM_COUNT = 5;
+    static final int MAX_VOICE_ITEM_COUNT = 10;
 
     private final Map<String, ScorePolicy> published = new HashMap<>();
 
@@ -187,16 +189,18 @@ public class ScorePolicyRegistry {
             require(percent >= 0 && percent <= 100,
                     "intonationPreprocess 계수가 0~1 밖이다: 구간 " + band + " = " + percent + "%");
         }
-        // 합 0~500 전 구간 전수 검사 - 분모(문항 수 x 100)가 같으므로 분자 합 x 계수%만 비교한다.
-        // 위 범위 검사를 통과한 (폭, 감소 폭) 규칙은 계수가 구간마다 비감소라 여기서 걸릴 수
-        // 없다 - 이 검사는 티켓 AC의 이중 안전장치이고, 규칙 표현이 늘어나 계수가 내려갈 수
-        // 있게 되는 날 처음으로 일을 한다 (Claude 검증자 리뷰 P3).
-        long previous = 0;
-        for (int sum = 1; sum <= VOICE_ITEM_COUNT * 100; sum++) {
-            long numerator = (long) sum * rule.coefficientPercent(sum, VOICE_ITEM_COUNT);
-            require(numerator >= previous,
-                    "intonationPreprocess가 단조 비감소가 아니다: 합 " + (sum - 1) + " → " + sum);
-            previous = numerator;
+        // 문항 수마다 합 0~(문항 수 x 100) 전 구간 전수 검사 - 같은 문항 수 안에서는 분모(문항 수
+        // x 100)가 같으므로 분자 합 x 계수%만 비교한다. 위 범위 검사를 통과한 (폭, 감소 폭) 규칙은
+        // 계수가 구간마다 비감소라 여기서 걸릴 수 없다 - 이 검사는 티켓 AC의 이중 안전장치이고,
+        // 규칙 표현이 늘어나 계수가 내려갈 수 있게 되는 날 처음으로 일을 한다 (Claude 검증자 리뷰 P3).
+        for (int voiceCount = 1; voiceCount <= MAX_VOICE_ITEM_COUNT; voiceCount++) {
+            long previous = 0;
+            for (int sum = 1; sum <= voiceCount * 100; sum++) {
+                long numerator = (long) sum * rule.coefficientPercent(sum, voiceCount);
+                require(numerator >= previous, "intonationPreprocess가 단조 비감소가 아니다: 음성 "
+                        + voiceCount + "문항, 합 " + (sum - 1) + " → " + sum);
+                previous = numerator;
+            }
         }
     }
 
