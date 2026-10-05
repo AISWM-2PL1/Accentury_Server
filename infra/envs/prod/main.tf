@@ -231,6 +231,7 @@ module "ai_host" {
   subnet_ids            = module.network.public_subnet_ids
   security_group_id     = module.network.ai_sg_id
   alb_security_group_id = module.network.ai_alb_sg_id
+  ami_id                = var.ai_ami_id
   instance_type         = var.ai_instance_type
   root_volume_size      = var.ai_root_volume_size
   max_size              = var.ai_max_size

@@ -15,7 +15,7 @@
 
 variable "voice_reader_principal_arns" {
   type        = list(string)
-  description = "음성 버킷의 객체 본문(GetObject, GetObjectVersion)을 읽을 수 있는 IAM 주체 ARN 목록 (KAN-269). 이 목록 밖의 주체는 관리자 자격 증명이어도 버킷 정책이 거부한다. null이면 학습 담당 IAM 사용자 jaeyoung과 학습용 EC2 역할 accentury-track2-ec2-role이다. 역할을 맡은 세션의 aws:PrincipalArn은 역할 ARN이라 역할은 역할 ARN으로 적는다."
+  description = "음성 버킷의 객체 본문(GetObject, GetObjectVersion)을 읽을 수 있는 IAM 주체 ARN 목록 (KAN-269). 이 목록 밖의 주체는 관리자 자격 증명이어도 버킷 정책이 거부한다. null이면 학습 담당 IAM 사용자 jaeyoung, 학습용 EC2 역할 accentury-track2-ec2-role, 운영 담당 IAM 사용자 accentury-cli다. 역할을 맡은 세션의 aws:PrincipalArn은 역할 ARN이라 역할은 역할 ARN으로 적는다."
   default     = null
 }
 
@@ -23,6 +23,7 @@ locals {
   voice_reader_principal_arns = coalesce(var.voice_reader_principal_arns, [
     "arn:aws:iam::${data.aws_caller_identity.current.account_id}:user/jaeyoung",
     "arn:aws:iam::${data.aws_caller_identity.current.account_id}:role/accentury-track2-ec2-role",
+    "arn:aws:iam::${data.aws_caller_identity.current.account_id}:user/accentury-cli",
   ])
 }
 
@@ -64,8 +65,8 @@ resource "aws_s3_bucket_public_access_block" "voice" {
 
 # 버킷 정책. 두 문장 다 Deny라 IAM 쪽 허용이 넓어도 이긴다.
 # 1) TLS가 아닌 요청은 전부 거부한다 (tfstate, audit 버킷과 같은 문장).
-# 2) 객체 본문 읽기(GetObject, GetObjectVersion)는 voice_reader_principal_arns의 주체만 한다. 관리자 자격 증명도
-#    거부된다. 이 문장은 허용이 아니라 거부의 예외일 뿐이라, 목록의 주체도 자기 IAM 정책에 s3:GetObject 허용이 따로
+# 2) 객체 본문 읽기(GetObject, GetObjectVersion)는 voice_reader_principal_arns의 주체만 한다. 목록 밖이면 관리자
+#    자격 증명도 거부된다. 이 문장은 허용이 아니라 거부의 예외일 뿐이라, 목록의 주체도 자기 IAM 정책에 s3:GetObject 허용이 따로
 #    있어야 읽는다.
 # List, Put, Delete는 여기서 거부하지 않는다. HeadBucket이 s3:ListBucket 권한으로 판정되므로 List를 거부하면
 # Terraform의 버킷 refresh가 막혀 이후 plan과 apply가 잠긴다 (KAN-239 리뷰에서 확인). 쓰기는 backend 태스크 역할의

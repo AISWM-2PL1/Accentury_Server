@@ -7,15 +7,16 @@
 # 띄운다 - 전달본이 없으니 실모델 어댑터는 임포트조차 되지 않고, 점수는 해시다 (app/fake.py).
 # 배포에는 쓸 수 없다 - 앱이 ACCENTURY_AI_INTERNAL_TOKEN_REQUIRED=true(배포 compose)와 fake의 조합을
 # 기동 시 거부한다.
-FROM python:3.12-slim
+FROM python:3.12-slim@sha256:02108f5d322dd89f1c9e552442c25acb0543dfdbc455693a5599624f20d9155d
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
     ACCENTURY_AI_ANALYSIS_ENGINE=fake
 
 WORKDIR /app
-COPY requirements.txt ./service-requirements.txt
-RUN pip install --no-cache-dir -r service-requirements.txt
+# 운영 이미지와 같은 잠금 파일을 해시 검증으로 설치한다 (KAN-246, ai/Dockerfile의 같은 줄).
+COPY requirements.lock ./service-requirements.lock
+RUN pip install --no-cache-dir --require-hashes -r service-requirements.lock
 COPY app app
 
 RUN groupadd --system --gid 10001 accentury \

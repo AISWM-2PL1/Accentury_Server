@@ -1,0 +1,43 @@
+# Dependabot 버전 갱신 (KAN-246)
+#
+# 이 레포는 GitHub Actions를 commit SHA로, Dockerfile의 베이스 이미지를 digest로 고정한다. 고정한 값은 저절로
+# 움직이지 않으므로 갱신 PR을 올려 줄 주체가 없으면 보안 패치가 들어오지 않는다. 그 역할을 Dependabot이 맡는다.
+#
+# 주기는 월 1회이고 생태계마다 PR 하나로 묶는다 (2026-10-05 결정). AI 호스트 AMI 갱신(infra/README.md
+# "AI 호스트 AMI 갱신")과 같은 주기라 한 번에 본다. 대상 브랜치는 기본 브랜치(Dev)다.
+#
+# Dependabot PR의 브랜치명은 dependabot/...으로 고정이라 브랜치 네이밍 검사에 예외가 있다 (branch-name.yml).
+#
+# 손이 닿지 않는 곳:
+#   - ai/Dockerfile의 베이스(accentury/ai-model)는 ARG로 조립하는 ECR 불변 태그라 대상이 아니다. 모델 교체가 곧
+#     그 줄을 바꾸는 일이다 (infra/README.md "모델 교체").
+#   - ai/requirements.lock은 Dependabot이 알아보는 이름이 아니라 갱신되지 않는다. 사람이 다시 만든다
+#     (ai/README.md "의존성 잠금"). pip 항목은 requirements.txt의 범위가 새 버전을 막게 됐을 때만 PR을 올린다.
+version: 2
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: monthly
+    groups:
+      github-actions:
+        patterns: ["*"]
+
+  - package-ecosystem: docker
+    directories:
+      - /backend
+      - /ai
+    schedule:
+      interval: monthly
+    groups:
+      docker:
+        patterns: ["*"]
+
+  - package-ecosystem: pip
+    directory: /ai
+    schedule:
+      interval: monthly
+    versioning-strategy: increase-if-necessary
+    groups:
+      pip:
+        patterns: ["*"]

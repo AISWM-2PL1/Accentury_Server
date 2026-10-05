@@ -7,7 +7,7 @@
 # --- 빌드 스테이지 ---------------------------------------------------------
 # 툴체인이 Java 25를 요구한다(build.gradle) - JDK도 25로 맞춰 foojay 리졸버가 런타임을
 # 따로 내려받지 않게 한다.
-FROM eclipse-temurin:25-jdk AS build
+FROM eclipse-temurin:25-jdk@sha256:8c0a84ea11c8f6ed52600fc19f1040121f2a162998e9f50a5faebbbad9172dcc AS build
 WORKDIR /workspace
 
 # 래퍼와 빌드 스크립트를 먼저 복사한다 - 소스만 바뀐 재빌드가 Gradle **배포본** 내려받기
@@ -28,7 +28,7 @@ RUN --mount=type=cache,target=/root/.gradle \
  && mv build/libs/*.jar build/app.jar
 
 # --- 실행 스테이지 ---------------------------------------------------------
-FROM eclipse-temurin:25-jre AS runtime
+FROM eclipse-temurin:25-jre@sha256:fcd7fd7b387f94bb2ac461478a7436ad8e349924c374ea8313919624dceae636 AS runtime
 
 # 비루트 실행 (NFR-SC-04) - 컨테이너가 뚫려도 호스트 권한으로 번지지 않게 한다.
 RUN groupadd --system --gid 10001 accentury \

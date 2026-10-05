@@ -60,6 +60,11 @@ variable "training_bucket_enabled" {
   default     = false
 }
 
+variable "ai_ami_id" {
+  type        = string
+  description = "AI 호스트의 AMI ID (KAN-246). AL2023 x86_64. 월 1회 staging, prod 순으로 최신 값으로 바꾼다 (README \"AI 호스트 AMI 갱신\")."
+}
+
 variable "ai_root_volume_size" {
   type        = number
   description = "AI 호스트 루트 볼륨 GiB (KAN-36). 스텁 20, 실모델(B단계) 40 - ai 이미지 7GB x SHA 태그 2개 공존 + pull 임시 공간. 근거는 tfvars 주석."
