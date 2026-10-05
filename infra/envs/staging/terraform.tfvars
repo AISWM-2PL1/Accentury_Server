@@ -20,6 +20,9 @@ db_instance_class = "db.t4g.micro"
 # 못 닿는다. 상향(c7i.2xlarge 또는 GPU)은 NFR 완화 논의와 KAN-204 stageMs(Whisper 대 MFA 비율)를 본 뒤 정한다.
 # RSS 최대 6.19GB는 8GB의 77%로 KAN-57 메모리 축(75%)을 살짝 넘지만 동시 처리가 1건 고정이라 그대로 둔다.
 ai_instance_type = "c7i.xlarge"
+# AI 호스트 AMI (KAN-246). AL2023 x86_64이고, 아래 값은 al2023-ami-2023.12.20260930.0-kernel-6.18-x86_64다.
+# 월 1회 staging, prod 순으로 최신 값으로 바꾼다 - 바꾸면 인스턴스가 무중단으로 교체된다 (README "AI 호스트 AMI 갱신").
+ai_ami_id = "ami-0870825cefcaafcc8"
 # 루트 볼륨 40GiB (B단계). 실모델 ai 이미지는 7.02GB(2026-09-10 staging 실측, 모델 베이스 4.12GB 위)이고 reload 중
 # 옛 SHA와 새 SHA가 공존하는 데다 pull이 압축 레이어를 임시로 한 벌 더 풀어 순간 최대치가 약 2.5(OS와 docker) +
 # 7 x 2 + 4 = 21GB다. 20GB에서는 pull이 디스크 부족으로 실패할 수 있어(실측 여유 11.8GB) 두 배로 올린다.

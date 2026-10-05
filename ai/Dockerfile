@@ -34,8 +34,12 @@ WORKDIR /app
 # 서비스 계층의 의존성만 더한다 - 추론 쪽(torch, transformers, librosa, MFA)은 베이스에 이미
 # 있다. 파일명을 requirements.txt로 두지 않는 이유는 베이스의 같은 이름 파일(모델 의존성 목록)을
 # 덮어써 이미지 안에서 두 목록을 구분할 수 없게 되기 때문이다.
-COPY requirements.txt ./service-requirements.txt
-RUN pip install --no-cache-dir -r service-requirements.txt
+#
+# 범위(requirements.txt)가 아니라 잠금 파일을 해시 검증으로 설치한다 (KAN-246). 같은 커밋은 언제 빌드해도 같은
+# 버전이 깔리고, 내려받은 파일의 해시가 잠금 파일과 다르면 빌드가 실패한다. 베이스에 이미 있는 패키지와 겹치는
+# 것은 잠금 파일이 베이스와 같은 버전으로 적어 두므로(model-base.constraints) pip가 건드리지 않는다.
+COPY requirements.lock ./service-requirements.lock
+RUN pip install --no-cache-dir --require-hashes -r service-requirements.lock
 
 COPY app app
 

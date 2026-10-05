@@ -406,6 +406,30 @@ reviewers에 팀원을 넣으면 Release 병합이 만든 실행이 승인 전�
 멈춘다. 이미지와 웹 배포가 같은 environment라 둘 다 승인을 기다린다. 코드가 아니라
 저장소 설정이므로 레포에는 남지 않는다 - 새 저장소에서는 다시 켠다.
 
+### Actions SHA 고정, 베이스 이미지 digest 고정, Dependabot (KAN-246)
+
+워크플로의 `uses:`는 전부 `<40자 commit SHA> # v버전` 형식이고, Dockerfile의 베이스 이미지는
+`태그@sha256:<digest>` 형식이다. 태그는 주인이 다른 커밋으로 옮길 수 있어서, 태그로 두면 남의 저장소가 뚫렸을 때
+바뀐 코드가 우리 배포 역할(`id-token: write`)을 쥔 채 돈다 (2025년 tj-actions 사례). SHA와 digest는 옮길 수 없다.
+
+| 대상 | 고정 방식 | 갱신 |
+| --- | --- | --- |
+| `.github/workflows/*.yml`의 `uses:` 7종 | commit SHA, 뒤 주석에 버전 | Dependabot `github-actions` |
+| `backend/Dockerfile`(`eclipse-temurin:25-jdk`, `25-jre`), `ai/Dockerfile.fake`(`python:3.12-slim`) | 멀티 아키텍처 인덱스 digest - 로컬(arm64)과 CI(amd64)가 같은 줄로 빌드한다 | Dependabot `docker` |
+| `ai/Dockerfile`의 베이스(`accentury/ai-model`) | ECR 불변 태그 (모델 해시) | 대상 아님 - "모델 교체" 절 |
+| `ai/requirements.lock` | 버전과 해시 | 사람이 다시 만든다 (`ai/README.md` "의존성 잠금") |
+
+고정한 값은 저절로 움직이지 않으므로 Dependabot(`.github/dependabot.yml`)이 **월 1회, 생태계마다 PR 하나**로
+갱신을 올린다. 그 PR의 브랜치명은 `dependabot/...`으로 고정이라, 브랜치 네이밍 검사(`branch-name.yml`)는 PR을
+연 계정이 `dependabot[bot]`일 때만 그 접두사를 통과시킨다. 병합하면 여느 Dev 병합처럼 staging 파이프라인이 돈다.
+
+워크플로에 새 action을 더하거나 손으로 올릴 때는 태그가 가리키는 commit SHA를 받아 적는다:
+
+```
+gh api repos/actions/checkout/commits/v4 --jq .sha            # uses: actions/checkout@<SHA> # v4.x.y
+docker buildx imagetools inspect python:3.12-slim --format '{{json .Manifest.Digest}}'   # FROM python:3.12-slim@<digest>
+```
+
 ## App Link 검증 파일 (KAN-32)
 
 공유 링크 `https://accentury.app/t?c=...`를 브라우저 대신 앱이 받게 하려면 도메인이 앱을
@@ -802,9 +826,9 @@ ai 호스트는 무상태이고 내부 ALB 뒤의 ASG(min 1, max 3)다 (아래 "
 `ai-health-metric.sh`)를 **부팅 자산 버킷에서 내려받은 뒤**(KAN-38, 아래 "부팅 자산 버킷") systemd
 유닛 `accentury.service`를 놓는다. 두 환경의 호스트 구성은 완전히 같고, 환경별 값은 전부 SSM
 Parameter Store에서 온다. compose 파일이나 스크립트를 고치면 user_data가 바뀌어 **인스턴스가
-교체된다** (시작 템플릿 새 버전 + ASG instance refresh). 그래도 되는 이유가 무상태다. 1대일 때는 교체 동안
-분석만 끊기고 backend 회로가 열렸다 닫히며, 2대 이상이면 최소 1대가 남는다(instance refresh
-min_healthy 50%). user_data는 raw 16KB 상한이 있어 ai-host 모듈의 precondition이 plan에서 크기를 검사한다.
+교체된다** (시작 템플릿 새 버전 + ASG instance refresh). 그래도 되는 이유가 무상태다. 교체는 새 인스턴스를 먼저
+띄우고 옛 인스턴스를 나중에 종료하는 순서라 1대일 때도 분석이 끊기지 않는다 (instance refresh min_healthy 100%,
+max_healthy 200%, KAN-246. 아래 "AI 호스트 AMI 갱신"). user_data는 raw 16KB 상한이 있어 ai-host 모듈의 precondition이 plan에서 크기를 검사한다.
 
 ### 내부 ALB와 오토스케일링 (KAN-201)
 
@@ -885,6 +909,63 @@ aws autoscaling resume-processes --auto-scaling-group-name "$(terraform output -
 
 **비용.** 내부 ALB는 환경당 시간 요금 약 0.0225달러 + LCU(호출이 적어 최소)로 월 약 20달러다. 추가 인스턴스는
 늘어난 동안만 과금된다(c7i.xlarge 온디맨드, Spot 제외는 기존 결정).
+
+### AI 호스트 AMI 갱신 (KAN-246)
+
+AI 호스트의 OS(AL2023)는 tfvars `ai_ami_id`에 적힌 AMI 그대로다. 인스턴스 안에서 `dnf update`를 돌리지 않으므로
+커널, glibc, OpenSSL의 보안 업데이트는 **AMI를 바꿔 인스턴스를 교체해야** 들어온다. docker는 user_data가 첫 부팅에
+그 AMI의 저장소 버전으로 깔기 때문에 함께 올라간다. **월 1회, staging을 먼저 하고 확인한 뒤 prod를 한다.**
+Dependabot의 월 1회 갱신 PR(`.github/dependabot.yml`)과 같은 주기다.
+
+```
+# 1. 최신 AMI ID와 이름을 읽는다 (이름의 날짜가 지금 값보다 뒤여야 한다)
+ami=$(aws ssm get-parameter --name /aws/service/ami-amazon-linux-latest/al2023-ami-kernel-default-x86_64 \
+  --query Parameter.Value --output text)
+aws ec2 describe-images --image-ids "$ami" --query 'Images[0].[ImageId,Name]' --output text
+
+# 2. envs/staging/terraform.tfvars의 ai_ami_id와 그 위 주석의 이름을 바꾸고 plan을 본다.
+#    변경은 2건이어야 한다 - 시작 템플릿의 image_id, 그리고 그 새 버전 번호를 따라가는 ASG의 launch_template.version
+cd infra/envs/staging && terraform plan
+
+# 3. apply. 교체가 끝날 때까지 기다린다 (실측은 아래)
+terraform apply
+
+# 4. 교체 확인 - refresh가 Successful이고 인스턴스가 새 AMI로 1대다
+aws autoscaling describe-instance-refreshes --auto-scaling-group-name "$(terraform output -raw ai_asg_name)" \
+  --max-records 1 --query 'InstanceRefreshes[0].[Status,PercentageComplete,StartTime,EndTime]' --output text
+aws ec2 describe-instances --filters "Name=tag:Name,Values=$(terraform output -raw ai_asg_name)" \
+  "Name=instance-state-name,Values=running" --query 'Reservations[].Instances[].[InstanceId,ImageId,LaunchTime]' --output text
+
+# 5. 스모크 한 바퀴 (아래 "원격 스모크 수동 실행")를 돌린 뒤 prod에서 1~4를 되풀이한다
+```
+
+**교체는 무중단이다.** instance refresh가 `min_healthy_percentage = 100`, `max_healthy_percentage = 200`이라 새
+인스턴스를 먼저 띄운다. 새 인스턴스가 대상 그룹 healthy(모델 적재 완료)가 되고 워밍업 120초가 지난 뒤에야 옛
+인스턴스가 대상 그룹에서 빠지고, 빠진 뒤에도 등록 해제 지연 90초 동안 진행 중이던 추론을 마친다. 그동안 ALB는
+두 대에 나눠 보낸다. 교체하는 몇 분 동안 인스턴스가 평소의 두 배(1대면 2대)라 그만큼 과금된다.
+
+| 주의 | 이유 |
+| --- | --- |
+| 배포 파이프라인이 도는 동안에는 하지 않는다 | reload가 ASG 프로세스를 멈추므로 refresh가 시작되지 않거나 취소된다 (위 "배포 시 순차 reload") |
+| AL2023 x86_64 AMI만 넣는다 | user_data가 dnf와 루트 디바이스 `/dev/xvda`를 전제한다. 파라미터 이름의 `kernel-default`가 가리키는 커널 계열이 바뀌면(AMI 이름의 `kernel-6.x`) staging에서 스모크를 반드시 본다 |
+| 되돌리려면 `ai_ami_id`를 옛 값으로 바꿔 다시 apply한다 | 옛 AMI는 지원 종료(DeprecationTime) 뒤에도 ID로는 시작할 수 있다. 같은 무중단 교체가 한 번 더 돈다 |
+| 새 인스턴스가 healthy가 되지 못하면 refresh가 실패하고 옛 인스턴스가 남는다 | 먼저 띄우는 순서라 실패해도 서비스는 옛 인스턴스로 이어진다. 원인은 새 인스턴스의 `/var/log/cloud-init-output.log`와 "ai 컨테이너 로그" 절을 본다 |
+
+staging 실증 (2026-10-05): `al2023-ami-2023.12.20260831.0`에서 `20260930.0`으로 바꿨다(커널 계열은 6.18로 같다).
+plan은 변경 2건, apply는 10초 만에 끝나고 교체는 그 뒤에 ASG가 진행한다.
+
+| 시각 (KST) | 일 |
+| --- | --- |
+| 20:02:55 | instance refresh 시작, 2초 뒤 새 인스턴스 시작 (대상 그룹에 옛 1대 healthy + 새 1대 initial) |
+| 20:06:34 | 새 인스턴스가 대상 그룹 healthy로 보인 첫 표본 (직전 표본 20:06:13은 아직 아님. 시작 약 3분 30초 뒤, 이미지 7GB pull과 모델 적재 포함). healthy 2대 |
+| 20:07:17 | 옛 인스턴스 등록 해제 시작 (draining) |
+| 20:09:30 | 옛 인스턴스 종료 완료 |
+| 20:09:40 | refresh Successful - 시작부터 6분 45초 |
+
+20초 간격으로 본 대상 그룹의 healthy 대상은 교체 내내 1대 아래로 내려가지 않았다 (1대 17회, 2대 3회). 그동안
+합성 응시자 2명(`scripts/load_resilience.py --get-rps 0 --examinees 2`)이 쉬지 않고 돌았는데, 교체 구간의 분석
+180건을 포함해 전체 330건이 전부 AI에 닿아 판정을 받았고(합성 사인파라 판정은 모두 `ANALYSIS_MISREAD`다) 5xx와
+연결 실패, AI 미도달과 시간 초과는 0건이었다. 교체 뒤 plan은 No changes, 스모크는 통과했다.
 
 ### 부팅 자산 버킷 (KAN-38)
 
@@ -1334,7 +1415,7 @@ KAN-201에서는 staging에만 환경별 버킷(`accentury-staging-training-<계
 | 버킷 | `accentury-voice-<계정 ID>` 하나. **bootstrap 스택이 만든다** (`bootstrap/voice.tf`). envs는 같은 규칙으로 이름만 조립한다 |
 | 환경 구분 | 키 접두사 `staging/`, `prod/`. tfvars `training_bucket_enabled = true`인 환경만 쓴다 (두 환경 모두 true) |
 | 보호 | 퍼블릭 액세스 전면 차단, SSE-S3 기본 암호화, 버전 관리 켬, 수명주기(만료) 규칙 없음, `force_destroy` 없음, `prevent_destroy` |
-| 버킷 정책 | TLS가 아닌 요청 전부 거부. 객체 본문 읽기(`s3:GetObject`, `s3:GetObjectVersion`)는 `voice_reader_principal_arns`의 주체만 - 기본값은 학습 담당 IAM 사용자 `jaeyoung`과 학습용 EC2 역할 `accentury-track2-ec2-role`. 관리자 자격 증명도 본문은 못 읽는다. List, Put, Delete는 정책이 거부하지 않는다 (List를 거부하면 Terraform refresh가 잠긴다) |
+| 버킷 정책 | TLS가 아닌 요청 전부 거부. 객체 본문 읽기(`s3:GetObject`, `s3:GetObjectVersion`)는 `voice_reader_principal_arns`의 주체만 - 기본값은 학습 담당 IAM 사용자 `jaeyoung`, 학습용 EC2 역할 `accentury-track2-ec2-role`, 운영 담당 IAM 사용자 `accentury-cli`. 목록 밖이면 관리자 자격 증명도 본문은 못 읽는다. List, Put, Delete는 정책이 거부하지 않는다 (List를 거부하면 Terraform refresh가 잠긴다) |
 | 쓰기 권한 | backend 태스크 역할에 `arn:aws:s3:::accentury-voice-<계정 ID>/<환경>/*`로 한정한 `s3:PutObject`만 (fargate 모듈 `training_bucket_arn`, `training_key_prefix`). staging 태스크는 `prod/` 아래에 쓰지 못한다. Get, List, Delete 없음 |
 | 스위치 | SSM `ACCENTURY_TRAINING_BUCKET` -> `accentury.training.bucket`, `ACCENTURY_TRAINING_KEYPREFIX` -> `accentury.training.key-prefix`. 버킷 값이 없으면 backend는 S3 클라이언트도 저장 빈도 만들지 않는다 (`TrainingConfig`) |
 | 저장 대상 | 음성 저장에 동의한 세션만. 동의 판정은 backend가 한다 |
@@ -2383,8 +2464,10 @@ terraform destroy
   `infra/modules/edge/spa-rewrite.test.mjs`가 이 동작을 붙들고 있다.
 - **RDS 마스터 비밀번호**: `manage_master_user_password`로 RDS가 생성해
   Secrets Manager에 보관한다. 코드, tfvars, state 어디에도 평문이 없다.
-- **AMI 고정 (ai 호스트)**: AL2023 최신 AMI를 SSM 파라미터로 읽되 `ignore_changes = [image_id]`.
-  AMI 갱신이 "plan No changes" AC를 깨고 instance refresh를 유발하지 않게 한다.
+- **AMI는 tfvars에 명시 (ai 호스트, KAN-246)**: `ai_ami_id`에 AMI ID를 적는다. 처음에는 SSM의 "최신 AMI"
+  파라미터를 읽고 `ignore_changes = [image_id]`로 묶었는데(KAN-36), 손대지 않은 plan에 교체가 끼어드는 것은
+  막았지만 최초 생성 시점의 AMI에 영구히 고정돼 OS 보안 업데이트가 들어오지 않았다. 명시하면 plan은 여전히
+  조용하고, 갱신은 값 한 줄을 바꾸는 일이 된다 ("AI 호스트 AMI 갱신").
 - **PriceClass_200**: 한국이 포함되는 최소 티어.
 - **지표 수집은 Micrometer CloudWatch push (2026-09-05, KAN-38)**: 티켓이 남긴 선택지는
   "레지스트리 push"와 "구조화 로그 기반(Logs Insights)"이었다. push를 택한 이유는 셋이다 -
