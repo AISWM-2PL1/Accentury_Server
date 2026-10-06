@@ -111,7 +111,7 @@ jobs:
       AWS_REGION: ap-northeast-2
       SSM_PREFIX: /accentury/${{ inputs.environment }}
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       # 토큰의 출처를 먼저 정한다. secrets 컨텍스트는 step의 if에서 못 읽으므로 출력으로 옮긴다.
       # 이 갈래가 아래 AWS 자격 증명 단계를 켜고 끈다 - 호출자가 토큰을 넘겼으면 SSM을 읽을
