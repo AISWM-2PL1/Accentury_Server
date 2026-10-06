@@ -36,6 +36,9 @@ public enum ErrorCode {
     ANALYSIS_TIMEOUT(HttpStatus.SERVICE_UNAVAILABLE, true, "분석이 지연되고 있습니다. 잠시 후 다시 시도해 주세요."),
     ANALYSIS_UNAVAILABLE(HttpStatus.SERVICE_UNAVAILABLE, true, "분석 서버에 연결할 수 없습니다."),
     ANALYSIS_MISREAD(HttpStatus.UNPROCESSABLE_CONTENT, true, "제시된 문장과 다른 내용이 녹음되었습니다."),
+    // AI가 끝까지 분석했지만 결과 값에 NaN이나 무한대가 섞여 점수를 낼 수 없는 경우다 (KAN-272).
+    // 같은 음성은 다시 분석해도 결과가 같아 AI에 재전송하지 않고, 사용자에게 재녹음을 연다.
+    ANALYSIS_UNSCORABLE(HttpStatus.UNPROCESSABLE_CONTENT, true, "음성을 분석하지 못했습니다. 다시 녹음해 주세요."),
 
     // === RESULT_* : 결과 (KAN-25) ===
     RESULT_NOT_READY(HttpStatus.CONFLICT, true, "결과를 준비하고 있습니다."),

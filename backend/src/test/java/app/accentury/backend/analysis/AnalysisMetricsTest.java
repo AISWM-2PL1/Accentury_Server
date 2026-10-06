@@ -48,6 +48,20 @@ class AnalysisMetricsTest {
     }
 
     @Test
+    void 판정_실패를_사유별로_세고_모르는_코드는_other로_접는다() {
+        // 채점 불가는 사용자의 발화가 아니라 모델 쪽 결함의 신호라 따로 센다 (KAN-272).
+        metrics.recordJudged("ANALYSIS_UNSCORABLE");
+        metrics.recordJudged("ANALYSIS_UNSCORABLE");
+        metrics.recordJudged("ANALYSIS_MISREAD");
+        metrics.recordJudged("AUDIO_TOO_QUIET");
+        metrics.recordJudged("처음_보는_코드");
+
+        assertEquals(2.0, counter(ServiceMetrics.ANALYSIS_JUDGED, "reason", "unscorable"));
+        assertEquals(1.0, counter(ServiceMetrics.ANALYSIS_JUDGED, "reason", "misread"));
+        assertEquals(2.0, counter(ServiceMetrics.ANALYSIS_JUDGED, "reason", "other"));
+    }
+
+    @Test
     void 스위퍼가_0건이어도_카운터를_망가뜨리지_않는다() {
         metrics.recordTimeouts(0, 0);
 

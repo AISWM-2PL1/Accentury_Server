@@ -53,8 +53,8 @@ variable "analysis_processing_timeout" {
 
 variable "analysis_dispatch_concurrency" {
   type        = number
-  description = "분석 전달 워커 수 (accentury.analysis.dispatch-concurrency). AI가 추론을 한 번에 하나만 돌리고 8GB에서 2건이면 OOM이라(KAN-57) 태스크 하나가 보내는 동시 호출을 1로 묶는다 (KAN-22, KAN-172 확정). 태스크 여러 개가 동시에 뜨면 그만큼은 여전히 겹친다 - 아래 README 참고. 코드 기본값과 같다."
-  default     = 1
+  description = "분석 전달 워커 수 (accentury.analysis.dispatch-concurrency). AI 호스트 최대 대수(ai_max_size 3)와 같은 값이다 (KAN-272, 2026-10-06 - 그 전에는 1이라 AI를 늘려도 태스크 하나가 한 번에 1건만 보내 처리량이 늘지 않았다). AI는 호스트마다 추론을 한 번에 하나만 돌리고 8GB에서 2건이면 OOM이라(KAN-57) AI가 1대면 뒤의 호출은 AI 안에서 차례를 기다리고, 2대 이상이면 내부 ALB가 나눈다. 태스크 여러 개가 동시에 뜨면 그만큼 더 겹친다 - main.tf의 표와 README 참고. 코드 기본값과 같다."
+  default     = 3
 
   validation {
     condition     = var.analysis_dispatch_concurrency >= 1
@@ -64,7 +64,7 @@ variable "analysis_dispatch_concurrency" {
 
 variable "ai_analysis_timeout_seconds" {
   type        = number
-  description = "AI 서버가 분석 1건에 거는 상한(초, ACCENTURY_AI_ANALYSIS_TIMEOUT_SECONDS). backend의 analysis_ai_timeout보다 짧아야 한다 (KAN-22). 단일 lock 대기와 워커 재적재 대기까지 포함하는 값이라 롤링 배포 중 backend 태스크 최대 6개(상한 3 x 200%)가 겹친 6 x P95 11초 = 67초와 재적재 31초 + 추론 11초 = 42초를 덮는 75초로 확정 (KAN-172, Codex 리뷰 P1 - 짧으면 추론 중인 요청을 끊어 멀쩡한 워커를 죽이고 재전송이 새 워커를 또 죽인다). 코드 기본값과 같다."
+  description = "AI 서버가 분석 1건에 거는 상한(초, ACCENTURY_AI_ANALYSIS_TIMEOUT_SECONDS). backend의 analysis_ai_timeout보다 짧아야 한다 (KAN-22). 단일 lock 대기와 워커 재적재 대기까지 포함하는 값이라 한 호스트에 겹친 호출 6건(태스크당 전달 워커 3개 x 롤링 배포 중 태스크 2개, KAN-272)의 6 x P95 11초 = 67초와 재적재 31초 + 추론 11초 = 42초를 덮는 75초로 확정 (KAN-172, Codex 리뷰 P1 - 짧으면 추론 중인 요청을 끊어 멀쩡한 워커를 죽이고 재전송이 새 워커를 또 죽인다). 코드 기본값과 같다."
   default     = 75
 }
 

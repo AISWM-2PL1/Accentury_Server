@@ -229,6 +229,39 @@ class HttpAnalysisDispatcherTest extends IntegrationTest {
     }
 
     @Test
+    void 채점_불가는_재전송_없이_재녹음_가능한_실패로_끝나고_건수가_남는다() {
+        // KAN-272. 같은 음성은 몇 번을 분석해도 NaN이다 - 재전송 예산(2회)이 남아 있어도 쓰지 않는다.
+        SimpleMeterRegistry registry = new SimpleMeterRegistry();
+        AnalysisMetrics metrics = TestMetrics.analysisMetrics(registry);
+        AnalysisJob job = saveProcessingJob();
+        ScriptedClient client = new ScriptedClient()
+                .then(AiAnalysisClient.Rejected.judged("ANALYSIS_UNSCORABLE", true));
+
+        new HttpAnalysisDispatcher(client, new SyncTaskExecutor(), transitions,
+                new AnalysisBacklog(), openCircuitNever(), metrics, 2, 0).dispatch(request(job));
+
+        AnalysisJob saved = repository.findById(job.id()).orElseThrow();
+        assertEquals(AnalysisJobStatus.RETRYABLE_FAILED, saved.status());
+        assertEquals("ANALYSIS_UNSCORABLE", saved.errorCode());
+        assertEquals(1, client.calls);
+        assertEquals(1.0, registry.get(ServiceMetrics.ANALYSIS_JUDGED).tag("reason", "unscorable").counter().count());
+    }
+
+    @Test
+    void 계약_위반은_판정_건수에_세지_않는다() {
+        SimpleMeterRegistry registry = new SimpleMeterRegistry();
+        AnalysisMetrics metrics = TestMetrics.analysisMetrics(registry);
+        AnalysisJob job = saveProcessingJob();
+        ScriptedClient client = new ScriptedClient().then(AiAnalysisClient.Rejected.contractViolation());
+
+        new HttpAnalysisDispatcher(client, new SyncTaskExecutor(), transitions,
+                new AnalysisBacklog(), openCircuitNever(), metrics, 0, 0).dispatch(request(job));
+
+        assertEquals(0.0, registry.get(ServiceMetrics.ANALYSIS_JUDGED).counters().stream()
+                .mapToDouble(counter -> counter.count()).sum());
+    }
+
+    @Test
     void 비재시도_판정_실패는_FAILED다() {
         AnalysisJob job = saveProcessingJob();
         ScriptedClient client = new ScriptedClient()

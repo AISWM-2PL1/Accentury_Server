@@ -19,6 +19,7 @@ import tools.jackson.core.JacksonException;
 import tools.jackson.databind.ObjectMapper;
 
 import java.io.InputStream;
+import java.util.List;
 import java.util.Locale;
 import java.net.SocketTimeoutException;
 import java.net.http.HttpConnectTimeoutException;
@@ -79,7 +80,7 @@ class RestAiAnalysisClient implements AiAnalysisClient {
         body.add("audio", part(new NamedBytes(request.audio()), MediaType.parseMediaType("audio/wav")));
         body.add("meta", part(objectMapper.writeValueAsString(new AnalyzeMeta(
                         correlationId, request.itemId(), request.scriptKey(), request.testVersion(),
-                        request.scoreVersion(), request.durationMs())),
+                        request.scoreVersion(), request.durationMs(), ACCEPTED_VERDICTS)),
                 MediaType.APPLICATION_JSON));
 
         try {
@@ -283,12 +284,26 @@ class RestAiAnalysisClient implements AiAnalysisClient {
     }
 
     /**
+     * 이 backend가 아는 <b>추가</b> 판정 코드 - meta의 {@code acceptsVerdicts}로 AI에 알린다 (§4.1, KAN-272).
+     * <p>
+     * 배포는 AI가 먼저이고 backend가 다음이다 (deploy.yml - 새 AI는 옛 backend의 호출을 받아야 한다).
+     * AI가 새 판정 코드를 무조건 내면 그 사이의 옛 backend는 모르는 코드를 계약 위반으로 끊어 재녹음도
+     * 안 되는 FAILED로 굳히고 회로에 실패로 센다 (Codex astra 리뷰 P1). 그래서 AI는 요청이 "안다"고 한
+     * 코드만 낸다 - 이 목록이 없는 요청(옛 backend)에는 예전처럼 500이다.
+     * <p>
+     * 판정 코드를 {@link ErrorCode}에 더할 때 여기에도 더한다. 기존 넷(AUDIO_TOO_QUIET 등)은 모든 backend가
+     * 알므로 싣지 않는다.
+     */
+    static final List<String> ACCEPTED_VERDICTS = List.of(ErrorCode.ANALYSIS_UNSCORABLE.name());
+
+    /**
      * §4.1 요청 meta 파트 - 순서와 이름은 명세 예시 그대로다.
      * {@code scriptKey}는 정의에 있을 때만 실린다 (KAN-182) - 없는 문항은 필드를 생략한다.
      */
     @JsonInclude(JsonInclude.Include.NON_NULL)
     record AnalyzeMeta(String correlationId, String itemId, @Nullable String scriptKey,
-                       String testVersion, String scoreVersion, long durationMs) {
+                       String testVersion, String scoreVersion, long durationMs,
+                       List<String> acceptsVerdicts) {
     }
 
     /** §4.1 응답 - 필요한 필드만 읽는다. segments, confidence, processingMs는 BE가 쓰지 않는다. */

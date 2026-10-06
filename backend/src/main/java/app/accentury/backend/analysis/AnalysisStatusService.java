@@ -10,6 +10,7 @@ import org.jspecify.annotations.Nullable;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.time.Instant;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -58,7 +59,34 @@ public class AnalysisStatusService {
                     ? AnalysisStatusResponse.Item.notSubmitted(item.itemId())
                     : AnalysisStatusResponse.Item.from(representative(attempts)));
         }
-        return new AnalysisStatusResponse(pollIntervals.pollAfterMs(), items);
+        PollIntervals.Decision poll = pollIntervals.decide();
+        return new AnalysisStatusResponse(poll.pollAfterMs(),
+                poll.congested() ? queueOf(attemptsByItem) : null, items);
+    }
+
+    /**
+     * 혼잡 안내 (§3.4의 {@code queue}, KAN-272) - 이 세션이 기다리는 분석 앞에 몇 건이 있는지.
+     * <p>
+     * 기준은 이 세션의 <b>가장 오래된</b> 분석 중 시도다. 그것이 끝나야 이 세션의 다음 문항이 돌기
+     * 시작하므로 "앞에 N건"은 그 시도 앞의 줄이다. 문항 대표 상태가 아니라 시도 전체에서 찾는다 -
+     * 대표가 실패로 접힌 문항에도 아직 도는 옛 시도가 있을 수 있고, 그것도 AI의 차례를 쓴다.
+     * <p>
+     * 분석 중인 시도가 없으면 null이다 (필드 생략). 이 세션은 줄을 서 있지 않으므로 안내할 것이 없고,
+     * 건수 조회도 나가지 않는다 - 혼잡할 때 대기 화면 밖의 폴링(재녹음 중인 세션 등)까지 count를
+     * 얹지 않는다 (§5.3 규칙 6).
+     */
+    private AnalysisStatusResponse.@Nullable Queue queueOf(Map<String, List<AnalysisJob>> attemptsByItem) {
+        Instant oldest = null;
+        for (List<AnalysisJob> attempts : attemptsByItem.values()) {
+            for (AnalysisJob attempt : attempts) {
+                if (attempt.status() == AnalysisJobStatus.PROCESSING
+                        && (oldest == null || attempt.createdAt().isBefore(oldest))) {
+                    oldest = attempt.createdAt();
+                }
+            }
+        }
+        return oldest == null ? null
+                : new AnalysisStatusResponse.Queue(repository.countProcessingCreatedBefore(oldest));
     }
 
     /**

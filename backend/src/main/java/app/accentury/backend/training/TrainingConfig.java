@@ -31,7 +31,7 @@ import java.util.regex.Pattern;
 class TrainingConfig {
 
     /**
-     * 호출 1건(시도 재시도 포함)의 상한. 저장은 분석 워커(dispatch-concurrency 1)가 동기로 하므로 S3가 느리거나
+     * 호출 1건(시도 재시도 포함)의 상한. 저장은 분석 워커(dispatch-concurrency 3)가 동기로 하므로 S3가 느리거나
      * 죽으면 그 시간만큼 뒤 작업의 큐 대기가 늘어난다 - SDK 기본값(소켓 30초 x 재시도 3회)이면 워커가 수 분
      * 멈춰 큐의 작업이 유실 한도(queued-timeout 5분)에 닿는다 (Codex astra 리뷰 P2). WAV 1MB 왕복은 수십 ms라
      * 시도 5초, 호출 10초면 넉넉하고, 넘기면 저장소가 실패로 삼킨다 - 분석 결과는 이미 확정된 뒤다. 샘플 하나가

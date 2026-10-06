@@ -143,7 +143,7 @@ variable "scaling_metric_namespace" {
 
 variable "scale_out_threshold" {
   type        = number
-  description = "진행 중 분석이 이 건수 이상으로 2분 연속이면 +1 (KAN-201). backend의 폴링 혼잡 임계치(congestion-threshold 6, KAN-172)와 같은 값 - 서버가 폴링 간격을 올려 압력을 빼는 것과 같은 지점에서 처리량도 늘린다. AI가 1건 10초라 6건은 대기열 1분이다."
+  description = "진행 중 분석이 이 건수 이상인 분이 1번 나오면 +1 (KAN-201. 판정은 KAN-272에서 2분 연속에서 1분으로 줄였다). backend의 폴링 혼잡 임계치(congestion-threshold 6, KAN-172)와 같은 값 - 서버가 폴링 간격을 올려 압력을 빼는 것과 같은 지점에서 처리량도 늘린다. AI가 1건 10초라 6건은 대기열 1분이다."
   default     = 6
 }
 

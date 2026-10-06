@@ -180,6 +180,8 @@ unset token
 환경당 월 약 8.7달러다. 태그는 값이 다섯 이하로 닫힌 것만 쓴다 - 세션 ID나 IP를 태그로 쓰면
 조합 수가 트래픽에 비례해 요금이 상한 없이 늘어난다.
 
+KAN-272가 `accentury.analysis.judged`로 3개를 더한다 (`reason`이 unscorable, misread, other).
+
 KAN-204가 `accentury/ai` `StageDuration`으로 7개를 더한다 (`stage` x `warm` 조합 - 지금 올라오는
 것은 `lockWait`, `model`, `total` 각각의 콜드와 웜, 그리고 콜드에만 생기는 `workerLoad`다).
 전달본이 안쪽 다섯 단계를 싣기 시작하면 최대 17개, 환경당 월 약 5.1달러가 된다. 단계 이름을
@@ -236,6 +238,7 @@ sum, count, avg, max만 쓴다. 그래서 `ServiceMetrics.registerPercentiles`�
 | `accentury.analysis.processing` | Gauge | 없음 | 전 인스턴스 진행 중 - 큐가 없어 이 값이 병목 지표 |
 | `accentury.analysis.inflight` | Gauge | 없음 | 이 태스크가 붙든 건수 |
 | `accentury.analysis.timeouts` | Counter | `reason` (stuck, lost) | 버려진 분석 |
+| `accentury.analysis.judged` | Counter | `reason` (unscorable, misread, other) | AI가 판정 실패(422)로 답한 건수 (KAN-272). `unscorable`은 결과에 NaN이 섞인 채점 불가라 사용자 발화가 아니라 모델 쪽 결함의 신호다. 경보 `analysis-unscorable-high`가 본다 |
 | `accentury.analysis.poll` | Counter | `congested` (true, false) | 혼잡 pollAfterMs 발동 비율 |
 | `accentury.analysis.duration` | Timer + P95 | 없음 | 업로드 접수부터 분석 완료까지, NFR-PF-01(3초) |
 | `accentury.ai.circuit.state` | Gauge | 없음 | AI 회로 (KAN-36) |
@@ -358,6 +361,7 @@ KAN-134/165/36의 9종은 "서버가 죽었다"를 알린다(근거는 `infra/RE
 | `ai-temp-residue` | `TempFiles` >= 20이 10분(5분 x 2회) | 이 지표는 처리 중인 파일도 센다. 동시 추론이 구조적으로 3건(워커 1 x 태스크 3, KAN-172)을 넘지 못하므로 20이면 정상 부하가 닿지 않는다 |
 | `analysis-backlog-high` | 진행 중 >= 12가 5분 연속 | 폴링 혼잡 임계치(6, KAN-172)의 두 배. 서버가 폴링 간격을 올려 압력을 뺀 뒤에도 그만큼 쌓였다면 사람이 볼 일이다. AI가 1건 10초라 12건은 대기열 2분이다 |
 | `analysis-timeouts-high` | 5분에 타임아웃 5건 초과 | 정상 운영에서는 0이다. 배포 중 태스크 교체로 나는 한두 건 위에 선을 긋는다 |
+| `analysis-unscorable-high` (KAN-272) | 5분에 채점 불가 5건 초과 | AI가 분석 결과에 NaN을 낸 건수다. 2026-10 prod에서 분석의 약 5%(5분에 2건 안팎)였고 그 위에 선을 긋는다. 판정(422)이라 회로가 열리지 않으므로 모델 회귀를 잡는 경보는 이것뿐이다 |
 
 `analysis-backlog-high`가 보는 것은 **전 인스턴스 합**(DB의 PROCESSING 행 수)이다. 태스크별
 인메모리 카운터로 걸면 태스크 셋이 임계치를 나눠 가져 아무도 울지 않는다 - KAN-167이 혼잡 판정을
