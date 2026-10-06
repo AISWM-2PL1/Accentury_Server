@@ -4,6 +4,7 @@ import app.accentury.backend.IntegrationTest;
 import app.accentury.backend.RedisTestcontainer;
 import app.accentury.backend.analysis.AnalysisDispatcher;
 import app.accentury.backend.common.AccenturyProperties;
+import app.accentury.backend.common.AdminAuth;
 import app.accentury.backend.training.VoiceConsent;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -47,8 +48,12 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
  */
 @AutoConfigureMockMvc
 @Import(RedisTestcontainer.class)
-@TestPropertySource(properties = "accentury.auth.fake-idp=true")
+@TestPropertySource(properties = {"accentury.auth.fake-idp=true",
+        "accentury.admin.token=" + VoiceUploadConsentTest.ADMIN_TOKEN})
 class VoiceUploadConsentTest extends IntegrationTest {
+
+    /** 합성 트래픽 표시를 검증할 관리자 토큰 - 배포 스모크가 쓰는 헤더다 (KAN-138). */
+    static final String ADMIN_TOKEN = "voice-upload-consent-test-admin-token-0123";
 
     private static final String CONSENT_VERSION = AccenturyProperties.Training.VOICE_CONSENT_VERSION;
 
@@ -98,8 +103,23 @@ class VoiceUploadConsentTest extends IntegrationTest {
         upload(session, "v1", "anon-none");
 
         assertNull(lastConsent());
-        // 익명 세션이라는 사실은 함께 넘어간다 (KAN-274) - 동의가 없어도 라벨(점수와 출신 지역)은 남기기 때문이다.
-        assertTrue(lastRequest().anonymousSession());
+        // 라벨 전용 저장 대상이라는 사실이 함께 넘어간다 (KAN-274) - 동의가 없어도 라벨(점수와 출신 지역)은 남긴다.
+        assertTrue(lastRequest().labelOnlyWithoutConsent());
+    }
+
+    @Test
+    void 합성_트래픽의_익명_세션은_동의가_없어도_라벨_전용_저장_대상이_아니다() throws Exception {
+        // 배포 스모크는 관리자 토큰으로 익명 세션을 만든다 (KAN-138). 실제 응시가 아니라서 라벨을 남기지 않는다 -
+        // 만료 없는 버킷에 배포마다 쌓이면 실사용자 건과 가려낼 표식이 없다 (검증 리뷰 P1).
+        JsonNode session = objectMapper.readTree(mockMvc.perform(post("/v0/sessions")
+                        .header(AdminAuth.TOKEN_HEADER, ADMIN_TOKEN)
+                        .contentType(MediaType.APPLICATION_JSON).content("{}"))
+                .andExpect(status().isCreated()).andReturn().getResponse().getContentAsString());
+
+        upload(session, "v1", "synthetic-none");
+
+        assertNull(lastConsent());
+        assertFalse(lastRequest().labelOnlyWithoutConsent());
     }
 
     @Test
@@ -122,8 +142,8 @@ class VoiceUploadConsentTest extends IntegrationTest {
         upload(session, "v1", "account-none");
 
         assertNull(lastConsent());
-        // 계정 세션은 익명이 아니다 - 동의가 없으면 라벨도 남기지 않는다 (KAN-274).
-        assertFalse(lastRequest().anonymousSession());
+        // 계정 세션은 라벨 전용 저장 대상이 아니다 - 동의가 없으면 라벨도 남기지 않는다 (KAN-274).
+        assertFalse(lastRequest().labelOnlyWithoutConsent());
     }
 
     @Test

@@ -696,13 +696,13 @@ class AuthApiTest extends IntegrationTest {
         String userId = login.get("user").get("id").asString();
         putProfile(access, profile()).andExpect(status().isOk());
         String accountSession = body(createSession(access, null)).get("sessionId").asString();
-        String anonymousSession = body(createSession(null, null)).get("sessionId").asString();
+        String labelOnlyWithoutConsent = body(createSession(null, null)).get("sessionId").asString();
 
         String accountLine = logLine(output.getAll(), "세션 생성 sessionId=" + accountSession);
         assertTrue(accountLine.contains("account=true"), accountLine);
         assertFalse(accountLine.contains(userId), "세션 생성 로그에 계정 id가 있다: " + accountLine);
         assertFalse(accountLine.contains("userId"), accountLine);
-        assertTrue(logLine(output.getAll(), "세션 생성 sessionId=" + anonymousSession).contains("account=false"));
+        assertTrue(logLine(output.getAll(), "세션 생성 sessionId=" + labelOnlyWithoutConsent).contains("account=false"));
     }
 
     // === 도우미 ===

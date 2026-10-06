@@ -103,9 +103,10 @@ public interface AnalysisDispatcher {
      *                  저장 쪽이 UNKNOWN으로 쓴다.
      * @param voiceConsent 이 세션의 음성 저장 동의 (KAN-269, {@code VoiceConsents}) - AI에는 가지 않고 학습 데이터
      *                  저장만 읽는다. null이면 동의가 없는 세션이고 음성은 어디에도 남지 않는다.
-     * @param anonymousSession 계정에 묶이지 않은 익명 세션인가 (KAN-274) - AI에는 가지 않고 학습 데이터 저장만 읽는다.
-     *                  동의가 없는 익명 세션은 음성 없이 라벨 JSON(점수와 출신 지역)만 남긴다. 동의가 없는 계정
-     *                  세션은 아무것도 남기지 않는다.
+     * @param labelOnlyWithoutConsent 동의가 없을 때 음성 없이 라벨 JSON(점수와 출신 지역)만 남길 세션인가 (KAN-274) -
+     *                  AI에는 가지 않고 학습 데이터 저장만 읽는다. 계정에 묶이지 않은 익명 세션이면서 실사용자
+     *                  트래픽일 때만 true다. 계정 세션과 합성 트래픽(배포 스모크) 세션은 false이고, 동의가
+     *                  없으면 아무것도 남기지 않는다.
      * @param audio     WAV 원본 - 클라이언트 업로드를 그대로 패스스루한다 (§4.1).
      *                  소유권은 {@code dispatch()}로 넘어간다 (위 계약 참조).
      */
@@ -119,7 +120,7 @@ public interface AnalysisDispatcher {
             @Nullable String region,
             long durationMs,
             @Nullable VoiceConsent voiceConsent,
-            boolean anonymousSession,
+            boolean labelOnlyWithoutConsent,
             byte[] audio) {
 
         /** 음성 저장 동의가 없는 계정 세션 모양의 요청 - 아무것도 남지 않는다 (KAN-269). */
@@ -130,7 +131,7 @@ public interface AnalysisDispatcher {
                     null, false, audio);
         }
 
-        /** 익명 여부 필드가 없던 모양 (KAN-274 이전) - 계정 세션으로 본다. 동의가 없으면 아무것도 남지 않는다. */
+        /** 라벨 전용 저장 필드가 없던 모양 (KAN-274 이전) - 동의가 없으면 아무것도 남지 않는다. */
         public AnalysisRequest(String analysisJobId, String sessionId, String itemId, @Nullable String scriptKey,
                                String testVersion, String scoreVersion, @Nullable String region, long durationMs,
                                @Nullable VoiceConsent voiceConsent, byte[] audio) {

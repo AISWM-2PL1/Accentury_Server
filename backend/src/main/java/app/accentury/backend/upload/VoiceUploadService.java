@@ -10,6 +10,7 @@ import app.accentury.backend.common.ApiException;
 import app.accentury.backend.common.ErrorCode;
 import app.accentury.backend.common.IdempotencyKeys;
 import app.accentury.backend.common.RateLimits;
+import app.accentury.backend.analytics.Traffic;
 import app.accentury.backend.session.SessionService;
 import app.accentury.backend.session.TestSession;
 import app.accentury.backend.session.TestSessionRepository;
@@ -200,12 +201,14 @@ public class VoiceUploadService {
             // 전달한다 - 신고값이 실제와 다르면 분석이 엉뚱한 메타를 받는다 (Codex sol 리뷰 P2).
             // 음성 저장 동의는 업로드마다 다시 판정한다 (KAN-269) - 계정 세션은 지금 계정의 동의를 보므로 세션 도중의
             // 철회가 다음 문항부터 반영된다. 동의가 없으면 null이고 그 요청의 음성은 어디에도 남지 않는다.
-            // 익명 세션 여부도 함께 넘긴다 (KAN-274) - 동의가 없는 익명 세션은 음성 없이 라벨 JSON(점수와 출신 지역)만
-            // 남기고, 동의가 없는 계정 세션은 아무것도 남기지 않는다.
+            // 라벨 전용 저장 대상인지도 함께 넘긴다 (KAN-274) - 동의가 없는 익명 세션은 음성 없이 라벨 JSON(점수와 출신
+            // 지역)만 남기고, 동의가 없는 계정 세션은 아무것도 남기지 않는다. 합성 트래픽(배포 스모크)은 실제 응시가
+            // 아니라서 뺀다 - 만료 없는 버킷에 배포마다 쌓이면 지역별 응시자 구성이 흔들리고 나중에 가려낼 표식도 없다.
             AnalysisDispatcher.AnalysisRequest analysisRequest = new AnalysisDispatcher.AnalysisRequest(
                     job.id(), session.id(), itemId, item.scriptKey(), session.testVersion(),
                     session.scoreVersion(), session.region(), wav.durationMs(),
-                    voiceConsents.forSession(session), session.userId() == null, audioBytes);
+                    voiceConsents.forSession(session),
+                    session.userId() == null && session.traffic() == Traffic.REAL, audioBytes);
             // 소유권은 반환이 아니라 호출과 함께 넘어간다 - 계약(AnalysisDispatcher)이 그렇게
             // 정의되어 있고, 예외로 끝난 경우의 파기도 구현의 몫이다. 반환 뒤에 세우면
             // "제출에는 성공하고 그 뒤에 던지는" 구현(계측 데코레이터, 향후 AOP)에서 살아

@@ -50,7 +50,7 @@ import java.util.concurrent.atomic.AtomicReference;
  * 알아볼 수 있게 {@link Task}로 감싸 추적한다.
  * <p>
  * 음성 저장에 동의한 세션이면 종결 뒤, 버퍼를 지우기 전에 학습 샘플을 남긴다 (KAN-201, KAN-269,
- * {@link TrainingSampleStore}) - AI가 계약대로 답한 건(성공과 판정 실패)만이고, 계약 위반과 AI 불가는 원점수도 판정도 없어 남기지
+ * {@link TrainingSampleStore}). 동의하지 않은 익명 세션은 음성 없이 라벨만 남긴다 (KAN-274). 어느 쪽이든 AI가 계약대로 답한 건(성공과 판정 실패)만이고, 계약 위반과 AI 불가는 원점수도 판정도 없어 남기지
  * 않는다. 저장 실패는 분석 결과에 영향을 주지 않는다.
  */
 class HttpAnalysisDispatcher implements AnalysisDispatcher {
@@ -256,7 +256,8 @@ class HttpAnalysisDispatcher implements AnalysisDispatcher {
             apply(request.analysisJobId(), outcome, acceptedNanos);
             logUnscorable(request, outcome);
             // 상태 전이가 끝난 뒤, 아래 finally의 wipeAudio() 전이다 (KAN-201). 사용자는 이미 종결을 볼 수
-            // 있고, 워커 점유 시간만 저장 왕복만큼 늘어난다 (수집을 켠 환경의 동의 세션 한정 - 그 밖은 즉시 돌아온다).
+            // 있고, 워커 점유 시간만 저장 왕복만큼 늘어난다. 수집을 켠 환경에서 동의한 세션(WAV와 JSON)과 동의하지
+            // 않은 익명 세션(JSON 하나, KAN-274)이 왕복하고, 동의하지 않은 계정 세션은 즉시 돌아온다.
             keepTrainingSample(request, outcome, correlationId);
         } catch (RuntimeException e) {
             // 종결을 놓치면 사용자는 타임아웃 스위퍼까지 대기 화면에 묶인다 - 어떤 예외도 종결로 바꾼다.
@@ -432,9 +433,9 @@ class HttpAnalysisDispatcher implements AnalysisDispatcher {
 
     /**
      * 학습 샘플로 남길 건이면 저장소에 넘긴다 (KAN-201). 음성까지 남기는 것은 음성 저장에 동의한 세션의 요청만이다
-     * (KAN-269). 동의가 없는({@code voiceConsent}가 null) <b>익명 세션</b>은 음성 없이 라벨만 남긴다 (KAN-274) -
+     * (KAN-269). 동의가 없는({@code voiceConsent}가 null) <b>실사용자 익명 세션</b>은 음성 없이 라벨만 남긴다 (KAN-274) -
      * 샘플의 {@code audio}와 {@code consent}를 null로 만들어 넘기고, 저장소가 JSON 하나만 별도 접두에 쓴다. 동의가
-     * 없는 계정 세션은 샘플을 만들지 않는다. 어느 쪽이든 동의가 없으면 음성은 이 뒤의 파기로 사라진다. 그중 AI가 계약대로
+     * 없는 계정 세션과 합성 트래픽 세션은 샘플을 만들지 않는다. 어느 쪽이든 동의가 없으면 음성은 이 뒤의 파기로 사라진다. 그중 AI가 계약대로
      * 답한 건 전부다 - 성공
      * ({@link AiAnalysisClient.Completed})과 판정 실패({@link AiAnalysisClient.Rejected}의 JUDGED, 부정 샘플도
      * 학습에 쓴다). 계약 위반은 원점수도 판정도 없고, null(재전송 예산 소진, 타임아웃, 회로 열림, 종료 중)은
@@ -447,7 +448,7 @@ class HttpAnalysisDispatcher implements AnalysisDispatcher {
     private void keepTrainingSample(AnalysisRequest request, AiAnalysisClient.@Nullable Outcome outcome,
                                     String correlationId) {
         VoiceConsent consent = request.voiceConsent();
-        if (consent == null && !request.anonymousSession()) {
+        if (consent == null && !request.labelOnlyWithoutConsent()) {
             return;
         }
         // 동의가 없으면 음성 배열을 샘플에 싣지 않는다 - 저장소가 실수로도 음성을 쓸 수 없게 여기서 끊는다.
