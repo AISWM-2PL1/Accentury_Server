@@ -23,6 +23,7 @@ import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /** S3 왕복 없이 객체 규약(키, Content-Type, 메타 필드), 대응표 기록 순서, 실패 삼킴을 본다 (KAN-201, KAN-269). */
@@ -81,6 +82,82 @@ class S3TrainingSampleStoreTest {
         assertEquals("2026-10-04", meta.get("voiceConsentVersion").asString());
         assertEquals("2026-09-11T05:00:00Z", meta.get("voiceConsentAt").asString());
         assertFalse(meta.has("ownerId"), "소유 계정은 라벨에 싣지 않는다 - 대응표에만 있다");
+        // 이 JSON 옆에 WAV가 있다는 표시 (KAN-274) - 라벨 전용 건과 파일만 보고도 갈린다.
+        assertTrue(meta.get("audioStored").asBoolean());
+    }
+
+    @Test
+    void 라벨_전용_샘플은_no_audio_접두에_JSON_하나만_놓인다() throws IOException {
+        // 음성 저장에 동의하지 않은 익명 세션의 건이다 (KAN-274). 음성 트리와 접두를 갈라 「음성 트리의 칸은 언제나
+        // WAV와 JSON 한 쌍」이라는 규약을 지킨다.
+        RecordingS3 s3 = new RecordingS3();
+        store(s3).save(labelOnly());
+
+        assertEquals(1, s3.puts.size(), "라벨 전용 건에 WAV가 올라갔다");
+        Put json = s3.puts.get(0);
+        assertEquals("training-bucket", json.request().bucket());
+        assertEquals("staging/_no-audio/GYEONGNAM/gn-2026.09.2/s_1/v3/a_9.json", json.request().key());
+        assertEquals("application/json", json.request().contentType());
+        assertEquals(1.0, registry.get("accentury.training.samples").tag("result", "label_saved").counter().count());
+        assertEquals(0.0, registry.get("accentury.training.samples").tag("result", "saved").counter().count());
+    }
+
+    @Test
+    void 라벨_전용_샘플의_메타는_점수와_지역을_싣고_동의_기록은_없다() throws IOException {
+        RecordingS3 s3 = new RecordingS3();
+        store(s3).save(labelOnly());
+
+        JsonNode meta = objectMapper.readTree(s3.puts.get(0).body());
+        assertFalse(meta.get("audioStored").asBoolean());
+        assertEquals("a_9", meta.get("analysisJobId").asString());
+        assertEquals("s_1", meta.get("sessionId").asString());
+        assertEquals("v3", meta.get("itemId").asString());
+        assertEquals("GYEONGNAM", meta.get("region").asString());
+        assertEquals("COMPLETED", meta.get("outcome").asString());
+        assertEquals(78, meta.get("intonationScore").asInt());
+        assertEquals("rmvpe-0.2", meta.get("modelVersion").asString());
+        assertEquals("2026-09-11T06:00:00Z", meta.get("savedAt").asString());
+        assertFalse(meta.has("voiceConsentVersion"), "동의하지 않은 세션에 동의 버전이 실렸다");
+        assertFalse(meta.has("voiceConsentAt"), "동의하지 않은 세션에 동의 시각이 실렸다");
+    }
+
+    @Test
+    void 라벨_전용_샘플은_동의_재확인과_대응표를_거치지_않는다() {
+        // 계정이 없는 세션이라 볼 동의도 이을 계정도 없다. 재확인이 false여도 남는다.
+        consents.inEffect = false;
+        RecordingS3 s3 = new RecordingS3();
+
+        store(s3).save(labelOnly());
+
+        assertEquals(1, s3.puts.size());
+        assertTrue(owners.records.isEmpty());
+        assertEquals(0.0, registry.get("accentury.training.samples").tag("result", "skipped").counter().count());
+    }
+
+    @Test
+    void 라벨_전용_저장의_S3_실패도_삼키고_카운터만_올린다() {
+        S3Client failing = new RecordingS3() {
+            @Override
+            public PutObjectResponse putObject(PutObjectRequest request, RequestBody body) {
+                throw S3Exception.builder().message("AccessDenied").statusCode(403).build();
+            }
+        };
+
+        assertDoesNotThrow(() -> store(failing).save(labelOnly()));
+
+        assertEquals(1.0, registry.get("accentury.training.samples").tag("result", "failed").counter().count());
+        assertEquals(0.0, registry.get("accentury.training.samples").tag("result", "label_saved").counter().count());
+    }
+
+    @Test
+    void 음성과_동의는_함께_있거나_함께_없어야_한다() {
+        // 동의 없는 음성이 저장소까지 가는 조합을 샘플을 만드는 자리에서 막는다 (KAN-274).
+        assertThrows(IllegalArgumentException.class, () -> new TrainingSample("a_9", "s_1", "v3", "GYEONGNAM",
+                "1|3", "gn-2026.09.2", "sv-0.4", 2450, TrainingSample.Outcome.COMPLETED, 78, "OK", "rmvpe-0.2",
+                "sv-ai-0.1", null, "c_abc", null, new byte[] {82, 73, 70, 70}));
+        assertThrows(IllegalArgumentException.class, () -> new TrainingSample("a_9", "s_1", "v3", "GYEONGNAM",
+                "1|3", "gn-2026.09.2", "sv-0.4", 2450, TrainingSample.Outcome.COMPLETED, 78, "OK", "rmvpe-0.2",
+                "sv-ai-0.1", null, "c_abc", ANONYMOUS, null));
     }
 
     @Test
@@ -174,6 +251,13 @@ class S3TrainingSampleStoreTest {
 
     private static TrainingSample completed() {
         return completed(ANONYMOUS);
+    }
+
+    /** 음성 저장에 동의하지 않은 익명 세션의 건 - 음성과 동의가 없다 (KAN-274). */
+    private static TrainingSample labelOnly() {
+        return new TrainingSample("a_9", "s_1", "v3", "GYEONGNAM", "1|3", "gn-2026.09.2", "sv-0.4",
+                2450, TrainingSample.Outcome.COMPLETED, 78, "OK", "rmvpe-0.2", "sv-ai-0.1", null,
+                "c_abc", null, null);
     }
 
     private static TrainingSample completed(VoiceConsent consent) {
