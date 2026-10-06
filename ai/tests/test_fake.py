@@ -73,3 +73,54 @@ def test_환경_변수로_실패_문항과_지연을_읽는다():
     assert settings.fake_delay_ms == 0
     # 빈 값은 없는 것과 같다 - compose가 "${E2E_FAIL_ITEM:-}"로 빈 문자열을 넘긴다
     assert Settings.from_env({"ACCENTURY_AI_FAKE_FAIL_ITEM": ""}).fake_fail_item is None
+
+
+def test_횟수를_정하면_처음_N번만_실패하고_재녹음은_성공한다(tmp_path):
+    # KAN-271 - 재녹음으로 완주하는 갈래. 시도마다 BE는 새 correlationId를 쓴다(업로드마다 새 추적 ID)
+    engine = FakeEngine(
+        Settings(analysis_engine=FAKE_ENGINE, fake_delay_ms=0, fake_fail_item="v3", fake_fail_times=1)
+    )
+
+    first = asyncio.run(engine.analyze(_request(tmp_path, item_id="v3", correlation_id="c_try1")))
+    retake = asyncio.run(engine.analyze(_request(tmp_path, item_id="v3", correlation_id="c_try2")))
+    # 세션을 가를 필드가 요청에 없어 프로세스 전역으로 센다 - 다음 세션도 이미 소진된 횟수를 본다
+    next_session = asyncio.run(engine.analyze(_request(tmp_path, item_id="v3", correlation_id="c_s2")))
+
+    assert first.failed is True
+    assert first.retryable is True
+    assert retake.failed is False
+    assert next_session.failed is False
+
+
+def test_같은_요청의_재전송은_처음_판정을_그대로_받는다(tmp_path):
+    # BE analyzeWithRetry는 같은 correlationId로 다시 보낸다 - 재전송이 횟수를 깎아 판정이 뒤집히면 안 된다
+    engine = FakeEngine(
+        Settings(analysis_engine=FAKE_ENGINE, fake_delay_ms=0, fake_fail_item="v3", fake_fail_times=2)
+    )
+
+    verdicts = [
+        asyncio.run(engine.analyze(_request(tmp_path, item_id="v3", correlation_id=cid))).failed
+        for cid in ("c_a", "c_a", "c_a", "c_b", "c_b", "c_c", "c_a")
+    ]
+
+    # c_a와 c_b가 두 번을 쓰고 c_c부터 성공한다. 늦게 온 c_a 재전송도 처음처럼 실패다
+    assert verdicts == [True, True, True, True, True, False, True]
+
+
+def test_횟수를_정하지_않으면_언제나_실패한다(tmp_path):
+    engine = FakeEngine(Settings(analysis_engine=FAKE_ENGINE, fake_delay_ms=0, fake_fail_item="v3"))
+
+    assert all(
+        asyncio.run(engine.analyze(_request(tmp_path, item_id="v3", correlation_id=f"c_{i}"))).failed
+        for i in range(5)
+    )
+
+
+def test_환경_변수로_실패_횟수를_읽고_양의_정수가_아니면_기동을_세운다():
+    assert Settings.from_env({"ACCENTURY_AI_FAKE_FAIL_TIMES": "2"}).fake_fail_times == 2
+    # compose가 "${E2E_FAIL_TIMES:-}"로 빈 문자열을 넘긴다 - 없는 것과 같다(언제나 실패)
+    assert Settings.from_env({"ACCENTURY_AI_FAKE_FAIL_TIMES": ""}).fake_fail_times is None
+    assert Settings.from_env({}).fake_fail_times is None
+    for bad in ("0", "-1", "abc"):
+        with pytest.raises(ValueError):
+            Settings.from_env({"ACCENTURY_AI_FAKE_FAIL_TIMES": bad})
