@@ -356,7 +356,7 @@ prod의 required reviewers(승인 게이트, KAN-128)도 environment 설정이�
 변수 4개는 환경 apply 출력에서 채운다 (재구축으로 배포 ID나 역할 ARN이 바뀌면 다시).
 `APP_DOMAIN`은 이미지 파이프라인의 E2E 스모크 대상이다 (KAN-128). 같은 값을 두 레포에
 넣는다 - `gh variable set`에 `-R AISWM-2PL1/Accentury_Server`와 `-R AISWM-2PL1/Accentury_App`을
-각각 준다. 웹 배포 전용 변수(REGION_SELECT, ADSENSE_*, GA4_*, STORE_LISTING_READY,
+각각 준다. 웹 배포 전용 변수(ADSENSE_*, GA4_*, STORE_LISTING_READY,
 DEPLOY_PAUSED)는 Accentury_App에만 있다.
 
 ```

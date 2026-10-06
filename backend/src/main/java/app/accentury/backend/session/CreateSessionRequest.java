@@ -22,8 +22,9 @@ import org.jspecify.annotations.Nullable;
  *                      활성 정의 스냅샷 하나에서 한다. 정수가 아닌 값은 프레임워크가 파싱 단계에서
  *                      400으로 끊는다.
  * @param region        응시자의 출신(모어 사투리) 지역 코드 (KAN-201, {@link Region}). 웹 응시 흐름의
- *                      선택 화면(KAN-202, staging 빌드 한정)이 보내고, 앱과 앱 안 WebView는 보내지
- *                      않는다. 코드 10개 밖의 값은 400 {@code VALIDATION_FAILED}이고 검증은
+ *                      선택 화면(KAN-202, KAN-274부터 두 환경 모두 상시)이 보내고, 로그인을 끈 앱의 익명
+ *                      세션(KAN-270)은 음성 저장에 동의한 경우에만 보낸다. 앱 안 WebView는 보내지
+ *                      않는다(세션은 네이티브가 만든다). 코드 10개 밖의 값은 400 {@code VALIDATION_FAILED}이고 검증은
  *                      {@link SessionService}가 한다 (campaignToken의 형식 검증과 같은 결과). 응답에는
  *                      실리지 않는다. 계정 세션(KAN-223)은 이 값을 무시하고 계정의 출신지역을 쓴다.
  * @param voiceConsentVersion 음성 저장(학습 활용) 선택 동의 (KAN-269, §3.1). 동의한 응시자만 게시 중인 동의 버전을
