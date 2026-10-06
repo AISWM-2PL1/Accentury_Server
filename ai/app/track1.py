@@ -27,7 +27,9 @@
 부모 -> 자식 (stdin, 한 줄 JSON): ``{"audioPath": ..., "scriptKey": ...}``
 자식 -> 부모 (stdout, 한 줄 JSON): 기동 직후 ``{"type": "ready", "modelVersion": ...}``,
 그 뒤 요청마다 ``{"type": "result", ...}``. 성공 결과에는 전달본이 실은 단계 시간이
-``stageMs``로 함께 온다 (KAN-204, 아래 :func:`_stage_ms`).
+``stageMs``로 함께 온다 (KAN-204, 아래 :func:`_stage_ms`). 채점은 끝났는데 결과에 NaN이나
+무한대가 섞인 경우는 ``{"ok": false, "kind": "unscorable", "fields": [...]}``로 온다
+(KAN-272, 아래 :func:`_non_finite_fields`).
 
 자식은 fd 1을 stderr로 덮은 뒤 원래 stdout의 복제본으로만 프로토콜을 쓴다. 라이브러리가
 표준출력에 한 줄이라도 찍으면(transformers의 진행 표시, MFA의 로그) 그것이 응답으로
@@ -40,18 +42,22 @@ import asyncio
 import contextlib
 import json
 import logging
+import math
 import os
+import re
 import shutil
 import signal
 import sys
 import tempfile
 import time
+from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
 
 from app.config import Settings
 from app.engine import (
     JUDGED_QUALITY_CODES,
+    EngineBusy,
     QUALITY_OK,
     STATUS_OK,
     AnalysisOutcome,
@@ -80,6 +86,26 @@ _PIPE_LIMIT_BYTES = 4 * 1024 * 1024
 #: 모르는 ``scriptKey``에 자식이 붙이는 사유 (아래 :meth:`Track1Engine._outcome_of` 참고).
 _UNKNOWN_SCRIPT_KEY = "unknown_script_key"
 _ENGINE_ERROR = "error"
+#: 채점은 끝났는데 결과에 NaN이나 무한대가 섞여 봉투로 내보낼 수 없을 때 자식이 붙이는 사유
+#: (KAN-272, 아래 :meth:`Track1Engine._outcome_of` 참고).
+_UNSCORABLE = "unscorable"
+
+#: 채점 불가의 판정 코드 (§2.4, KAN-272).
+UNSCORABLE_QUALITY_CODE = "ANALYSIS_UNSCORABLE"
+
+#: 채점 불가 로그에 싣는 필드 이름의 상한. 구간 피드백이 많은 문장에서 모든 구간이 NaN이어도
+#: 이름은 ``[]``로 접혀 하나지만, 전달본이 봉투를 넓히면 줄이 끝없이 길어질 수 있다.
+_MAX_NON_FINITE_FIELDS = 20
+#: 봉투를 내려가는 깊이의 상한 - 자기 자신을 돌려주는 ``item()`` 같은 것에 걸려 돌지 않게 한다.
+_MAX_ENVELOPE_DEPTH = 12
+#: 로그에 그대로 실어도 되는 필드 이름. 전달본이 정한 식별자 꼴만 통과시킨다 - 봉투 안에
+#: 단어나 전사를 키로 쓴 dict가 있으면 그 키가 곧 발화 내용이라(NFR-SC-07) ``*``로 가린다.
+_FIELD_NAME = re.compile(r"[A-Za-z_][A-Za-z0-9_]{0,39}")
+#: 부모가 자식에게서 받은 경로를 로그에 싣기 전에 다시 보는 꼴 (위 이름에 ``.``, ``[]``, ``*``).
+_FIELD_PATH = re.compile(r"[A-Za-z0-9_.\[\]*]{1,200}")
+#: 로그에 싣는 콘텐츠 식별자(scriptKey "1|5", testVersion "gn-2026.09.4")의 꼴. meta는 호출자가 보낸
+#: 값 그대로라 꼴이 다르면 싣지 않는다 - 식별자 자리에 임의의 문자열이 로그로 들어오지 않게 한다.
+_CONTENT_KEY = re.compile(r"[A-Za-z0-9|_.\-]{1,40}")
 
 #: 전달본이 정렬 작업에 쓰는 임시 디렉터리의 접두사 (``serve.py``의 ``mfa_align_single``).
 #:
@@ -198,6 +224,14 @@ class Track1Engine:
     """
 
     def __init__(self, settings: Settings) -> None:
+        # 여유분이 상한 이상이면 모든 요청이 추론 전에 거절된다 - 설정 실수가 "전부 429"로
+        # 조용히 굴러가지 않게 기동을 세운다 (KAN-272)
+        reserve = settings.inference_reserve_seconds
+        if reserve < 0 or (reserve > 0 and reserve >= settings.analysis_timeout_seconds):
+            raise ValueError(
+                f"추론 여유분({reserve}초)은 0 이상이고 분석 상한"
+                f"({settings.analysis_timeout_seconds}초)보다 작아야 한다"
+            )
         self._settings = settings
         self._model_version = LOADING_MODEL_VERSION
         self._process: asyncio.subprocess.Process | None = None
@@ -260,6 +294,7 @@ class Track1Engine:
             # 정상 추론 하나가 아니라 이 대기까지 덮어야 하는 근거가 이 값이다
             stages.put("lockWait", (time.monotonic() - waiting) * 1000)
             await self._load_worker(stages)
+            self._require_inference_budget(waiting)
             try:
                 reply = await self._score(payload, stages)
             except asyncio.CancelledError:
@@ -278,8 +313,41 @@ class Track1Engine:
                 # 매번 재적재를 태우면 그것이 더 나쁘다
                 log.warning("워커가 사라져 다시 띄운다 reason=%s", error)
                 await self._load_worker(stages)
+                # 재적재(수십 초)를 기다린 뒤다 - 남은 시간으로 추론을 마칠 수 있는지 다시 본다.
+                # 모자라면 시작하지 않되 **과부하(429)로 내지 않는다** (Codex astra 리뷰 P2). 이 요청은
+                # 추론에 들어갔다가 워커가 죽었을 수 있어 "추론 전 거절"이라고 할 수 없다 - 429로 내면
+                # BE가 미도달로 보아 시도 예산에서 빼는데, 추론이 실제로 돌았을 수 있다. 워커가 요청을
+                # 받기 전에 사라진 경우와는 여기서 구분되지 않으므로 500으로 올려 BE가 도달한 장애로
+                # 세게 한다 (예산을 안 세는 쪽으로 틀리는 것보다 세는 쪽이 낫다)
+                try:
+                    self._require_inference_budget(waiting)
+                except EngineBusy as busy:
+                    raise RuntimeError("트랙 1 추론 실패: 워커 재적재 뒤 남은 시간이 모자라다") from busy
                 reply = await self._score(payload, stages)
-        return self._outcome_of(reply)
+        return self._outcome_of(reply, request)
+
+    def _require_inference_budget(self, entered: float) -> None:
+        """추론을 시작해도 상한 안에 끝낼 수 있는지 본다 - 아니면 시작하지 않는다 (KAN-272).
+
+        라우트의 상한은 lock 대기와 워커 적재 대기를 포함한다. 오래 기다린 요청을 그대로
+        추론에 넣으면 **추론 도중** 상한이 발화하고, 그 취소는 워커를 죽인다 (아래 ``analyze``의
+        ``CancelledError`` 처리 - 계약 2가 요구하는 동작이다). 죽은 워커의 재적재가 뒤에 선
+        요청까지 밀어 같은 일이 되풀이된다. 한 호스트에 일곱 건 이상이 겹치면 일곱 번째가 바로
+        그 자리다 (11.1초 x 6 = 66.6초에 시작해 75초에 끊긴다).
+
+        여기서 접으면 워커는 그대로 살아 있고 다음 요청이 바로 lock을 잡는다. 추론을 시작하지
+        않았으므로 과부하 셰딩(429)이고, BE는 시도 예산을 깎지 않고 다시 보낸다 (§4.1).
+
+        ``entered``는 :meth:`analyze`에 들어온 시각이다. 라우트가 상한을 거는 시점과 사실상 같다.
+        """
+        reserve = self._settings.inference_reserve_seconds
+        if reserve <= 0:
+            return
+        remaining = self._settings.analysis_timeout_seconds - (time.monotonic() - entered)
+        if remaining < reserve:
+            raise EngineBusy(
+                f"남은 시간 {remaining:.1f}초가 추론 여유분 {reserve:.1f}초보다 적다"
+            )
 
     async def _load_worker(self, stages: StageRecord) -> None:
         """워커를 준비시키고, 적재가 실제로 일어났으면 그 대기를 적는다 (KAN-204).
@@ -492,12 +560,41 @@ class Track1Engine:
 
     # ── 결과 변환 ────────────────────────────────────────────────────────────
 
-    def _outcome_of(self, reply: dict[str, Any]) -> AnalysisOutcome:
+    def _outcome_of(self, reply: dict[str, Any], request: AnalysisRequest) -> AnalysisOutcome:
         """자식이 준 봉투 재료를 :class:`AnalysisOutcome`으로 옮긴다.
 
         축과 계산은 전달본 그대로이고 여기서는 이름만 바꿔 담는다 (KAN-159의 ``serve.py``).
         """
         if not reply.get("ok"):
+            if reply.get("kind") == _UNSCORABLE:
+                # 채점은 끝까지 돌았는데 결과에 NaN이나 무한대가 섞였다 (KAN-272). **같은 음성을
+                # 다시 보내도 결과가 같다** - 500으로 올리면 BE가 재전송 예산(2회)을 전부 같은
+                # 실패에 쓰고(추론 3회, 약 30초) INTERNAL_ERROR로 끝난다. 2026-10-05부터 이틀간
+                # prod의 500 122건이 전부 이 경우였다. 판정 실패로 내면 BE는 재전송하지 않고
+                # 사용자에게 재녹음을 연다.
+                # 남기는 것은 문항 ID, 추적 ID, 필드 이름뿐이다 - 값은 NaN이라 실을 것이 없고,
+                # 이름은 자식이 식별자 꼴만 통과시킨 것이다 (:func:`_non_finite_fields`)
+                accepted = _accepts_verdict(request.meta, UNSCORABLE_QUALITY_CODE)
+                # 어느 문항인지는 셋으로 남긴다. itemId(v12)는 정의 버전이 바뀌면 다른 문장을 가리키므로
+                # testVersion을 함께 싣고, 전달본이 문장을 찾는 키인 scriptKey("1|5")도 싣는다 -
+                # 모델 쪽에서 원인을 찾을 때 보는 것은 그 키다. 셋 다 콘텐츠 식별자이지 발화 내용이 아니다
+                log.warning(
+                    "채점 불가 - 결과에 유한하지 않은 값이 있다 correlationId=%s itemId=%s scriptKey=%s "
+                    "testVersion=%s fields=%s verdict=%s",
+                    request.correlation_id,
+                    request.item_id,
+                    _loggable_key(request.meta.get("scriptKey")),
+                    _loggable_key(request.meta.get("testVersion")),
+                    _loggable_fields(reply.get("fields")),
+                    "422" if accepted else "500(호출자가 이 판정 코드를 모른다)",
+                )
+                if not accepted:
+                    # 이 코드를 모르는 backend다 (배포는 AI가 먼저라 옛 backend가 부르는 구간이 있다).
+                    # 모르는 판정 코드를 받은 backend는 계약 위반으로 끊어 재녹음도 안 되는 FAILED로
+                    # 굳히고 회로에 실패로 센다 (Codex astra 리뷰 P1) - 예전 동작(500)이 그보다 낫다.
+                    # 로그는 위에서 이미 남겼다. backend가 전부 새 버전이 되면 이 갈래는 돌지 않는다
+                    raise RuntimeError("트랙 1 추론 실패: 채점 불가 (호출자가 판정 코드를 받지 않는다)")
+                return AnalysisOutcome.failure(quality_code=UNSCORABLE_QUALITY_CODE, retryable=True)
             if reply.get("kind") == _UNKNOWN_SCRIPT_KEY:
                 # 정의에 scriptKey가 없거나 서비스 문장이 아닌 키다 (KAN-182 계약).
                 # **재전송으로 풀리지 않는다** - 같은 정의로 다시 보내면 결과도 같으므로
@@ -516,6 +613,10 @@ class Track1Engine:
                 # 모르는 코드를 그대로 실으면 BE가 계약 위반으로 끊고 그 문항은 재시도 없이
                 # 죽는다 (§2.4). 조용히 바꿔 담지 않고 신호를 남긴다
                 raise RuntimeError(f"모델이 §2.4에 없는 품질 코드를 냈다: {code!r}")
+            if code == UNSCORABLE_QUALITY_CODE and not _accepts_verdict(request.meta, code):
+                # 전달본이 이 코드를 직접 내는 날에도 같은 문을 지난다 (검증자 리뷰 P3) - 모르는
+                # backend에는 내보내지 않는다 (위 채점 불가 갈래와 같은 이유)
+                raise RuntimeError("트랙 1 추론 실패: 채점 불가 (호출자가 판정 코드를 받지 않는다)")
             return AnalysisOutcome.failure(quality_code=code, retryable=bool(envelope["retryable"]))
         return AnalysisOutcome.ok(
             intonation_score=int(envelope["intonationScore"]),
@@ -612,16 +713,26 @@ def _worker_main(argv: list[str]) -> int:
                 # 봉투에 JSON으로 나갈 수 없는 값이 있다 (NaN, 알 수 없는 객체). 여기서 잡지
                 # 않으면 이 예외가 워커를 죽여, 부모에게는 "워커가 응답 없이 사라졌다"로만
                 # 보인다 - 원인이 로그 어디에도 남지 않는 종류의 실패다
-                _send(
-                    channel,
-                    {
-                        "type": _RESULT,
-                        "ok": False,
-                        "kind": _ENGINE_ERROR,
-                        # 여기서도 메시지 본문은 싣지 않는다 - 직렬화 오류 문자열에 값이 실린다
-                        "message": f"봉투를 직렬화할 수 없다: {type(error).__name__}",
-                    },
-                )
+                fields = _non_finite_fields(envelope)
+                if fields:
+                    # NaN이나 무한대다 (KAN-272). 이 음성으로는 몇 번을 돌려도 같은 값이 나오므로
+                    # 모델 내부 오류(500, 재전송)와 갈라 부모가 판정 실패로 옮기게 한다.
+                    # 어느 값인지는 이름만 싣는다 - 전달본에서 원인을 찾을 유일한 단서다
+                    _send(
+                        channel,
+                        {"type": _RESULT, "ok": False, "kind": _UNSCORABLE, "fields": fields},
+                    )
+                else:
+                    _send(
+                        channel,
+                        {
+                            "type": _RESULT,
+                            "ok": False,
+                            "kind": _ENGINE_ERROR,
+                            # 여기서도 메시지 본문은 싣지 않는다 - 직렬화 오류 문자열에 값이 실린다
+                            "message": f"봉투를 직렬화할 수 없다: {type(error).__name__}",
+                        },
+                    )
         finally:
             _clear_mfa_workspace()
     return 0
@@ -641,6 +752,86 @@ def _stage_ms(envelope: Any) -> Any:
     if isinstance(envelope, dict):
         return envelope.pop("stageMs", None)
     return None
+
+
+def _non_finite_fields(envelope: Any) -> list[str]:
+    """봉투에서 NaN이나 무한대가 든 자리의 **이름**을 모은다 (KAN-272).
+
+    값은 싣지 않는다 - 어차피 NaN이고, 로그에 남길 것은 "어느 값인가"뿐이다. 경로는
+    ``segments[].st``처럼 점과 ``[]``로 잇고, 목록의 순번은 접는다 (구간마다 한 줄씩 늘지
+    않게). 식별자 꼴이 아닌 키는 ``*``로 가린다 - 단어나 전사를 키로 쓴 dict가 있으면 그 키가
+    발화 내용이다 (NFR-SC-07).
+
+    numpy 값은 :func:`_send`가 접는 것과 같은 방법(:func:`_jsonable`)으로 접어 본다. 그래야
+    "보낼 때 걸린 값"과 "여기서 찾은 값"이 같은 것이 된다.
+
+    **예외를 내지 않는다.** 이 함수는 워커가 직렬화 실패를 수습하는 자리에서 돌므로, 여기서
+    터지면 워커가 죽어 원인이 다시 사라진다. 찾지 못하면 빈 목록이고, 그때 호출자는 예전처럼
+    모델 내부 오류로 올린다.
+    """
+    found: list[str] = []
+
+    def visit(value: Any, path: str, depth: int) -> None:
+        if len(found) >= _MAX_NON_FINITE_FIELDS or depth > _MAX_ENVELOPE_DEPTH:
+            return
+        if value is None or isinstance(value, (bool, int, str)):
+            return
+        if isinstance(value, float):
+            if not math.isfinite(value) and path not in found:
+                found.append(path)
+            return
+        if isinstance(value, Mapping):
+            for key, child in value.items():
+                name = key if isinstance(key, str) and _FIELD_NAME.fullmatch(key) else "*"
+                visit(child, f"{path}.{name}" if path else name, depth + 1)
+            return
+        if isinstance(value, (list, tuple)):
+            for child in value:
+                visit(child, f"{path}[]", depth + 1)
+            return
+        try:
+            folded = _jsonable(value)
+        except Exception:  # noqa: BLE001 - 접지 못하는 값 하나 때문에 나머지 탐색을 접지 않는다
+            # TypeError만이 아니다 - 원소가 여럿인 numpy 배열은 item()이 ValueError를 낸다.
+            # 이 값만 건너뛰고 형제 값들은 계속 본다 (검증자 리뷰 P3)
+            return
+        visit(folded, path, depth + 1)
+
+    try:
+        visit(envelope, "", 0)
+    except Exception:  # noqa: BLE001 - 수습하는 자리다 (위 설명). 찾은 데까지만 돌려준다
+        pass
+    return found
+
+
+def _accepts_verdict(meta: Mapping[str, Any], code: str) -> bool:
+    """호출자가 이 판정 코드를 안다고 했는가 (§4.1 meta의 ``acceptsVerdicts``, KAN-272).
+
+    기존 §2.4 판정 코드 넷은 모든 backend가 알므로 묻지 않는다. 그 뒤에 더한 코드만 여기서 가린다 -
+    목록이 없거나 꼴이 다르면 "모른다"로 본다 (옛 backend는 이 필드를 보내지 않는다).
+    """
+    accepted = meta.get("acceptsVerdicts")
+    return isinstance(accepted, list) and code in accepted
+
+
+def _loggable_key(value: Any) -> str:
+    """meta의 콘텐츠 식별자를 로그 한 칸으로 - 꼴이 다르거나 없으면 ``-``다."""
+    return value if isinstance(value, str) and _CONTENT_KEY.fullmatch(value) else "-"
+
+
+def _loggable_fields(raw: Any) -> str:
+    """자식이 보낸 필드 경로를 로그 한 칸으로 접는다.
+
+    자식이 이미 식별자 꼴만 통과시켰지만, 파이프를 건너온 값을 그대로 로그에 붓지는 않는다 -
+    꼴이 다른 것은 버리고 개수도 다시 자른다.
+    """
+    if not isinstance(raw, list):
+        return "-"
+    paths = [
+        item for item in raw[:_MAX_NON_FINITE_FIELDS]
+        if isinstance(item, str) and _FIELD_PATH.fullmatch(item)
+    ]
+    return ",".join(paths) or "-"
 
 
 def _is_service_sentence(scorer: Any, script_key: Any) -> bool:

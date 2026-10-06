@@ -19,9 +19,10 @@ import java.util.UUID;
  * 스스로 알아야</b> 하기 때문이다 - 가장 최근 행의 {@link #previousVersion}이 곧 되돌아갈
  * 자리다 ({@link ActiveVersionService#rollback}).
  * <p>
- * 개인 식별 정보가 없다. 운영자의 전환 행위만 남고 세션이나 응시자와 연결되는 컬럼이 없어서,
- * 음성·결과 무보관 원칙(NFR-PR-03)과 충돌하지 않는다 - 익명 집계 카운터(KAN-106)와 같은
- * 계열의 영속 데이터다. 어떤 보존 정리 잡도 이 테이블을 건드리지 않는다.
+ * 응시자의 개인 식별 정보가 없다. 운영자의 전환 행위와 그 호출 IP({@link #callerIp}, KAN-244)만
+ * 남고 세션이나 응시자와 연결되는 컬럼이 없어서, 음성·결과 무보관 원칙(NFR-PR-03)과 충돌하지
+ * 않는다 - 익명 집계 카운터(KAN-106)와 같은 계열의 영속 데이터다. 어떤 보존 정리 잡도 이 테이블을
+ * 건드리지 않는다.
  */
 @Entity
 @Table(name = "active_version_audit")
@@ -67,6 +68,17 @@ public class ActiveVersionAudit {
     @Column(length = MAX_REASON_LENGTH)
     private @Nullable String reason;
 
+    /**
+     * 전환을 요청한 IP (KAN-244). 관리자 토큰은 공유 시크릿이라 "누가"를 가리지 못한다 - 대신
+     * 어디서 왔는지를 남겨, 예상 밖의 전환이 운영자 자리에서 온 것인지 가릴 근거로 쓴다.
+     * {@link app.accentury.backend.common.ClientIps}의 값이라 IPv6 최대 길이(45자)에 맞춘다.
+     * <b>이 열이 생기기 전의 행에서만 null이다.</b>
+     * <p>
+     * 운영자의 IP다. 응시자와 연결되는 값이 아니므로 위의 무보관 원칙과 부딪히지 않는다.
+     */
+    @Column(name = "caller_ip", length = 45)
+    private @Nullable String callerIp;
+
     @Column(name = "recorded_at", nullable = false)
     private Instant recordedAt;
 
@@ -75,12 +87,13 @@ public class ActiveVersionAudit {
     }
 
     ActiveVersionAudit(Action action, @Nullable String previousVersion, String newVersion,
-                       @Nullable String reason, Instant recordedAt) {
+                       @Nullable String reason, String callerIp, Instant recordedAt) {
         this.id = "av_" + UUID.randomUUID();
         this.action = action;
         this.previousVersion = previousVersion;
         this.newVersion = newVersion;
         this.reason = reason;
+        this.callerIp = callerIp;
         this.recordedAt = recordedAt;
     }
 
@@ -102,6 +115,10 @@ public class ActiveVersionAudit {
 
     public @Nullable String reason() {
         return reason;
+    }
+
+    public @Nullable String callerIp() {
+        return callerIp;
     }
 
     public Instant recordedAt() {

@@ -85,10 +85,20 @@ public final class ServiceMetrics {
     /** 전달 접수부터 종결까지 걸린 시간 - NFR-PF-01(3초)의 측정값이다. */
     public static final String ANALYSIS_DURATION = "accentury.analysis.duration";
 
-    // ---- 학습 데이터 (S3TrainingSampleStore, staging 한정) ----
+    /**
+     * AI가 판정 실패(§4.1의 422)로 답한 건수 (KAN-272) - 태그 {@code reason}은 {@code unscorable}
+     * (결과에 NaN이 섞인 채점 불가), {@code misread}(제시 문장과 다른 발화), {@code other}(그 밖의
+     * 판정 코드)다. 코드 이름을 그대로 태그로 쓰지 않는 것은 값의 가짓수를 닫아 두기 위해서다
+     * (위 "지표를 늘릴 때의 비용").
+     */
+    public static final String ANALYSIS_JUDGED = "accentury.analysis.judged";
+
+    // ---- 학습 데이터 (S3TrainingSampleStore, 수집을 켠 환경 한정) ----
 
     /**
-     * 학습 샘플 저장 시도 수 - 태그 {@code result}는 {@code saved} | {@code failed}다 (KAN-201).
+     * 학습 샘플 저장 시도 수 - 태그 {@code result}는 {@code saved} | {@code label_saved} | {@code failed} |
+     * {@code skipped}다 (KAN-201). {@code label_saved}는 동의하지 않은 익명 세션의 라벨 전용 저장이고 (KAN-274),
+     * {@code skipped}는 업로드와 저장 사이에 동의가 철회된 건이다 (KAN-269).
      * 실패는 분석 결과에 영향을 주지 않으므로 이 지표와 WARN 로그가 유일한 신호다.
      */
     public static final String TRAINING_SAMPLES = "accentury.training.samples";

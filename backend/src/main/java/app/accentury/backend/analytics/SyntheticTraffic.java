@@ -39,10 +39,11 @@ public class SyntheticTraffic {
      *
      * @param adminToken {@code X-Admin-Token} 헤더 - <b>아예 없을 때만</b> 실사용자다.
      *                   빈 값은 표시하려다 실패한 것으로 보고 401이다.
+     * @param clientIp   호출 IP - 토큰이 틀렸을 때 {@link AdminAuth}가 실패 로그에 남긴다 (KAN-244)
      * @throws ApiException 401 {@code ADMIN_UNAUTHORIZED} - 토큰이 틀렸거나, 이 서버가
      *                      관리자 토큰을 설정하지 않아 표시를 검증할 수 없을 때
      */
-    public Traffic resolve(@Nullable String adminToken) {
+    public Traffic resolve(@Nullable String adminToken, String clientIp) {
         // isBlank()를 여기 두지 않는다 - 빈 값은 "표시하지 않음"이 아니라 "표시하려다 실패함"이다.
         if (adminToken == null) {
             return Traffic.REAL;
@@ -50,7 +51,7 @@ public class SyntheticTraffic {
         if (adminAuth == null) {
             throw new ApiException(ErrorCode.ADMIN_UNAUTHORIZED);
         }
-        adminAuth.authorize(adminToken);
+        adminAuth.authorize(adminToken, clientIp);
         return Traffic.SYNTHETIC;
     }
 }

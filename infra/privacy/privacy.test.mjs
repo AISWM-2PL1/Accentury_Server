@@ -103,6 +103,7 @@ test('연락처가 있다 (Play·App Store 심사가 요구하는 항목)', () =
 test('음성은 분석 직후 즉시 삭제라고 적혀 있다 (KAN-27, ai/app/tempstore.py)', () => {
   // 분석이 성공·실패·시간 초과·취소 어느 쪽으로 끝나든 임시 파일을 지운다. 이 처리가 바뀌면
   // 권한 안내 문구("녹음은 분석 후 즉시 삭제돼요")와 스토어 설명도 함께 거짓이 된다.
+  // KAN-269부터 이 문장은 채점용 임시 파일의 약속이다. 선택 동의한 응시의 음성 보관은 아래 KAN-269 테스트가 본다.
   assert.ok(html.includes('즉시 삭제'), '음성 즉시 삭제 문구가 없다');
 });
 
@@ -148,6 +149,13 @@ test('1항 표의 보유 기간이 행마다 코드와 맞는다', () => {
   // [구분, 그 행의 보유 기간 칸에 반드시 있어야 하는 문자열들, 근거]
   const expected = [
     ['음성 녹음', ['즉시 삭제'], 'KAN-27, ai/app/tempstore.py'],
+    // 선택 동의한 응시의 음성은 음성 전용 버킷에 남고 수명주기 만료가 없다 (KAN-269). 이 칸이 기간으로
+    // 바뀌면 버킷에 만료 규칙이 생겼다는 뜻이어야 한다.
+    ['음성 저장과 학습 활용 (선택 동의)', ['학습 목적 달성 시까지'], 'KAN-269, 음성 전용 버킷(수명주기 만료 없음)'],
+    // 선택 동의하지 않은 익명 세션은 음성 없이 라벨 JSON만 같은 버킷의 _no-audio 접두에 남는다 (KAN-274).
+    // 버킷에 만료 규칙이 없으므로 보유 기간이 음성과 같다.
+    ['분석 정보 (선택 동의하지 않은 익명 응시)', ['학습 목적 달성 시까지'],
+      'KAN-274, training/S3TrainingSampleStore.java의 saveLabelOnly'],
     // 미완주 세션은 생성 30분 뒤 만료 정리(SessionService.java:133), 완주 세션은 완료 시점부터
     // 24시간(TestSession.java:140-157, CompletionService.java:169-175). 기준점이 둘이라 셋을 함께 본다.
     // 앱 세션이 계정에 붙으면서(KAN-223) 행 이름에서 「익명」을 뺐다 (KAN-240).
@@ -343,19 +351,23 @@ test('후기 이메일이 내부 알림에 실리지 않는다고 적혀 있다 
 test('데이터 소재지가 서울 리전이라고 적혀 있다 (infra, AWS ap-northeast-2)', () => {
   // 국외 이전 고지의 반대편이다. 음성·세션·결과는 국내에 머무르고 Google로 가는 것은
   // 이용 통계와 오류 로그뿐이라는 구분이 이 문구에 걸려 있다.
+  // 선택 동의로 보관하는 음성의 버킷도 같은 리전이다 (KAN-269).
   assert.ok(html.includes('ap-northeast-2'), '리전 표기가 없다');
   assert.ok(html.includes('서울 리전'), '서울 리전 표기가 없다');
 });
 
-// ── 환경별 본문 (KAN-239) ─────────────────────────────────────────────────────
-// staging에는 학습 수집 고지가 붙고 prod에는 없다. 자르는 규칙은 게시 스크립트 하나에 있고
-// (--render), 여기서는 그 스크립트를 그대로 돌려 두 환경에 올라갈 본문을 검사한다.
+// ── 환경별 본문 (KAN-239 -> KAN-269) ──────────────────────────────────────────
+// KAN-239는 staging에만 학습 수집 고지를 붙였다. KAN-269부터 음성 저장은 두 환경 공통의 선택 동의라
+// staging 전용 고지가 사라졌고, staging-only 블록은 비어 있다. 자르는 규칙은 게시 스크립트 하나에
+// 그대로 있고(--render), 여기서는 그 스크립트를 그대로 돌려 두 환경에 올라갈 본문을 검사한다.
 const SCRIPT = join(HERE, '..', '..', 'scripts', 'publish-privacy.sh');
 const rendered = (env) => execFileSync('bash', [SCRIPT, '--render', env], { encoding: 'utf8' });
+/** 표식 줄을 뺀 본문. 두 환경의 고지가 같은지 대조할 때 쓴다. */
+const withoutMarkers = (body) => body.split('\n').filter((line) => !line.includes('staging-only')).join('\n');
 
 test('staging-only 표식은 짝이 맞고 각자 한 줄을 차지한다 (KAN-239)', () => {
   // 스크립트는 줄 단위로 자른다. 표식이 다른 내용과 한 줄에 있거나 짝이 안 맞으면 prod 본문의
-  // 뒷부분이 통째로 잘리거나 고지가 prod에 샌다.
+  // 뒷부분이 통째로 잘리거나 고지가 prod에 샌다. 블록이 비어 있어도 표식은 남겨 자르는 경로를 계속 돌린다.
   const lines = html.split('\n');
   const begins = lines.filter((line) => line.includes('staging-only:begin'));
   const ends = lines.filter((line) => line.includes('staging-only:end'));
@@ -366,25 +378,245 @@ test('staging-only 표식은 짝이 맞고 각자 한 줄을 차지한다 (KAN-2
   }
 });
 
-test('prod 본문에는 학습 수집 고지가 없고 음성 미보존 문구가 그대로다 (KAN-239, FR-DP-01)', () => {
+test('prod 본문은 표식 없이 끝까지 게시되고 옛 staging 고지가 없다 (KAN-239 -> KAN-269)', () => {
   const prod = rendered('prod');
   assert.ok(!prod.includes('staging-only'), 'prod 본문에 표식이 남았다');
-  assert.ok(!prod.includes('내부 테스트 환경'), 'prod 본문에 staging 고지가 새었다');
-  assert.ok(prod.includes('음성은 데이터베이스나 S3 같은 영속 저장소에 저장하지 않습니다'), 'prod 본문의 음성 미보존 문구가 없다');
+  assert.ok(!prod.includes('내부 테스트 환경'), 'prod 본문에 옛 staging 고지가 새었다');
   assert.ok(prod.includes('</html>'), 'prod 본문 뒷부분이 잘렸다');
 });
 
-test('staging 본문은 학습 수집의 목적과 대상과 기간을 적는다 (KAN-239)', () => {
+test('두 환경의 게시 본문이 같다 - 음성 고지에 환경별 차이가 없다 (KAN-269)', () => {
+  // 음성 저장은 두 환경이 같은 선택 동의로 한다. staging에만 붙는 고지가 다시 생기면 prod와 다른
+  // 약속을 하게 되므로, 블록을 다시 채울 때는 이 테스트를 고치면서 그 이유를 적는다.
   const staging = rendered('staging');
-  // 본문은 줄바꿈으로 감싸여 있어 낱말 사이 공백을 하나로 접어 대조한다.
-  const notice = staging.slice(staging.indexOf('staging-only:begin'), staging.indexOf('staging-only:end'))
-    .replace(/\s+/g, ' ');
-  assert.ok(notice.includes('학습'), '목적(모델 재학습)이 없다');
-  assert.ok(notice.includes('동의한 테스터 계정'), '대상(동의한 테스터 계정)이 없다');
-  assert.ok(notice.includes('로그인하지 않은 응시'), '익명 응시를 보관하지 않는다는 문구가 없다');
-  assert.ok(notice.includes('보유 기간이 끝나는 날'), '보관 기간이 없다');
-  assert.ok(notice.includes('가명'), '세션 가명화 문구가 없다');
-  assert.ok(notice.includes('철회'), '철회 방법이 없다');
+  assert.equal(withoutMarkers(staging), rendered('prod'), 'staging 본문이 prod 본문과 다르다');
+  for (const stale of ['내부 테스트 환경', '동의한 테스터 계정', '가명 값', '보유 기간이 끝나는 날']) {
+    assert.ok(!staging.includes(stale), `KAN-239 시절의 staging 고지가 남아 있다: ${stale}`);
+  }
+});
+
+// ── 음성 저장과 학습 활용의 선택 동의 (KAN-269) ────────────────────────────────
+// 선택 동의한 응시의 음성은 두 환경 모두 음성 전용 S3 버킷에 남는다. 「음성은 저장하지 않는다」가 조건 없이
+// 남으면 거짓 고지이고, 반대로 선택 동의 절이 빠지면 수집을 고지하지 않은 것이 된다. 양쪽을 붙든다.
+
+/** 본문에서 선택 동의 절만 자른 것. 줄바꿈으로 접힌 문장을 대조하려고 공백을 하나로 누른다. */
+function voiceConsentSection(body) {
+  const from = body.indexOf('<h3>음성 저장과 AI 모델 학습 활용 (선택 동의)</h3>');
+  const to = body.indexOf('<h3>선택 동의하지 않으신 경우에 남기는 분석 정보</h3>');
+  assert.ok(from >= 0 && to > from, '선택 동의 절을 찾지 못했다');
+  return body.slice(from, to).replace(/\s+/g, ' ');
+}
+
+test('prod 본문에 음성 저장 선택 동의 절이 있고 대상, 항목, 장소, 기간, 철회를 적는다 (KAN-269)', () => {
+  const consent = voiceConsentSection(rendered('prod'));
+  // 선택 동의이고 거부해도 불이익이 없다.
+  assert.ok(consent.includes('선택 동의'), '선택 동의라는 말이 없다');
+  assert.ok(consent.includes('필수 동의와 별개'), '필수 동의와 별개라는 말이 없다');
+  assert.ok(consent.includes('서비스 이용에는 아무런 제한이 없습니다'), '거부해도 제한이 없다는 말이 없다');
+  // 대상은 웹과 앱 모두이고, 웹에는 다른 나이 확인이 없어 동의 문안이 만 14세 이상 확인을 겸한다.
+  assert.ok(consent.includes('브라우저 웹과 앱'), '대상(웹과 앱)이 없다');
+  assert.ok(consent.includes('만 14세 이상임을 확인'), '만 14세 이상 확인이 없다');
+  // 저장 항목. 라벨 파일의 필드가 늘면 여기와 본문을 함께 늘린다.
+  for (const item of [
+    'WAV', '분석 작업 식별자', '세션 식별자', '문항 식별자', '출신 지역', '식별 키', '테스트 버전', '채점 버전',
+    '음성 길이', '최종 상태', '억양 원점수', '음질 판정 코드', '모델 버전', 'AI 채점 버전', '오류 코드',
+    '추적용 식별자', '동의하신 문안의 버전과 동의 시각', '저장 시각',
+  ]) {
+    assert.ok(consent.includes(item), `선택 동의 절의 저장 항목에 「${item}」이 없다`);
+  }
+  // 식별자는 가명화하지 않는다 (KAN-239의 가명화를 되돌린 상태다).
+  assert.ok(consent.includes('가명으로 바꾸지 않고 그대로 저장'), '식별자를 그대로 저장한다는 말이 없다');
+  // 앱 계정의 연결 기록은 세션 만료와 탈퇴 뒤에도 남는다.
+  assert.ok(consent.includes('연결 기록'), '계정과 음성의 연결 기록이 없다');
+  assert.ok(consent.includes('탈퇴하신 뒤에도 남습니다'), '연결 기록이 탈퇴 뒤에도 남는다는 말이 없다');
+  // 웹 익명 세션은 만료 뒤 개별 삭제 요청을 맞출 수 없다.
+  assert.ok(consent.includes('개별 삭제 요청'), '웹 세션 만료 뒤의 개별 삭제 요청 한계가 없다');
+  // 장소와 보호 조치.
+  assert.ok(consent.includes('서울 리전(ap-northeast-2)'), '보관 리전이 없다');
+  assert.ok(consent.includes('Amazon S3'), '보관 장소(S3)가 없다');
+  assert.ok(consent.includes('버전 기록'), '버전 기록이 없다');
+  assert.ok(consent.includes('암호화'), '저장 시 암호화가 없다');
+  assert.ok(consent.includes('HTTPS'), 'HTTPS 전용이 없다');
+  assert.ok(consent.includes('모델 학습 담당자'), '읽기 권한 제한이 없다');
+  // 기간과 철회.
+  assert.ok(consent.includes('학습 목적 달성 시까지'), '보유 기간이 없다');
+  assert.ok(consent.includes('철회'), '철회 방법이 없다');
+  assert.ok(consent.includes('13항'), '이미 저장된 음성의 처리 요청처(13항)가 없다');
+});
+
+test('「음성을 저장하지 않는다」는 선택 동의를 하지 않은 경우로 한정돼 있다 (KAN-269)', () => {
+  // 두 환경 모두 본다. 조건 없는 미보존 문장이 한 자리라도 남으면 동의한 사람에게는 거짓 고지다.
+  for (const env of ['prod', 'staging']) {
+    const flat = rendered(env).replace(/\s+/g, ' ');
+    assert.ok(
+      flat.includes('동의하지 않으신 경우, 음성은 데이터베이스나 S3 같은 영속 저장소에 저장하지 않습니다'),
+      `${env}: 미보존 문구가 선택 동의 조건에 묶여 있지 않다`,
+    );
+    for (const unconditional of [
+      '<p> 음성은 데이터베이스나 S3 같은 영속 저장소에 저장하지 않습니다',
+      '<p> 녹음한 음성은 억양을 분석해 점수를 매기는 데에만 씁니다',
+      '<li>음성: 분석이 끝나는 즉시 삭제',
+      '같은 내용을 말합니다. 녹음한 음성은 점수를 매기는 그 순간에만 쓰고 곧바로 지웁니다',
+      '음성은 서비스 서버와 분석 서버(모두 저희가 운영합니다)의 메모리와 임시 파일로만 흐르고',
+    ]) {
+      assert.ok(!flat.includes(unconditional), `${env}: 조건 없는 음성 미보존 문장이 남아 있다: ${unconditional}`);
+    }
+  }
+});
+
+test('선택 동의가 5, 6, 7, 11, 12항에도 반영돼 있다 (KAN-269)', () => {
+  const disposal = section('<h2>5. 개인정보의 파기', '<h2>6. 정보주체의 권리').replace(/\s+/g, ' ');
+  assert.ok(disposal.includes('학습 목적 달성 시까지'), '5항에 선택 동의 음성의 보유 기간이 없다');
+  assert.ok(disposal.includes('자동 만료는 두지 않습니다'), '5항에 자동 만료가 없다는 말이 없다');
+
+  const rights = section('<h2>6. 정보주체의 권리', '<h2>7. 만 14세 미만').replace(/\s+/g, ' ');
+  assert.ok(rights.includes('선택 동의는 언제든 철회하실 수 있습니다'), '6항에 선택 동의 철회가 없다');
+
+  const children = section('<h2>7. 만 14세 미만', '<h2>8. 개인정보 자동 수집 장치').replace(/\s+/g, ' ');
+  assert.ok(children.includes('선택 동의 문안에는 본인이 만 14세 이상임을 확인'), '7항에 웹의 연령 확인 방식이 없다');
+
+  const safety = section('<h2>11. 개인정보의 안전성 확보 조치', '<h2>12. 동의를 받는 방식').replace(/\s+/g, ' ');
+  assert.ok(safety.includes('선택 동의로 보관하는 음성'), '11항에 보관 음성의 보호 조치가 없다');
+
+  const consent = section('<h2>12. 동의를 받는 방식', '<h2>13. 개인정보 보호책임자').replace(/\s+/g, ' ');
+  assert.ok(consent.includes('별도의 선택 동의'), '12항에 음성 선택 동의를 받는 방식이 없다');
+});
+
+// ── 웹의 출신 지역 수집과 로그인 없는 앱 판 (KAN-274) ──────────────────────────────
+// 웹의 출신 지역 선택 화면이 두 환경에 늘 서게 됐고(빌드 스위치 제거), 앱의 첫 스토어 심사 빌드는 로그인을 끈
+// 익명 모드다 (App 레포 KAN-270의 LOGIN_ENABLED). 방침이 「앱은 로그인한 계정으로 이용한다」만 말하면 그
+// 빌드의 이용자에게는 거짓 고지가 되므로, 익명 앱의 처리가 서야 하는 자리(머리말, 1, 6, 7, 12항)를 붙든다.
+// 그리고 익명 세션은 음성 저장에 동의하지 않아도 음성 없이 분석 정보(점수와 출신 지역)를 남긴다
+// (S3TrainingSampleStore의 라벨 전용 저장). 지역도 그래서 동의와 무관하게 모두에게 묻는다.
+
+test('테스트 세션 절에 웹에서 출신 지역을 묻는다는 사실과 목적이 적혀 있다 (KAN-274)', () => {
+  const session = section('<h3>테스트 세션</h3>', '<h3>계정 (앱 소셜 로그인)</h3>').replace(/\s+/g, ' ');
+  // 웹과 익명 앱 모두 동의와 무관하게 묻는다 (App 레포 App.tsx의 IntroRoute, needsAnonymousRegion).
+  assert.ok(
+    session.includes('브라우저 웹과 로그인 없이 이용하는 앱에서는 응시를 시작하기 전에 출신 지역'),
+    '웹과 익명 앱이 응시 전에 출신 지역을 묻는다는 사실이 없다',
+  );
+  assert.ok(session.includes('선택 동의 여부와 관계없이 여쭙니다'), '지역을 동의와 무관하게 묻는다는 말이 없다');
+  assert.ok(session.includes('고르신 값을 세션에 기록합니다'), '고른 지역을 세션에 기록한다는 말이 없다');
+  // 목적 문구는 계정 절의 출신 지역 항목과 같아야 한다 - 같은 값을 두 절이 다른 목적으로 말하면 안 된다.
+  const purpose = '출신 지역별 응시자 구성 파악과 억양 분석 개선';
+  assert.ok(session.includes(purpose), '테스트 세션 절에 출신 지역의 목적이 없다');
+  const account = section('<h3>계정 (앱 소셜 로그인)</h3>', '<h3>익명 통계</h3>').replace(/\s+/g, ' ');
+  assert.ok(account.includes(purpose), '계정 절의 출신 지역 목적 문구가 바뀌었다 - 두 절을 함께 맞춘다');
+  // 1항 표의 테스트 세션 행도 본문과 같은 목적을 말한다.
+  const table = section('<h2>1. 개인정보의 처리 목적', '<h3>음성 녹음</h3>').replace(/\s+/g, ' ');
+  assert.ok(table.includes(`${purpose}(출신 지역에 한함)`), '1항 표의 테스트 세션 행 목적에 출신 지역의 목적이 없다');
+});
+
+test('로그인 없이 이용하는 앱 판의 처리가 적혀 있다 (KAN-274, App KAN-270 익명 모드)', () => {
+  const flat = html.replace(/\s+/g, ' ');
+  // 머리말: 앱에 두 판이 있고, 로그인 없는 판은 웹처럼 익명 세션이다.
+  assert.ok(flat.includes('로그인 없이 이용하는 판과 로그인해 이용하는 판이 있습니다'), '머리말에 앱의 두 판이 없다');
+  assert.ok(flat.includes('계정 없는 익명 세션 하나로 처리됩니다'), '로그인 없는 앱의 응시가 익명 세션이라는 말이 없다');
+  assert.ok(flat.includes('계정에 관한 내용은 로그인해 이용하는 판에만 적용됩니다'), '계정 고지의 적용 범위가 없다');
+
+  // 선택 동의 절: 동의를 기기에 저장하고 세션마다 기록한다 (AnonymousVoiceConsentStore), 철회는 설정 화면에서
+  // 하고 다음 테스트부터 적용된다 (익명 세션의 동의는 세션 생성 때 고정된다).
+  const consent = voiceConsentSection(html);
+  assert.ok(consent.includes('앱을 설치한 기기에 저장'), '익명 앱의 동의를 기기에 저장한다는 말이 없다');
+  assert.ok(consent.includes('세션마다 동의 사실을 기록'), '익명 앱이 세션마다 동의를 기록한다는 말이 없다');
+  assert.ok(consent.includes('앱의 설정 화면에서 철회'), '익명 앱의 철회 방법이 없다');
+  assert.ok(consent.includes('그 뒤에 시작하시는 테스트부터 적용'), '익명 앱의 철회가 다음 테스트부터라는 말이 없다');
+
+  // 테스트 세션 절: 익명 앱은 지역을 한 번 묻고 기기에 저장해 다음 세션에도 싣는다 (AnonymousVoiceConsentStore.saveRegion).
+  const session = section('<h3>테스트 세션</h3>', '<h3>계정 (앱 소셜 로그인)</h3>').replace(/\s+/g, ' ');
+  assert.ok(session.includes('브라우저 웹과 로그인 없이 이용하는 앱의 세션은 익명'), '익명 앱의 세션이 익명이라는 말이 없다');
+  assert.ok(session.includes('로그인 없이 이용하는 앱은 처음 한 번 여쭌 뒤 고르신 값을 앱을 설치한 기기에 저장'), '익명 앱이 지역을 기기에 저장한다는 말이 없다');
+
+  // 계정 절은 로그인하는 판에만 적용된다.
+  const account = section('<h3>계정 (앱 소셜 로그인)</h3>', '<h3>익명 통계</h3>').replace(/\s+/g, ' ');
+  assert.ok(account.includes('이 절은 로그인해 이용하는 앱에만 적용됩니다'), '계정 절의 적용 범위가 없다');
+
+  // 6항: 익명 앱도 세션 만료 뒤에는 개별 삭제 요청을 맞출 수 없다.
+  const rights = section('<h2>6. 정보주체의 권리', '<h2>7. 만 14세 미만').replace(/\s+/g, ' ');
+  assert.ok(rights.includes('브라우저 웹이나 로그인 없이 이용하는 앱에서 동의하신 경우'), '6항에 익명 앱의 개별 삭제 한계가 없다');
+
+  // 7항: 익명 앱에는 계정이 없어 나이를 묻지 않는다.
+  const children = section('<h2>7. 만 14세 미만', '<h2>8. 개인정보 자동 수집 장치').replace(/\s+/g, ' ');
+  assert.ok(children.includes('브라우저 웹과 로그인 없이 이용하는 앱에는 계정이 없어 나이를 묻지 않습니다'), '7항에 익명 앱의 연령 확인 방식이 없다');
+
+  // 12항: 익명 앱에는 가입 동의 화면이 없다.
+  const method = section('<h2>12. 동의를 받는 방식', '<h2>13. 개인정보 보호책임자').replace(/\s+/g, ' ');
+  assert.ok(method.includes('브라우저 웹과 로그인 없이 이용하는 앱은 아래의 선택 동의를 하지 않으시면'), '12항에 익명 앱의 동의 방식이 없다');
+});
+
+test('선택 동의하지 않은 익명 응시의 분석 정보 보관이 적혀 있다 (KAN-274, S3TrainingSampleStore.saveLabelOnly)', () => {
+  const flat = html.replace(/\s+/g, ' ');
+  assert.ok(html.includes('<h3>선택 동의하지 않으신 경우에 남기는 분석 정보</h3>'), '분석 정보 보관 절이 없다');
+  const labels = section('<h3>선택 동의하지 않으신 경우에 남기는 분석 정보</h3>', '<h3>테스트 세션</h3>').replace(/\s+/g, ' ');
+  // 대상은 익명 세션(웹, 로그인 없는 앱)이고 음성은 남기지 않는다.
+  assert.ok(labels.includes('브라우저 웹과 로그인 없이 이용하는 앱'), '대상(웹과 로그인 없는 앱)이 없다');
+  assert.ok(labels.includes('음성 녹음은 남기지 않으며'), '음성을 남기지 않는다는 말이 없다');
+  assert.ok(labels.includes('억양 분석 AI 모델을 개선하고 출신 지역별 응시자 구성을 파악'), '목적이 없다');
+  // 라벨 JSON의 필드. 필드가 늘면 여기와 본문을 함께 늘린다. 동의 버전과 동의 시각은 이 건에는 없다.
+  for (const item of [
+    '분석 작업 식별자', '세션 식별자', '문항 식별자', '출신 지역', '식별 키', '테스트 버전', '채점 버전',
+    '음성 길이', '최종 상태', '억양 원점수', '음질 판정 코드', '모델 버전', 'AI 채점 버전', '오류 코드',
+    '추적용 식별자', '저장 시각',
+  ]) {
+    assert.ok(labels.includes(item), `분석 정보 절의 항목에 「${item}」이 없다`);
+  }
+  assert.ok(!labels.includes('동의하신 문안의 버전'), '동의하지 않은 건에 동의 버전을 남긴다고 적혀 있다');
+  assert.ok(labels.includes('가명으로 바꾸지 않고 그대로 저장'), '식별자를 그대로 저장한다는 말이 없다');
+  assert.ok(labels.includes('개별 삭제 요청'), '세션 만료 뒤의 개별 삭제 요청 한계가 없다');
+  // 한계에는 예외가 있다 (Codex 리뷰 P2). 후기에 이메일을 적어 보낸 응시는 session_feedback이 세션 식별자와
+  // 이메일을 1년 동안 함께 들고 있어(SessionFeedback.java) 세션이 지워진 뒤에도 그 분석 정보를 찾을 수 있다.
+  // 「어느 분의 것인지 알 수 없다」만 적으면 그 응시자에게는 거짓 고지다.
+  assert.ok(labels.includes('후기에 함께 남는 세션 식별자로 해당 정보를 찾을 수 있습니다'), '후기 이메일로 이어지는 경우의 예외가 없다');
+  assert.ok(labels.includes('Amazon S3'), '보관 장소가 없다');
+  assert.ok(labels.includes('음성과 구분된 위치'), '음성과 구분된 위치에 둔다는 말이 없다');
+  assert.ok(labels.includes('학습 목적 달성 시까지'), '보유 기간이 없다');
+  // 계정 세션은 동의하지 않으면 아무것도 남기지 않는다 (HttpAnalysisDispatcher.keepTrainingSample).
+  assert.ok(labels.includes('로그인해 이용하는 앱에서는 선택 동의하지 않으시면 이 분석 정보를 남기지 않습니다'), '계정 세션 제외가 없다');
+
+  // 다른 자리의 문장이 이 보관과 어긋나지 않는다: 24시간 삭제의 예외, 5항 파기, 12항.
+  const session = section('<h3>테스트 세션</h3>', '<h3>계정 (앱 소셜 로그인)</h3>').replace(/\s+/g, ' ');
+  assert.ok(session.includes('그 절에 적은 대로 따로 보관합니다'), '24시간 삭제 문장에 분석 정보 보관의 예외가 없다');
+  const disposal = section('<h2>5. 개인정보의 파기', '<h2>6. 정보주체의 권리').replace(/\s+/g, ' ');
+  assert.ok(disposal.includes('선택 동의하지 않으신 익명 응시(브라우저 웹, 로그인 없이 이용하는 앱)의 분석 정보'), '5항에 분석 정보의 보유가 없다');
+  const method = section('<h2>12. 동의를 받는 방식', '<h2>13. 개인정보 보호책임자').replace(/\s+/g, ' ');
+  assert.ok(method.includes('선택 동의를 하지 않으셔도 음성 없이 남기는 분석 정보'), '12항에 분석 정보 보관의 안내가 없다');
+  // 동의한 익명 세션의 음성에도 같은 예외가 적혀 있다.
+  assert.ok(
+    voiceConsentSection(html).includes('후기에 함께 남는 세션 식별자로 해당 음성을 찾을 수 있습니다'),
+    '선택 동의 절에 후기 이메일로 이어지는 경우의 예외가 없다',
+  );
+  // 이용 후기 절이 후기에 세션 식별자가 남는다는 사실을 적는다 (session_feedback.session_id).
+  const feedback = section('<h3>이용 후기</h3>', '<h3>접속 정보와 서버 로그</h3>').replace(/\s+/g, ' ');
+  assert.ok(feedback.includes('후기를 쓰신 세션의 식별자'), '이용 후기 절에 세션 식별자가 함께 남는다는 말이 없다');
+  // 1항 표의 이용 후기 행도 같은 사실을 적는다 - 표와 본문이 갈리면 안 된다 (검증 리뷰 지적).
+  const table = section('<h2>1. 개인정보의 처리 목적', '<h3>음성 녹음</h3>').replace(/\s+/g, ' ');
+  assert.ok(/<td>이용 후기<\/td>.*?후기를 쓰신 세션의 식별자/.test(table), '1항 표의 이용 후기 행에 세션 식별자가 없다');
+  // 6항이 「찾아 드릴 수 없다」를 예외 없이 말하지 않는다 - 후기 이메일로 이어지는 경우를 함께 적는다.
+  const rights6 = section('<h2>6. 정보주체의 권리', '<h2>7. 만 14세 미만').replace(/\s+/g, ' ');
+  assert.ok(rights6.includes('이용 후기에 답변 받을 이메일 주소를 적어 보내신 경우만 예외'), '6항의 익명 응시 문단에 후기 이메일의 예외가 없다');
+  assert.ok(rights6.includes('같은 응시에서 따로 보관한 음성이나 분석 정보가 있으면 함께 요청하실 수 있고'), '6항에 후기 이메일로 음성과 분석 정보를 요청하는 방법이 없다');
+  // 재응시의 즉시 삭제가 따로 보관하는 음성과 분석 정보까지 지운다고 읽히지 않는다.
+  const session2 = section('<h3>테스트 세션</h3>', '<h3>계정 (앱 소셜 로그인)</h3>').replace(/\s+/g, ' ');
+  assert.ok(session2.includes('따로 보관하는 음성과 분석 정보는 이때 삭제되지 않습니다'), '재응시의 즉시 삭제 문장에 보관 정보의 예외가 없다');
+  // 위탁 표의 AWS 업무에 분석 정보 저장이 들어 있다.
+  const trust = section('<h2>3. 개인정보 처리의 위탁', '<h2>4. 개인정보의 국외 이전').replace(/\s+/g, ' ');
+  assert.ok(trust.includes('선택 동의하지 않으신 익명 응시의 분석 정보 저장소'), '3항 위탁 표에 분석 정보 저장이 없다');
+  // 음성 미보존 문장은 그대로다 - 남기는 것은 분석 정보이지 음성이 아니다.
+  assert.ok(flat.includes('동의하지 않으신 경우, 음성은 데이터베이스나 S3 같은 영속 저장소에 저장하지 않습니다'), '음성 미보존 문장이 사라졌다');
+});
+
+test('앱이 로그인으로만 이용된다는 문장이 남아 있지 않다 (KAN-274)', () => {
+  // 첫 스토어 심사 빌드에는 로그인이 없다. 조건 없는 문장이 한 자리라도 남으면 그 빌드의 이용자에게 거짓 고지다.
+  const flat = html.replace(/\s+/g, ' ');
+  for (const sentence of [
+    '앱(Android, iOS)은 구글, 카카오, 네이버, 애플(iOS만) 중 하나로 로그인한 계정으로 이용합니다',
+    '<p> 앱은 구글, 카카오, 네이버, 애플(iOS만) 중 하나로 로그인해 이용합니다',
+    '<p> 앱은 처음 로그인할 때 이 방침에 대한 동의를 받습니다',
+    '브라우저 웹의 세션은 익명이고, 앱의 세션은 아래 「계정」에 적은 대로 계정에 연결됩니다',
+  ]) {
+    assert.ok(!flat.includes(sentence), `앱이 로그인으로만 이용된다는 문장이 남아 있다: ${sentence}`);
+  }
 });
 
 // ── 계정 PII (KAN-240) ───────────────────────────────────────────────────────
@@ -408,7 +640,9 @@ test('1항에 계정 절이 있고 수집 항목과 목적과 보유 기간을 �
   assert.ok(html.includes('<h3>계정 (앱 소셜 로그인)</h3>'), '1항 아래 「계정」 절이 없다');
   const account = section('<h3>계정 (앱 소셜 로그인)</h3>', '<h3>익명 통계</h3>').replace(/\s+/g, ' ');
   // app_user의 열 전부다. 열이 늘면 여기와 본문을 함께 늘린다.
-  for (const item of ['이메일', '이름', '생년월일', '성별', '출신 지역', '닉네임', '프로필 이미지', '식별값', '동의하신 시각과 방침 버전']) {
+  for (const item of ['이메일', '이름', '생년월일', '성별', '출신 지역', '닉네임', '프로필 이미지', '식별값', '동의하신 시각과 방침 버전',
+    // V6__voice_consent.sql의 세 열 (KAN-269).
+    '음성 저장 선택 동의 기록']) {
     assert.ok(account.includes(item), `계정 절에 「${item}」이 없다`);
   }
   assert.ok(account.includes('탈퇴하실 때까지'), '계정 절에 보유 기간(탈퇴까지)이 없다');

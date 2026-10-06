@@ -84,7 +84,7 @@ class SchemaBaselineTest extends IntegrationTest {
     /**
      * 운영 마이그레이션은 재베이스라인 V1과 그 뒤의 새 번호뿐이어야 한다 - 옛 번호(V2~V12의 옛 내용)가 되살아나면
      * 재베이스라인 뒤의 기존 DB(baseline 1만 기록)에는 그것이 "적용 안 된 마이그레이션"으로 보여 기동 시 실행되고,
-     * 이미 있는 테이블을 다시 만들다 실패한다. V2는 재베이스라인 뒤 첫 새 마이그레이션(KAN-223 계정)이고 V3는 탈퇴의 FK 변경(KAN-241)이다.
+     * 이미 있는 테이블을 다시 만들다 실패한다. V2는 재베이스라인 뒤 첫 새 마이그레이션(KAN-223 계정)이고 V3는 탈퇴의 FK 변경(KAN-241), V4는 활성 버전 감사의 caller_ip(KAN-244), V5는 7문항 정의 gn-2026.10.1 발행(KAN-260), V6는 음성 저장 동의와 대응표(KAN-269)다.
      * 테스트 픽스처(V899~)는 test 프로파일에만 있다. 새 마이그레이션을 더하면 이 목록도 함께 늘린다.
      */
     @Test
@@ -92,8 +92,8 @@ class SchemaBaselineTest extends IntegrationTest {
         List<String> versions = jdbc.queryForList(
                 "select version from flyway_schema_history where success order by installed_rank",
                 String.class);
-        assertEquals(List.of("1", "2", "3", "899", "900", "901"), versions,
-                "운영 마이그레이션 V1~V3 뒤에는 테스트 픽스처(db/testdata)만 와야 한다");
+        assertEquals(List.of("1", "2", "3", "4", "5", "6", "899", "900", "901"), versions,
+                "운영 마이그레이션 V1~V6 뒤에는 테스트 픽스처(db/testdata)만 와야 한다");
     }
 
     /**
@@ -287,7 +287,10 @@ class SchemaBaselineTest extends IntegrationTest {
                 Map.entry("session_feedback", Set.of("pk_session_feedback",
                         "ux_session_feedback_session", "ix_session_feedback_created_at")),
                 // KAN-223 계정 (V2) - 계정 식별 키 (provider, provider_user_id) 유일.
-                Map.entry("app_user", Set.of("pk_app_user", "ux_app_user_provider_subject")));
+                Map.entry("app_user", Set.of("pk_app_user", "ux_app_user_provider_subject")),
+                // KAN-269 계정과 음성의 대응표 (V6) - 세션마다 한 행이고, 철회와 탈퇴 때 계정으로 찾는다.
+                Map.entry("training_voice_owner", Set.of("pk_training_voice_owner",
+                        "ix_training_voice_owner_user")));
 
         Map<String, Set<String>> actual = new TreeMap<>();
         jdbc.query("select tablename, indexname from pg_indexes"

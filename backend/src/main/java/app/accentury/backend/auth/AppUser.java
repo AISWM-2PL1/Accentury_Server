@@ -86,6 +86,20 @@ public class AppUser implements Persistable<UUID> {
     @Column(name = "privacy_policy_version", nullable = false, length = 32)
     private String privacyPolicyVersion;
 
+    /**
+     * 음성 저장(학습 활용) 선택 동의의 버전 (KAN-269). null이면 한 번도 동의하지 않은 계정이다. 개인정보 동의와
+     * 별개이고, 동의하지 않아도 서비스 이용에는 제한이 없다.
+     */
+    @Column(name = "voice_consent_version", length = 32)
+    private @Nullable String voiceConsentVersion;
+
+    @Column(name = "voice_consent_at")
+    private @Nullable Instant voiceConsentAt;
+
+    /** 음성 저장 동의를 철회한 시각 - 값이 있으면 동의가 없는 것으로 본다. 버전과 동의 시각은 이력으로 남는다. */
+    @Column(name = "voice_consent_withdrawn_at")
+    private @Nullable Instant voiceConsentWithdrawnAt;
+
     @Column(name = "created_at", nullable = false)
     private Instant createdAt;
 
@@ -204,6 +218,32 @@ public class AppUser implements Persistable<UUID> {
         this.deletedAt = now;
     }
 
+    /** 음성 저장에 동의한다 (KAN-269). 철회했던 계정이 다시 동의하면 철회 시각을 지우고 새 버전과 시각으로 덮는다. */
+    void consentToVoice(String version, Instant now) {
+        this.voiceConsentVersion = version;
+        this.voiceConsentAt = now;
+        this.voiceConsentWithdrawnAt = null;
+        this.updatedAt = now;
+    }
+
+    /** 음성 저장 동의를 철회한다 - 동의한 적이 없거나 이미 철회했으면 아무것도 바꾸지 않는다 (멱등). */
+    void withdrawVoiceConsent(Instant now) {
+        if (voiceConsentVersion == null || voiceConsentWithdrawnAt != null) {
+            return;
+        }
+        this.voiceConsentWithdrawnAt = now;
+        this.updatedAt = now;
+    }
+
+    /**
+     * 지금 음성 저장 동의가 유효한가 - 동의했고, 철회하지 않았고, 탈퇴하지 않은 계정이다. 버전은 가르지 않는다:
+     * 동의 문구가 바뀌어도 이미 받은 동의는 그 버전으로 유효하고, 어느 버전인지는 라벨에 남는다.
+     */
+    public boolean hasVoiceConsent() {
+        return voiceConsentVersion != null && voiceConsentAt != null
+                && voiceConsentWithdrawnAt == null && deletedAt == null;
+    }
+
     private void markCompletionIfReady(Instant now) {
         if (profileCompletedAt == null && hasAllProfileFields()) {
             profileCompletedAt = now;
@@ -281,6 +321,14 @@ public class AppUser implements Persistable<UUID> {
 
     public String privacyPolicyVersion() {
         return privacyPolicyVersion;
+    }
+
+    public @Nullable String voiceConsentVersion() {
+        return voiceConsentVersion;
+    }
+
+    public @Nullable Instant voiceConsentAt() {
+        return voiceConsentAt;
     }
 
     /** IdP의 사용자 id - 탈퇴한 계정은 {@code deleted:<계정 id>}다. */

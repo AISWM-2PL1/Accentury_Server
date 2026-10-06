@@ -13,7 +13,7 @@ infra/
     data/             RDS PostgreSQL (KAN-122)
     fargate/          backend ECS Fargate 서비스 - 클러스터, 태스크 정의, 서비스, 실행 역할과 태스크 역할, 로그 그룹 (KAN-165), 목표 추적 오토스케일링 min 1 max 3 (KAN-168)
     ai-host/          ai 전용 EC2 - ASG, 운영 compose, 기동 스크립트, systemd 유닛, egress 가드와 health 타이머 (KAN-124, KAN-36)
-    config/           backend, ai 환경 변수의 정본인 SSM 파라미터와 시크릿 2종 (관리자 토큰, 내부 호출 토큰) (KAN-129, KAN-36)
+    config/           backend, ai 환경 변수의 정본인 SSM 파라미터와 시크릿 (관리자 토큰, 내부 호출 토큰, JWT 서명 키 - state에 값이 없는 write-only, KAN-242) (KAN-129, KAN-36)
     edge/             internal ALB(대상 그룹 ip), VPC 오리진, CloudFront, S3 (KAN-125, KAN-126)
     waf/              CloudFront 앞단 웹 ACL. us-east-1 프로바이더로 호출한다 (KAN-149)
     monitoring/       SNS 이메일과 CloudWatch 경보 12종(ALB, RDS 3종 + backend 서비스 2종 + AI 호스트 4종 + 관측성 3종), 운영 대시보드 1개 (KAN-134, KAN-165, KAN-36, KAN-38)
@@ -182,8 +182,11 @@ diff -r infra/envs/staging infra/envs/prod
 
 ### 0. bootstrap (계정에 한 번만)
 
-state 버킷은 Terraform state를 담을 곳이라 자기 자신을 원격 state로 만들 수
-없다 (닭과 달걀). 이 스택만 로컬 state로 실행한다.
+state 버킷은 Terraform state를 담을 곳이라 처음에는 자기 자신을 원격 state로 만들 수
+없다 (닭과 달걀). 그래서 처음에는 로컬 state로 만들었고, 2026-10-03(KAN-245)에 그 버킷의
+`bootstrap/terraform.tfstate`로 옮겼다 (`backend.tf`). 이제는 envs와 똑같이 `terraform init`만 하면
+원격 state를 읽는다. 버킷부터 다시 만들어야 하는 계정에서는 `backend.tf`를 잠시 빼고 로컬로 apply한 뒤
+`terraform init -migrate-state`로 되돌린다.
 
 ```
 cd infra/bootstrap
@@ -192,7 +195,10 @@ terraform plan
 terraform apply
 ```
 
-생성물: `accentury-tfstate-<account_id>` 버킷 (버전 관리, 암호화, 퍼블릭 차단),
+생성물: `accentury-tfstate-<account_id>` 버킷 (버전 관리, 암호화, 퍼블릭 차단, 이전 버전 30일 만료와
+TLS 강제 정책 - KAN-242),
+음성 전용 버킷 `accentury-voice-<account_id>` (KAN-269 - 버전 관리, 암호화, 퍼블릭 차단, 만료 규칙 없음,
+TLS 강제와 객체 읽기 주체 제한 정책. envs/*가 이 버킷에 쓰므로 bootstrap apply가 먼저다, "음성 전용 S3" 절),
 ECR 리포지토리 `accentury/backend`, `accentury/ai`, `accentury/ai-model` (IMMUTABLE,
 라이프사이클 정책: 태그 없는 이미지 1일, 최근 50개 유지), GitHub Actions OIDC 공급자
 (`token.actions.githubusercontent.com`, KAN-127 - 계정에 1개뿐이라 여기서 만든다.
@@ -201,7 +207,8 @@ envs/*의 deploy 모듈이 data 소스로 조회하므로 bootstrap apply가 먼
 대신 여기서 만든다. 없으면 envs apply의 클러스터 생성이 실패한다), Application Auto Scaling의
 ECS용 서비스 연결 역할 `AWSServiceRoleForApplicationAutoScaling_ECSService` (KAN-168 - 같은
 이유. 없으면 envs apply의 scalable target 등록이 실패한다).
-로컬에 남는 `terraform.tfstate`는 커밋하지 않는다 (.gitignore 처리 완료).
+CloudTrail trail `accentury-account-audit`과 로그 버킷 `accentury-cloudtrail-<account_id>`, GuardDuty
+detector (KAN-245, 아래 "전송 구간과 엣지 보안").
 
 배포용 리포지토리 `accentury/backend`와 `accentury/ai`는 KAN-120이 콘솔에서 먼저
 만들었다. `ecr.tf`의 import 블록이 첫 plan에서 그 둘을 state로 흡수하므로 별도
@@ -266,17 +273,16 @@ terraform apply
   aws route53 list-resource-record-sets --hosted-zone-id "$(terraform output -raw private_zone_id)" \
     --query "ResourceRecordSets[?Type=='A'].[Name,AliasTarget.DNSName]" --output table
   ```
-- 학습 데이터 S3 (KAN-201, KAN-239, staging만): 버킷이 있고 퍼블릭 액세스가 차단됐는지, 수명주기 만료일이
-  tfvars `training_retention_until`과 같은지, 버킷 정책이 붙었는지. **이 apply가 backend 코드 배포보다 먼저다** -
-  태스크 정의 secrets에 `ACCENTURY_TRAINING_CONSENTEDBUCKET`, `ACCENTURY_TRAINING_TESTERIDS`,
-  `ACCENTURY_TRAINING_PSEUDONYMKEY`가 늘어 apply가 태스크 정의를 새 리비전으로 갈고, 그 파라미터가 없으면
-  파이프라인의 리비전 등록이 실패한다 (KAN-132 교훈, "staging 전용 학습 데이터 S3" 절).
+- 음성 전용 S3 (KAN-201, KAN-269, 두 환경): 버킷은 bootstrap이 만든다 - **bootstrap apply가 이 apply보다
+  먼저다.** 여기서는 버킷이 있고 퍼블릭 액세스가 차단됐는지, 두 파라미터가 생겼는지 본다. **이 apply가 backend
+  코드 배포보다 먼저다** - 태스크 정의 secrets에 `ACCENTURY_TRAINING_BUCKET`과 `ACCENTURY_TRAINING_KEYPREFIX`가
+  늘어 apply가 태스크 정의를 새 리비전으로 갈고, 그 파라미터가 없으면 파이프라인의 리비전 등록이 실패한다
+  (KAN-132 교훈, "음성 전용 S3" 절).
 
   ```
-  B="$(terraform output -raw training_bucket)"
-  aws s3api get-public-access-block --bucket "$B"
-  aws s3api get-bucket-lifecycle-configuration --bucket "$B" --query 'Rules[].Expiration.Date'
-  aws s3api get-bucket-policy --bucket "$B" --query Policy --output text | jq '.Statement[].Sid'
+  aws s3api get-public-access-block --bucket "$(terraform output -raw training_bucket)"
+  aws s3api get-bucket-versioning --bucket "$(terraform output -raw training_bucket)"      # Status = Enabled
+  aws ssm get-parameters-by-path --path /accentury/staging --query "Parameters[?contains(Name, 'TRAINING')].[Name,Value]" --output table
   ```
 
 ### 2. prod
@@ -350,7 +356,7 @@ prod의 required reviewers(승인 게이트, KAN-128)도 environment 설정이�
 변수 4개는 환경 apply 출력에서 채운다 (재구축으로 배포 ID나 역할 ARN이 바뀌면 다시).
 `APP_DOMAIN`은 이미지 파이프라인의 E2E 스모크 대상이다 (KAN-128). 같은 값을 두 레포에
 넣는다 - `gh variable set`에 `-R AISWM-2PL1/Accentury_Server`와 `-R AISWM-2PL1/Accentury_App`을
-각각 준다. 웹 배포 전용 변수(REGION_SELECT, ADSENSE_*, GA4_*, STORE_LISTING_READY,
+각각 준다. 웹 배포 전용 변수(ADSENSE_*, GA4_*, STORE_LISTING_READY,
 DEPLOY_PAUSED)는 Accentury_App에만 있다.
 
 ```
@@ -399,6 +405,30 @@ prod의 승인 게이트는 GitHub environment `prod`의 **required reviewers**�
 reviewers에 팀원을 넣으면 Release 병합이 만든 실행이 승인 전까지 `deploy` job에서
 멈춘다. 이미지와 웹 배포가 같은 environment라 둘 다 승인을 기다린다. 코드가 아니라
 저장소 설정이므로 레포에는 남지 않는다 - 새 저장소에서는 다시 켠다.
+
+### Actions SHA 고정, 베이스 이미지 digest 고정, Dependabot (KAN-246)
+
+워크플로의 `uses:`는 전부 `<40자 commit SHA> # v버전` 형식이고, Dockerfile의 베이스 이미지는
+`태그@sha256:<digest>` 형식이다. 태그는 주인이 다른 커밋으로 옮길 수 있어서, 태그로 두면 남의 저장소가 뚫렸을 때
+바뀐 코드가 우리 배포 역할(`id-token: write`)을 쥔 채 돈다 (2025년 tj-actions 사례). SHA와 digest는 옮길 수 없다.
+
+| 대상 | 고정 방식 | 갱신 |
+| --- | --- | --- |
+| `.github/workflows/*.yml`의 `uses:` 7종 | commit SHA, 뒤 주석에 버전 | Dependabot `github-actions` |
+| `backend/Dockerfile`(`eclipse-temurin:25-jdk`, `25-jre`), `ai/Dockerfile.fake`(`python:3.12-slim`) | 멀티 아키텍처 인덱스 digest - 로컬(arm64)과 CI(amd64)가 같은 줄로 빌드한다 | Dependabot `docker` |
+| `ai/Dockerfile`의 베이스(`accentury/ai-model`) | ECR 불변 태그 (모델 해시) | 대상 아님 - "모델 교체" 절 |
+| `ai/requirements.lock` | 버전과 해시 | 사람이 다시 만든다 (`ai/README.md` "의존성 잠금") |
+
+고정한 값은 저절로 움직이지 않으므로 Dependabot(`.github/dependabot.yml`)이 **월 1회, 생태계마다 PR 하나**로
+갱신을 올린다. 그 PR의 브랜치명은 `dependabot/...`으로 고정이라, 브랜치 네이밍 검사(`branch-name.yml`)는 PR을
+연 계정이 `dependabot[bot]`일 때만 그 접두사를 통과시킨다. 병합하면 여느 Dev 병합처럼 staging 파이프라인이 돈다.
+
+워크플로에 새 action을 더하거나 손으로 올릴 때는 태그가 가리키는 commit SHA를 받아 적는다:
+
+```
+gh api repos/actions/checkout/commits/v4 --jq .sha            # uses: actions/checkout@<SHA> # v4.x.y
+docker buildx imagetools inspect python:3.12-slim --format '{{json .Manifest.Digest}}'   # FROM python:3.12-slim@<digest>
+```
 
 ## App Link 검증 파일 (KAN-32)
 
@@ -796,9 +826,9 @@ ai 호스트는 무상태이고 내부 ALB 뒤의 ASG(min 1, max 3)다 (아래 "
 `ai-health-metric.sh`)를 **부팅 자산 버킷에서 내려받은 뒤**(KAN-38, 아래 "부팅 자산 버킷") systemd
 유닛 `accentury.service`를 놓는다. 두 환경의 호스트 구성은 완전히 같고, 환경별 값은 전부 SSM
 Parameter Store에서 온다. compose 파일이나 스크립트를 고치면 user_data가 바뀌어 **인스턴스가
-교체된다** (시작 템플릿 새 버전 + ASG instance refresh). 그래도 되는 이유가 무상태다. 1대일 때는 교체 동안
-분석만 끊기고 backend 회로가 열렸다 닫히며, 2대 이상이면 최소 1대가 남는다(instance refresh
-min_healthy 50%). user_data는 raw 16KB 상한이 있어 ai-host 모듈의 precondition이 plan에서 크기를 검사한다.
+교체된다** (시작 템플릿 새 버전 + ASG instance refresh). 그래도 되는 이유가 무상태다. 교체는 새 인스턴스를 먼저
+띄우고 옛 인스턴스를 나중에 종료하는 순서라 1대일 때도 분석이 끊기지 않는다 (instance refresh min_healthy 100%,
+max_healthy 200%, KAN-246. 아래 "AI 호스트 AMI 갱신"). user_data는 raw 16KB 상한이 있어 ai-host 모듈의 precondition이 plan에서 크기를 검사한다.
 
 ### 내부 ALB와 오토스케일링 (KAN-201)
 
@@ -809,6 +839,12 @@ backend 쪽은 무변경이다 - `ACCENTURY_ANALYSIS_AIBASEURL`(`http://ai.accen
 `dispatch-concurrency` 1도 그대로다. 동시성은 backend 태스크 수에서 온다(태스크당 1건, 최대 3, 롤링 배포 중
 6)이고 ALB가 그 호출을 빈 인스턴스로 나눈다.
 
+**2026-10-06에 이 전제가 틀린 것으로 드러났다 (KAN-272).** prod는 backend 태스크가 1개로 유지되므로
+(backend 오토스케일링은 요청 수 기준이라 분석이 밀려도 늘지 않는다) 동시 호출이 늘 1건이었고, AI가 2대로
+늘어도 2번째는 일을 받지 못했다. 응시가 몰린 14:52부터 진행 중 분석이 19건까지 쌓이는 동안 AI의 lock 대기는
+0초였고 분당 완료는 7건을 넘지 못했다. 그래서 `dispatch-concurrency`를 AI 최대 대수와 같은 3으로 올렸고
+(태스크 하나가 동시에 3건을 보낸다), 확대 판정도 2분 연속에서 1분으로 줄였다.
+
 | 항목 | 값 | 근거 |
 | --- | --- | --- |
 | ASG | min 1, max `ai_max_size`(3), 초기 desired 1 | 평시 1대. 계정 vCPU 쿼터(256)로는 64대까지 되므로 이 값은 비용 상한이다 |
@@ -817,7 +853,7 @@ backend 쪽은 무변경이다 - `ACCENTURY_ANALYSIS_AIBASEURL`(`http://ai.accen
 | ALB idle timeout | 90초 | backend 읽기 타임아웃(ai-timeout 85초)보다 길어야 한다. 기본 60초면 긴 추론이 504로 끊긴다 |
 | 등록 해제 지연 | 90초 | 빠지는 인스턴스의 진행 중 추론(AI 상한 75초)이 끝날 시간 |
 | ASG 상태 검사 | ELB, 유예 900초 | 첫 부팅(docker 설치 + 이미지 7GB pull + 모델 적재)이 실측 3분 20초 - 파이프라인의 healthy 대기(600초)에 pull을 더한 여유다 |
-| 확대 | `accentury.analysis.processing.value` Maximum >= 6, 1분 x 2회 -> +1, 워밍업 600초 | backend의 폴링 혼잡 임계치와 같은 지점. CPU는 추론 1건이 10초라 밀림보다 늦다 |
+| 확대 | `accentury.analysis.processing.value` Maximum >= 6, 1분 x 1회 -> +1, 워밍업 600초 | backend의 폴링 혼잡 임계치와 같은 지점. CPU는 추론 1건이 10초라 밀림보다 늦다. 판정은 KAN-272에서 2회 연속에서 1회로 줄였다 - 한 사람이 5문항을 연달아 올려도 5건이라 6에 닿지 않는다 |
 | 축소 | 같은 지표 <= 1, 1분 x 15회 -> -1, 그 뒤 ALARM이 유지되는 동안 약 3분마다 다시 -1 (min까지) | 늘어난 인스턴스는 늘어난 동안만 과금이라 확대보다 훨씬 느리게 접는다. 실측 3에서 2가 16분, 2에서 1이 19분 |
 | SG | backend-sg -> ai-alb-sg -> ai-sg (8000) | backend 태스크가 호스트에 직접 닿는 길은 없다 |
 
@@ -879,6 +915,63 @@ aws autoscaling resume-processes --auto-scaling-group-name "$(terraform output -
 
 **비용.** 내부 ALB는 환경당 시간 요금 약 0.0225달러 + LCU(호출이 적어 최소)로 월 약 20달러다. 추가 인스턴스는
 늘어난 동안만 과금된다(c7i.xlarge 온디맨드, Spot 제외는 기존 결정).
+
+### AI 호스트 AMI 갱신 (KAN-246)
+
+AI 호스트의 OS(AL2023)는 tfvars `ai_ami_id`에 적힌 AMI 그대로다. 인스턴스 안에서 `dnf update`를 돌리지 않으므로
+커널, glibc, OpenSSL의 보안 업데이트는 **AMI를 바꿔 인스턴스를 교체해야** 들어온다. docker는 user_data가 첫 부팅에
+그 AMI의 저장소 버전으로 깔기 때문에 함께 올라간다. **월 1회, staging을 먼저 하고 확인한 뒤 prod를 한다.**
+Dependabot의 월 1회 갱신 PR(`.github/dependabot.yml`)과 같은 주기다.
+
+```
+# 1. 최신 AMI ID와 이름을 읽는다 (이름의 날짜가 지금 값보다 뒤여야 한다)
+ami=$(aws ssm get-parameter --name /aws/service/ami-amazon-linux-latest/al2023-ami-kernel-default-x86_64 \
+  --query Parameter.Value --output text)
+aws ec2 describe-images --image-ids "$ami" --query 'Images[0].[ImageId,Name]' --output text
+
+# 2. envs/staging/terraform.tfvars의 ai_ami_id와 그 위 주석의 이름을 바꾸고 plan을 본다.
+#    변경은 2건이어야 한다 - 시작 템플릿의 image_id, 그리고 그 새 버전 번호를 따라가는 ASG의 launch_template.version
+cd infra/envs/staging && terraform plan
+
+# 3. apply. 교체가 끝날 때까지 기다린다 (실측은 아래)
+terraform apply
+
+# 4. 교체 확인 - refresh가 Successful이고 인스턴스가 새 AMI로 1대다
+aws autoscaling describe-instance-refreshes --auto-scaling-group-name "$(terraform output -raw ai_asg_name)" \
+  --max-records 1 --query 'InstanceRefreshes[0].[Status,PercentageComplete,StartTime,EndTime]' --output text
+aws ec2 describe-instances --filters "Name=tag:Name,Values=$(terraform output -raw ai_asg_name)" \
+  "Name=instance-state-name,Values=running" --query 'Reservations[].Instances[].[InstanceId,ImageId,LaunchTime]' --output text
+
+# 5. 스모크 한 바퀴 (아래 "원격 스모크 수동 실행")를 돌린 뒤 prod에서 1~4를 되풀이한다
+```
+
+**교체는 무중단이다.** instance refresh가 `min_healthy_percentage = 100`, `max_healthy_percentage = 200`이라 새
+인스턴스를 먼저 띄운다. 새 인스턴스가 대상 그룹 healthy(모델 적재 완료)가 되고 워밍업 120초가 지난 뒤에야 옛
+인스턴스가 대상 그룹에서 빠지고, 빠진 뒤에도 등록 해제 지연 90초 동안 진행 중이던 추론을 마친다. 그동안 ALB는
+두 대에 나눠 보낸다. 교체하는 몇 분 동안 인스턴스가 평소의 두 배(1대면 2대)라 그만큼 과금된다.
+
+| 주의 | 이유 |
+| --- | --- |
+| 배포 파이프라인이 도는 동안에는 하지 않는다 | reload가 ASG 프로세스를 멈추므로 refresh가 시작되지 않거나 취소된다 (위 "배포 시 순차 reload") |
+| AL2023 x86_64 AMI만 넣는다 | user_data가 dnf와 루트 디바이스 `/dev/xvda`를 전제한다. 파라미터 이름의 `kernel-default`가 가리키는 커널 계열이 바뀌면(AMI 이름의 `kernel-6.x`) staging에서 스모크를 반드시 본다 |
+| 되돌리려면 `ai_ami_id`를 옛 값으로 바꿔 다시 apply한다 | 옛 AMI는 지원 종료(DeprecationTime) 뒤에도 ID로는 시작할 수 있다. 같은 무중단 교체가 한 번 더 돈다 |
+| 새 인스턴스가 healthy가 되지 못하면 refresh가 실패하고 옛 인스턴스가 남는다 | 먼저 띄우는 순서라 실패해도 서비스는 옛 인스턴스로 이어진다. 원인은 새 인스턴스의 `/var/log/cloud-init-output.log`와 "ai 컨테이너 로그" 절을 본다 |
+
+staging 실증 (2026-10-05): `al2023-ami-2023.12.20260831.0`에서 `20260930.0`으로 바꿨다(커널 계열은 6.18로 같다).
+plan은 변경 2건, apply는 10초 만에 끝나고 교체는 그 뒤에 ASG가 진행한다.
+
+| 시각 (KST) | 일 |
+| --- | --- |
+| 20:02:55 | instance refresh 시작, 2초 뒤 새 인스턴스 시작 (대상 그룹에 옛 1대 healthy + 새 1대 initial) |
+| 20:06:34 | 새 인스턴스가 대상 그룹 healthy로 보인 첫 표본 (직전 표본 20:06:13은 아직 아님. 시작 약 3분 30초 뒤, 이미지 7GB pull과 모델 적재 포함). healthy 2대 |
+| 20:07:17 | 옛 인스턴스 등록 해제 시작 (draining) |
+| 20:09:30 | 옛 인스턴스 종료 완료 |
+| 20:09:40 | refresh Successful - 시작부터 6분 45초 |
+
+20초 간격으로 본 대상 그룹의 healthy 대상은 교체 내내 1대 아래로 내려가지 않았다 (1대 17회, 2대 3회). 그동안
+합성 응시자 2명(`scripts/load_resilience.py --get-rps 0 --examinees 2`)이 쉬지 않고 돌았는데, 교체 구간의 분석
+180건을 포함해 전체 330건이 전부 AI에 닿아 판정을 받았고(합성 사인파라 판정은 모두 `ANALYSIS_MISREAD`다) 5xx와
+연결 실패, AI 미도달과 시간 초과는 0건이었다. 교체 뒤 plan은 No changes, 스모크는 통과했다.
 
 ### 부팅 자산 버킷 (KAN-38)
 
@@ -960,17 +1053,16 @@ fargate 모듈이 config의 파라미터 이름 목록을 그대로 태스크 �
 | `SPRING_PROFILES_ACTIVE` | `deploy` (두 환경 동일). 이 프로파일에서만 backend가 아래 8개 누락 시 기동을 세운다 (`DeploymentConfigGuard`) | String |
 | `SPRING_DATASOURCE_URL` | `jdbc:aws-wrapper:postgresql://<RDS 주소>:5432/accentury?secretsManagerSecretId=<마스터 시크릿 ARN>` | String |
 | `ACCENTURY_ANALYSIS_AIBASEURL` | `http://ai.accentury.internal:8000` (프라이빗 영역의 고정 이름, 두 환경 동일, KAN-36) | String |
-| `ACCENTURY_ANALYSIS_AITOKEN` | `random_password` 48자 영숫자. backend가 AI 호출마다 `X-Accentury-Internal-Token`으로 싣는다 (KAN-36) | SecureString |
+| `ACCENTURY_ANALYSIS_AITOKEN` | ephemeral 난수 48자 영숫자, write-only라 state에 값이 없다 (KAN-242). backend가 AI 호출마다 `X-Accentury-Internal-Token`으로 싣는다 (KAN-36) | SecureString |
 | `ACCENTURY_TRUSTEDPROXIES` | 해당 환경 VPC CIDR 하나 | String |
 | `ACCENTURY_RESULT_WEBTESTURL` | `https://<도메인>/t?c=kko_share` | String |
 | `ACCENTURY_RESULT_ASSETBASEURL` | `https://<도메인>/share` (KAN-132). backend가 등급 code를 붙여 `share.imageUrl`을 만든다. 이미지는 웹 버킷 `share/<code>.png` (`scripts/publish-share-assets.sh`) | String |
-| `ACCENTURY_ADMIN_TOKEN` | `random_password` 48자 영숫자. 관리자 API(§6)와 E2E 스모크(KAN-138)가 쓴다 | SecureString |
+| `ACCENTURY_ADMIN_TOKEN` | ephemeral 난수 48자 영숫자, write-only라 state에 값이 없다 (KAN-242). 관리자 API(§6)와 E2E 스모크(KAN-138)가 쓴다 | SecureString |
 | `ACCENTURY_SHARE_KAKAOADMINKEY` | 카카오디벨로퍼스 콘솔의 앱 Admin 키 (KAN-164). Terraform은 자리 표시 값으로 만들고(write-only `value_wo`라 state에 값이 남지 않는다) apply 뒤 `put-parameter --overwrite`로 넣는다 (아래 "카카오 공유 웹훅" 절). 두 환경 같은 값 | SecureString |
 | `ACCENTURY_FEEDBACK_SLACKWEBHOOKURL` | 이용 후기 알림이 나가는 슬랙 채널(`#feedback`)의 Incoming Webhook URL (KAN-211). 카카오 키와 같이 자리 표시 값으로 만들고 apply 뒤 `put-parameter`로 넣는다 (아래 "이용 후기 슬랙 알림" 절). **선택 값이다 - 없거나 자리 표시 값이면 backend가 알림만 끄고 그대로 기동한다** (`DeploymentConfigGuard` 밖이라 apply와 배포의 순서 제약이 없다). 채널이 하나라 두 환경 같은 값 | SecureString |
 | `ai/ACCENTURY_AI_INTERNAL_TOKEN` | `ACCENTURY_ANALYSIS_AITOKEN`과 같은 난수. ai 서버가 health를 뺀 모든 요청에서 대조한다 (KAN-36). ai 호스트 역할만 읽는다 | SecureString |
-| `ACCENTURY_TRAINING_CONSENTEDBUCKET` | **staging에만 있다** (KAN-201). 학습 데이터 버킷 이름(`accentury-staging-training-<계정>`). tfvars `training_bucket_enabled`가 true인 환경에만 파라미터가 생기고, 그래서 prod 태스크 정의에는 이 변수가 없어 backend가 S3 클라이언트를 만들지 않는다 (아래 "staging 전용 학습 데이터 S3" 절) | String |
-| `ACCENTURY_TRAINING_TESTERIDS` | **staging에만 있다** (KAN-239). 학습 활용에 동의한 테스터의 `app_user.id`를 쉼표로 이은 값. backend는 이 계정들의 세션만 저장한다. Terraform은 자리 표시 값(write-only `value_wo`)으로 자리만 만들고 운영자가 `put-parameter`로 채운다 - 자리 표시 값인 동안은 아무것도 저장하지 않는다 | StringList |
-| `ACCENTURY_TRAINING_PSEUDONYMKEY` | **staging에만 있다** (KAN-239). 학습 샘플의 세션 ID를 가명(HMAC-SHA256)으로 바꾸는 키. ephemeral 난수를 write-only로 넣어 state에 값이 없다. 버킷이 있는데 이 값이 없으면 backend가 기동하지 않는다 | SecureString |
+| `ACCENTURY_TRAINING_BUCKET` | 음성 전용 버킷 이름(`accentury-voice-<계정>`, KAN-201, KAN-269). 두 환경이 같은 값이다. tfvars `training_bucket_enabled`가 true인 환경에만 파라미터가 생기고(지금은 두 환경 모두 true), 끈 환경의 태스크 정의에는 이 변수가 없어 backend가 S3 클라이언트를 만들지 않는다 (아래 "음성 전용 S3" 절) | String |
+| `ACCENTURY_TRAINING_KEYPREFIX` | 음성 버킷 안에서 이 환경이 쓰는 키 접두사 (KAN-269). 끝에 슬래시가 없는 환경 이름이다 - staging은 `staging`, prod는 `prod`. `ACCENTURY_TRAINING_BUCKET`과 함께 생기고 함께 사라진다. 태스크 역할의 PutObject가 같은 접두사 아래로만 열려 있어 값이 다르면 저장이 AccessDenied로 실패한다 | String |
 
 **DB 사용자 이름과 비밀번호 파라미터는 없다.** RDS 관리형 마스터 시크릿은 7일마다
 자동 회전되므로(AWS 문서, 일정 변경만 가능) 값을 SSM에 복사하면 첫 회전에서 접속이
@@ -987,13 +1079,8 @@ aws ssm get-parameter --with-decryption --name /accentury/staging/ACCENTURY_ADMI
   --query Parameter.Value --output text
 ```
 
-재발급은 `terraform apply -replace='module.config.random_password.admin_token'`(taint는
-deprecated) 뒤 backend 태스크를 새로 띄우는 것이다 (`aws ecs update-service --force-new-deployment`,
-위 "backend Fargate 서비스" - secrets는 태스크 시작 시 한 번 읽힌다). 내부 호출 토큰은
-`-replace='module.config.random_password.ai_internal_token'` 뒤 **ai 호스트 reload 먼저, backend
-force-new-deployment 다음**이다 (그 사이 backend 호출은 401로 끊겨 회로가 열렸다가 닫힌다). 값은
-Terraform state(S3 암호화 + 버전 관리 버킷)에 남는다 - KAN-140이 수용한 범위이고, 레포, 이미지,
-로그에는 없다.
+재발급(회전)은 아래 "시크릿 회전" 절이다. 값은 SSM에만 있다 - Terraform state, 레포, 이미지, 로그
+어디에도 없다 (KAN-242).
 
 **이 토큰은 GitHub에 두지 않는다** (2026-09-05, KAN-171 리뷰 P3). 예전에는
 `e2e-smoke.yml`이 저장소 시크릿 `ACCENTURY_ADMIN_TOKEN`을 읽었는데 두 가지가 걸렸다.
@@ -1011,6 +1098,69 @@ apply나 재발급으로 토큰이 바뀌어도 GitHub 쪽에 맞춰 줄 것이 
 gh secret list                                 # ACCENTURY_ADMIN_TOKEN이 보이면
 gh secret delete ACCENTURY_ADMIN_TOKEN         # 지운다
 ```
+
+### 시크릿 회전 (KAN-242)
+
+관리자 토큰, 내부 호출 토큰, JWT 서명 키는 Terraform state에 값을 남기지 않는다. 난수는 `ephemeral
+"random_password"`가 apply 동안에만 만들고, SSM 파라미터에는 write-only 인자(`value_wo`)로 넘긴다. state에는
+`has_value_wo = true`와 `value_wo_version`만 남는다. 예전처럼 `random_password` + `value`로 두면 값이 state(버전 관리
+버킷)에 평문으로 남아, 버킷을 읽을 수 있는 주체는 누구나 임의 사용자의 Access JWT를 만들 수 있었다.
+
+Terraform이 값을 기억하지 않으므로 "값이 바뀌었다"를 스스로 알 수 없다. 그래서 회전은 `modules/config/main.tf`
+상단 `locals`의 버전 숫자를 올리는 것이다.
+
+| 시크릿 | 버전 local | 다시 읽어야 하는 쪽 |
+| --- | --- | --- |
+| 관리자 토큰 | `admin_token_version` | backend (워크플로는 SSM에서 직접 읽으므로 GitHub에 맞출 것이 없다) |
+| 내부 호출 토큰 (파라미터 2개) | `ai_internal_token_version` | ai 호스트, backend |
+| JWT 서명 키 | `jwt_secret_version` | backend |
+
+순서 (환경마다, staging 먼저):
+
+1. 버전 숫자를 올리고 `terraform apply`. plan에는 해당 파라미터의 `value_wo_version` 갱신만 나와야 한다.
+   내부 호출 토큰을 바꿨다면 apply 직후 두 파라미터가 같은지 대조한다 (값 대신 해시만 출력한다).
+
+   ```
+   for n in ACCENTURY_ANALYSIS_AITOKEN ai/ACCENTURY_AI_INTERNAL_TOKEN; do
+     aws ssm get-parameter --with-decryption --name "/accentury/staging/$n" --query Parameter.Value --output text | shasum -a 256
+   done
+   ```
+
+   두 해시가 다르면 apply가 한쪽만 쓰고 실패한 뒤 재시도된 것이다 (재시도의 ephemeral은 새 값이고, 버전이 이미
+   맞는 쪽은 다시 쓰이지 않는다). 값이 state에 없어 plan은 이것을 못 본다. `ai_internal_token_version`을 한 번
+   더 올려 apply하면 둘이 같은 값으로 다시 쓰인다. 같은 이유로 둘 중 한 파라미터만 `-replace`하지 않는다.
+2. Actions "Image Deploy"를 그 환경으로, `image_tag`에 현재 SSM `IMAGE_TAG` 값을 넣어 수동 실행한다. 같은 태그
+   재실행은 ai 호스트를 한 대씩 reload한 뒤 backend에 새 배포를 강제하고(`deploy.yml`, 리비전을 쌓지 않는다) E2E
+   스모크까지 돈다. **ai 먼저, backend 다음**이 내부 호출 토큰에 맞는 순서다 - 그 사이 backend 호출은 401로 끊겨
+   회로가 열렸다가 닫힌다. 관리자 토큰과 JWT 키만 바꿨다면 ai reload는 필요 없지만 같은 실행으로 해도 된다.
+3. 스모크 통과를 확인한다. JWT 키를 바꿨다면 앱은 다음 요청에서 401을 받고 refresh로 새 Access를 받는다.
+
+버전 숫자는 두 환경이 같은 모듈에서 읽는다. staging만 apply한 동안 prod plan에는 파라미터 갱신이 남는데, prod도
+회전해야 한다는 표시다. 같은 순서로 prod에서 한 번 더 밟는다.
+
+**이 파라미터의 다른 인자를 바꿀 때도 버전을 함께 올린다.** provider는 description 같은 다른 인자가 바뀌어도
+PutParameter를 다시 보내는데, 버전이 그대로면 `value_wo`를 읽지 않고 state의 빈 `value`를 실어 거부된다.
+
+state에 값이 없는지 확인 (envs 루트에서):
+
+```
+terraform state pull | jq '.resources[] | select(.module=="module.config" and .type=="aws_ssm_parameter")
+  | select(.name|test("admin_token|ai_token|jwt_secret")) | {name, value: .instances[0].attributes.value,
+  has_value_wo: .instances[0].attributes.has_value_wo}'
+```
+
+`value`가 비어 있고(`""`) `has_value_wo`가 `true`면 된다 (2026-10-01 staging 전환 뒤 실측).
+
+**Redis AUTH 토큰은 state에 남는다 (위험 수용).** aws provider 6.61.0의 `aws_elasticache_replication_group`에는
+write-only 인자(`auth_token_wo` 같은 것)가 없다 (2026-10-01 provider 바이너리 확인). 복제 그룹 자체가 `auth_token`을
+state에 두므로 SSM 쪽만 write-only로 바꿔도 의미가 없다. Redis는 사설 서브넷에 있고 redis-sg가 backend-sg의 6379만
+받으므로, 토큰을 알아도 VPC 안의 backend 자리에 있지 않으면 쓸 수 없다. provider에 write-only 인자가 생기면 같은
+방식으로 옮긴다. 회전은 아래 "앱 계정 인증" 절의 세 단계다.
+
+**state 버킷 (bootstrap).** 회전해도 옛 값은 이전 state 버전 객체에 남는다. 그래서 state 버킷에 이전 버전 30일
+만료 규칙을 두고(그 사이가 잘못된 apply 뒤 복구 창이다), TLS가 아닌 요청을 거부하는 버킷 정책을 둔다. 읽기 주체를
+Terraform 운영자 역할로 좁히는 정책은 두지 않는다 - 역할 목록이 틀리면 state가 잠기고, 2026-10-01 확인 시점에 이
+버킷을 읽을 수 있는 주체는 전부 SSM도 직접 읽는 관리자라 좁혀서 얻는 것이 없다 (KAN-242 노출 범위 표).
 
 ### 카카오 공유 웹훅 검증 키 (KAN-164)
 
@@ -1178,9 +1328,9 @@ revoke 없이 성공한다(탈퇴 때마다 `애플 토큰 revoke 건너뜀` WAR
 
 **키 재발급.**
 
-- JWT 서명 키: `terraform apply -replace='module.config.random_password.jwt_secret'` 뒤 backend 태스크를 새로 띄운다.
+- JWT 서명 키: 위 "시크릿 회전" 절이다 (`modules/config`의 `local.jwt_secret_version`을 올린다, KAN-242).
   그 순간까지 발급된 Access(최대 30분)가 무효가 되고, 앱은 refresh로 새로 받는다. Refresh는 Redis라 영향이 없다.
-- Redis AUTH 토큰: 세 단계다. `ROTATE`는 새 토큰을 더하되 옛 토큰도 계속 받으므로, 유출 대응이라면 마지막 단계를
+- Redis AUTH 토큰: 세 단계다. 이 토큰은 state에 값이 남는다 (위 "시크릿 회전" 절의 Redis 결정). `ROTATE`는 새 토큰을 더하되 옛 토큰도 계속 받으므로, 유출 대응이라면 마지막 단계를
   빼먹으면 옛 토큰이 살아 있다 (Codex 리뷰).
   1. `terraform apply -replace='module.data.random_password.redis_auth_token'` - 새 토큰이 더해지고 옛 토큰도 받는다.
      떠 있는 태스크가 끊기지 않는다.
@@ -1239,8 +1389,8 @@ KAN-57의 c7i.xlarge 실측(bf16 + MFA `align_one`, 1건 P50 10.1초, P95 11.1�
 | --- | --- | --- |
 | `ACCENTURY_ANALYSIS_AITIMEOUT` | `85s` | backend가 AI 호출에 거는 연결과 읽기 타임아웃. AI 상한 75초보다 10초 길다 |
 | `ACCENTURY_ANALYSIS_PROCESSINGTIMEOUT` | `300s` | 실행 잔류 한도. `ai-timeout x 3 + 백오프`(255.9초)보다 길어야 backend가 뜬다 |
-| `ACCENTURY_ANALYSIS_DISPATCHCONCURRENCY` | `1` | 전달 워커 수. AI가 추론을 한 번에 하나만 돌리고 8GB에서 2건이면 OOM이다 |
-| `ai/ACCENTURY_AI_ANALYSIS_TIMEOUT_SECONDS` | `75` | AI 자신의 상한 (lock 대기와 워커 재적재 대기 포함). backend보다 짧아야 AI가 먼저 끊고 503을 돌려준다. 정상 추론 1건이 아니라 롤링 배포 중 태스크 최대 6개(상한 3 x 200%)가 겹친 6 x P95 11초 = 67초와 워커 재적재 31초 + 추론 11초 = 42초를 덮는 값이다 - 짧으면(25초, 40초) 추론 중인 요청을 끊어 멀쩡한 워커를 죽이고 재전송이 새 워커를 또 죽이는 연쇄가 된다 (Codex 리뷰 P1, 실제 어댑터로 재현). 두 시나리오를 각각 덮을 뿐 합(97.6초)은 덮지 않는다 - 그때는 backend 회로 차단기가 연속 5회 실패에서 열려 호출을 멈추므로 연쇄가 자기수렴한다 (KAN-28) |
+| `ACCENTURY_ANALYSIS_DISPATCHCONCURRENCY` | `3` | 전달 워커 수 (KAN-272에서 1에서 올렸다). AI 최대 대수와 같은 값이다. AI는 호스트마다 추론을 한 번에 하나만 돌리므로(8GB에서 2건이면 OOM) AI가 1대면 뒤의 2건은 AI 안에서 차례를 기다리고, 2대 이상이면 내부 ALB가 나눈다 |
+| `ai/ACCENTURY_AI_ANALYSIS_TIMEOUT_SECONDS` | `75` | AI 자신의 상한 (lock 대기와 워커 재적재 대기 포함). backend보다 짧아야 AI가 먼저 끊고 503을 돌려준다. 정상 추론 1건이 아니라 한 호스트에 겹친 호출 6건(태스크당 전달 워커 3개 x 롤링 배포 중 태스크 2개, KAN-272)의 6 x P95 11초 = 67초와 워커 재적재 31초 + 추론 11초 = 42초를 덮는 값이다 - 짧으면(25초, 40초) 추론 중인 요청을 끊어 멀쩡한 워커를 죽이고 재전송이 새 워커를 또 죽이는 연쇄가 된다 (Codex 리뷰 P1, 실제 어댑터로 재현). 두 시나리오를 각각 덮을 뿐 합(97.6초)은 덮지 않는다 - 그때는 backend 회로 차단기가 연속 5회 실패에서 열려 호출을 멈추므로 연쇄가 자기수렴한다 (KAN-28) |
 
 같은 티켓에서 backend의 읽기 타임아웃은 재전송하지 않게 바꿨다 (`ANALYSIS_TIMEOUT` 즉시 종결 -
 연결 실패와 5xx만 2회 재전송). 폴링 혼잡 임계치는 30에서 6(AI 1분 처리량)으로, 디스패처 큐 용량은
@@ -1251,73 +1401,103 @@ KAN-57의 c7i.xlarge 실측(bf16 + MFA `align_one`, 1건 P50 10.1초, P95 11.1�
 
 **`dispatch-concurrency`는 전역 상한이 아니다** (Codex sol 리뷰 P1). 태스크 하나가 보내는
 동시 호출만 묶으므로, 오토스케일링(최대 3, KAN-168)이나 롤링 배포로 태스크가 둘 이상 뜨면
-그만큼 AI에 동시에 들어간다. AI는 추론을 한 번에 하나만 돌리므로 뒤에 온 요청은 AI 안에서
-기다리다 backend의 읽기 타임아웃에 걸리고, 그 실패가 연속 5회면 회로가 열린다 (KAN-28).
+그만큼 AI에 동시에 들어간다. AI는 호스트마다 추론을 한 번에 하나만 돌리므로 AI 대수를 넘는 요청은
+AI 안에서 기다리고, 그 대기가 AI 상한(75초)을 넘으면 503으로 끊겨 backend가 재전송한다. 그 실패가
+연속 5회면 회로가 열린다 (KAN-28).
+
+한 호스트에 겹치는 호출 수는 "태스크 수 x 3 / AI 대수"다 (KAN-272, 값의 근거는 `modules/config/main.tf`).
+
+| backend 태스크 | AI 1대에 겹치는 호출 | 맨 뒤 요청의 소요 | AI 상한 75초 |
+| --- | --- | --- | --- |
+| 1 (평시) | 3 | 약 33초 | 안 |
+| 2 (롤링 배포 중) | 6 | 약 67초 | 안 |
+| 3 (backend 스케일아웃) | 9 | 약 100초 | 밖. AI가 2대면 약 50초로 안이다 |
+
+상한 밖 구간에서 일곱 번째 요청을 그대로 추론에 넣으면 66.6초에 시작해 **추론 도중** 75초 상한에 걸리고,
+그 취소가 멀쩡한 워커를 죽여 재적재 31초가 뒤 요청까지 민다. 그래서 AI는 lock을 잡은 시점에 상한까지 남은
+시간이 여유분(기본 15초, `ACCENTURY_AI_INFERENCE_RESERVE_SECONDS`)보다 적으면 추론을 시작하지 않고 429로
+돌려준다 (KAN-272, `ai/app/track1.py`의 `_require_inference_budget`). 추론 전 거절이라 backend는 시도 예산을
+깎지 않고 재전송 예산(2회) 안에서 다시 보내고, 다 쓰면 `ANALYSIS_UNAVAILABLE`로 종결해 재업로드를 연다.
+AI 로그의 `과부하로 추론 전 거절`이 이 경우다 - 보이면 한 호스트에 호출이 너무 많이 겹친 것이다.
 
 기다리는 요청이 **도는 추론을 방해하지는 않는다** - 취소는 자기 차례를 기다리는 지점에서
 끊기고 워커를 죽이지 않는다 (`ai/app/track1.py`). 그래서 증상은 "느려지고 일부가 재전송된다"
 이지 "전부 죽는다"가 아니다. 전역 한 건으로 묶는 일은 다중 인스턴스 상태를 다루는 KAN-167의
 몫이고, 프로토타입 트래픽(동시 응시 소수)에서는 태스크가 1개로 유지되므로 지금은 두고 본다.
 
-### staging 전용 학습 데이터 S3 (KAN-201)
+### 음성 전용 S3 (KAN-201, KAN-269)
 
-원본 음성은 요청 처리 중에만 메모리에 있고 영속 저장소에 남지 않는다 (SRS FR-DP-01). 그래서 모델을 다시
-학습시킬 실발화 데이터가 어디에도 없었고, 2026-09-08 결정으로 **staging에만** 버킷을 두고 음성 WAV와 AI 원점수
-메타 JSON을 보존한다. prod는 FR-DP-01 그대로다.
-
-**대상은 학습 활용에 동의한 테스터 계정의 세션뿐이다 (KAN-239).** staging은 CloudFront와 WAF로 인터넷에 공개돼
-있어 "staging이니 내부 테스터"가 성립하지 않았다 - KAN-201의 첫 구현은 버킷 설정 하나만 보고 누구의 음성이든,
-익명 웹 세션이든 저장했다. 2026-09-28에 수집을 멈추고 그때까지의 382개 객체를 전량 파기한 뒤(동의 여부를 확인할
-수 없어서) 아래 한정 장치를 넣었다. 테스터 동의(목적, 항목, 보유 기간, 철회 방법)를 받는 것은 운영 절차이고,
-동의를 받기 전에는 테스터 목록이 비어 있어 켜져 있어도 아무것도 쌓이지 않는다.
+모델을 다시 학습시킬 실발화 데이터를 모으려고, 음성 저장(선택 동의)에 동의한 세션의 음성 WAV와 AI 원점수 메타
+JSON을 S3에 남긴다. 동의하지 않은 세션의 음성은 요청 처리 중에만 메모리에 있고 어디에도 남지 않는다.
+KAN-201에서는 staging에만 환경별 버킷(`accentury-staging-training-<계정 ID>`)을 두었는데, KAN-269(2026-10-04
+결정)에서 **두 환경이 함께 쓰는 음성 전용 버킷 하나**로 옮기고 prod도 켰다.
 
 | 항목 | 값 |
 | --- | --- |
-| 버킷 | `accentury-staging-training-<계정 ID>` (envs main.tf, tfvars `training_bucket_enabled = true`인 환경만) |
-| 보호 | 퍼블릭 액세스 전면 차단, SSE-S3 기본 암호화, 버전 관리 없음 |
-| 보유 기간 | 수명주기 만료일 = tfvars `training_retention_until`(UTC 자정 RFC3339, 동의서의 보유 기간 끝날). 켜져 있는데 값이 없으면 plan이 precondition으로 실패한다. 만료는 비동기라 그날 즉시 삭제를 보장하지 않으므로, 그날이 오면 아래 "환경 teardown 파기 런북"대로 버킷을 비운다 |
-| 버킷 정책 | `aws:SecureTransport = false` 요청 전부 거부. 객체 본문(`GetObject`)은 학습 읽기 역할(`accentury-staging-training-reader`, 출력 `training_reader_role_arn`) 외에는 거부 - 관리자 자격 증명도 거부된다. `ListBucket`은 거부하지 않는다 - `HeadBucket`이 그 권한으로 판정돼 거부하면 Terraform refresh와 파기 apply가 잠긴다. 키에는 가명과 지역, 문항 ID뿐이다 |
-| 권한 | backend 태스크 역할에 이 버킷 한 개로 한정한 `s3:PutObject`만 (fargate 모듈 `training_bucket_arn`). Get, List, Delete 없음. 읽기는 학습 읽기 역할만(신뢰 대상 tfvars `training_reader_principals`, 비우면 계정 루트) |
-| 스위치 | SSM `ACCENTURY_TRAINING_CONSENTEDBUCKET` -> `accentury.training.consented-bucket`. 없으면 backend는 S3 클라이언트도 저장 빈도 만들지 않는다 (`TrainingConfig`). KAN-201의 이름(`ACCENTURY_TRAINING_BUCKET`)에서 KAN-239가 바꿨다 - KAN-239 이전 SHA로 롤백(`deploy.yml` 수동 실행이나 반영 실패 시 자동 롤백)돼도 옛 이미지는 이 이름을 모르므로 수집이 꺼진 채 뜬다. 한정 없는 옛 코드가 다시 수집하는 길이 이름으로 막혀 있으니 이 이름을 옛 이름으로 되돌리지 않는다 |
-| 대상 | SSM `ACCENTURY_TRAINING_TESTERIDS` -> `accentury.training.tester-ids`. 세션 소유 계정(`test_session.user_id`)이 이 목록에 있을 때만 저장한다. 익명 세션(웹)과 목록 밖 계정은 저장하지 않고 지표 `result=skipped`만 오른다. 목록이 비거나 자리 표시 값이면 아무것도 저장하지 않는다 (`TrainingSpeakers`) |
-| 가명 | SSM `ACCENTURY_TRAINING_PSEUDONYMKEY` -> `accentury.training.pseudonym-key`. `speaker = HMAC-SHA256(sessionId, 키)`, `sampleId = HMAC-SHA256(analysisJobId, 키)`의 hex. 같은 세션의 문항은 한 접두에 모이고 DB와 로그의 세션 ID, 작업 ID와는 이어지지 않는다(작업 ID 원문은 `analysis_job.session_id`로 계정까지 조인되므로 함께 가린다). 로그에는 작업 ID와 객체 키를 한 줄에 남기지 않는다. 키 회전은 config 모듈 `value_wo_version` 증가 + apply + backend 재배포이고, 회전 전후의 speaker는 이어지지 않는다 |
+| 버킷 | `accentury-voice-<계정 ID>` 하나. **bootstrap 스택이 만든다** (`bootstrap/voice.tf`). envs는 같은 규칙으로 이름만 조립한다 |
+| 환경 구분 | 키 접두사 `staging/`, `prod/`. tfvars `training_bucket_enabled = true`인 환경만 쓴다 (두 환경 모두 true) |
+| 보호 | 퍼블릭 액세스 전면 차단, SSE-S3 기본 암호화, 버전 관리 켬, 수명주기(만료) 규칙 없음, `force_destroy` 없음, `prevent_destroy` |
+| 버킷 정책 | TLS가 아닌 요청 전부 거부. 객체 본문 읽기(`s3:GetObject`, `s3:GetObjectVersion`)는 `voice_reader_principal_arns`의 주체만 - 기본값은 학습 담당 IAM 사용자 `jaeyoung`, 학습용 EC2 역할 `accentury-track2-ec2-role`, 운영 담당 IAM 사용자 `accentury-cli`. 목록 밖이면 관리자 자격 증명도 본문은 못 읽는다. List, Put, Delete는 정책이 거부하지 않는다 (List를 거부하면 Terraform refresh가 잠긴다) |
+| 쓰기 권한 | backend 태스크 역할에 `arn:aws:s3:::accentury-voice-<계정 ID>/<환경>/*`로 한정한 `s3:PutObject`만 (fargate 모듈 `training_bucket_arn`, `training_key_prefix`). staging 태스크는 `prod/` 아래에 쓰지 못한다. Get, List, Delete 없음 |
+| 스위치 | SSM `ACCENTURY_TRAINING_BUCKET` -> `accentury.training.bucket`, `ACCENTURY_TRAINING_KEYPREFIX` -> `accentury.training.key-prefix`. 버킷 값이 없으면 backend는 S3 클라이언트도 저장 빈도 만들지 않는다 (`TrainingConfig`) |
+| 저장 대상 | 음성까지 남기는 것은 음성 저장에 동의한 세션만. 동의하지 않은 익명 세션(웹, 로그인을 끈 앱)은 음성 없이 메타 JSON만 남긴다 (KAN-274). 동의하지 않은 계정 세션과 합성 트래픽 세션(관리자 토큰으로 만드는 배포 스모크)은 아무것도 남기지 않는다. 판정은 backend가 한다 |
 | 저장 시점 | 분석 상태 전이가 끝난 뒤, 오디오 버퍼 파기 전 (`HttpAnalysisDispatcher`). 성공과 판정 실패 모두, 계약 위반과 AI 불가는 제외 |
-| 키 | `<region>/<testVersion>/<speaker>/<itemId>/<sampleId>.wav` 와 `.json` (region은 세션 생성 요청의 출신 지역 코드 10개 중 하나 또는 `UNKNOWN`). 메타 JSON도 `sessionId`, `analysisJobId` 대신 `speaker`, `sampleId`를 싣고 `correlationId`와 계정 정보는 없다 (KAN-239) |
-| 실패 | 삼킨다 - WARN 로그 1줄 + 지표 `accentury.training.samples`(result=failed). 분석 결과와 상태 조회에 영향 없음 |
+| 키 | `<환경>/<region>/<testVersion>/<sessionId>/<itemId>/<analysisJobId>.wav` 와 `.json` (region은 세션 생성 요청의 출신 지역 코드 10개 중 하나 또는 `UNKNOWN`) |
+| 음성 없는 건의 키 | `<환경>/_no-audio/<region>/<testVersion>/<sessionId>/<itemId>/<analysisJobId>.json` 하나 (KAN-274). 음성 트리의 칸이 언제나 WAV와 JSON 한 쌍이도록 접두를 갈랐다. 환경 접두 아래라 태스크 역할의 쓰기 권한이 그대로다. JSON의 `audioStored`가 false이고 동의 버전과 동의 시각 키가 없다 |
+| 실패 | 삼킨다 - WARN 로그 1줄 + 지표 `accentury.training.samples`(result=failed). 분석 결과와 상태 조회에 영향 없음. 성공은 result=saved(음성과 메타), result=label_saved(메타만)로 갈린다 |
 
-**apply 순서.** 이 파라미터가 태스크 정의 secrets에 들어가므로 staging apply가 코드 배포보다 먼저다 (KAN-132
-교훈). 반대로 하면 파이프라인이 등록하는 리비전이 없는 파라미터를 가리켜 태스크가 뜨지 않는다. 두 환경의
-main.tf는 같고(KAN-140) 차이는 tfvars다 - prod plan에는 버킷도 정책도 역할도 파라미터도 없어야 한다.
+**음성은 Terraform이 지우지 않는다.** 버킷이 환경 스택 밖(bootstrap)에 있어 환경 destroy나 스위치 끄기가 버킷을
+건드리지 못하고, bootstrap에서도 `prevent_destroy`라 버킷을 지우는 plan은 실패한다. 만료 규칙이 없어 S3가 알아서
+지우는 일도 없다. 버전 관리가 켜져 있어 같은 키를 덮어쓰거나 지워도 이전 버전이 남는다. 음성을 지우는 일은
+사람이 판단해서 사람이 한다.
 
-**테스터 추가와 철회.** 동의를 받은 테스터의 `app_user.id`를 목록에 넣고 backend를 새로 띄운다 (secrets는 태스크
-시작 때 한 번 읽힌다). 철회도 같은 명령으로 목록에서 빼고 새로 띄운다. 기동 로그 `학습 샘플 저장 켜짐 - 동의
-테스터 N명`으로 반영을 확인한다.
+**배포 전제 (KAN-269).** 이 변경은 방침 버전을 `2026-10-04`로 올린다. backend는 가입 요청의 방침 버전이 서버 값과
+정확히 같아야 받으므로(`AuthService`), 새 이미지가 뜬 환경에서는 옛 방침 버전 상수를 가진 앱 빌드의 신규 가입이
+400 `AUTH_CONSENT_REQUIRED`가 된다 (기존 회원 로그인은 영향 없다). 그래서 prod는 아래 셋을 같은 때에 맞춘다.
+
+- 새 방침 버전 상수를 가진 앱 빌드의 스토어 배포 (`Accentury_App` 레포)
+- prod `privacy.html` 게시 (`scripts/publish-privacy.sh prod`)
+- backend Release 승격
+
+**apply 순서 (KAN-269).** bootstrap, staging, prod 순이다.
+
+1. `infra/bootstrap` apply - 음성 버킷과 버킷 정책이 생기고 CloudTrail 데이터 이벤트 대상에 음성 버킷이 더해진다.
+   옛 staging 버킷은 대상에 남는다. 버킷이 없는 채로 환경을 먼저 적용하면 backend 저장이 NoSuchBucket으로
+   실패한다 (분석 결과에는 영향이 없지만 그동안의 음성은 남지 않는다).
+2. `infra/envs/staging` apply - plan에 옛 버킷 리소스 6개(버킷, 퍼블릭 차단, 암호화, 버킷 정책, 읽기 역할과 그
+   정책)가 **"will no longer be managed by Terraform, but will not be destroyed"**로 나와야 한다.
+   `aws_s3_bucket.training`이 "will be destroyed"로 보이면 apply하지 않는다. destroy로 나오는 것은 옛 버킷의
+   수명주기 규칙과 테스터 ID, 가명 키 파라미터 셋이다. **이 apply는 2026-12-31 전에 끝나야 한다** - 옛 버킷에는
+   KAN-239가 건 만료 규칙(2026-12-31에 객체 삭제)이 아직 실물로 살아 있고 버전 관리가 꺼져 있어, 그날을 넘기면
+   남은 음성이 복구할 수 없이 지워진다. 이 apply가 그 규칙을 없앤다.
+3. `infra/envs/prod` apply - 이 티켓의 몫은 두 파라미터와 태스크 역할 문장, 태스크 정의 교체뿐이다. 다만 prod에는
+   아직 적용하지 않은 앞선 변경(KAN-242 write-only 시크릿, KAN-244 WAF, KAN-245 엣지와 backend 아웃바운드)이
+   쌓여 있어 plan에 함께 나온다 (2026-10-04 plan: 11 add, 11 change, 6 destroy). 그 변경들의 순서 제약이 그대로
+   적용된다 - 이미지가 먼저이고, backend 아웃바운드는 좁은 규칙을 `-target`으로 먼저 만든다 (아래 "JDBC 서버
+   인증서 검증의 적용 순서", "backend 아웃바운드 축소의 적용 순서").
+
+이미지 배포와 환경 apply의 앞뒤는 어느 쪽이든 안전하다. 새 이미지는 두 파라미터가 없으면 저장 빈을 만들지 않고
+그대로 뜬다 (`TrainingConfig`). 반대로 apply가 먼저이고 옛 이미지가 떠 있는 동안에는 옛 이미지가 접두 없는 키로
+저장을 시도해 분석마다 AccessDenied WARN과 `accentury.training.samples{result=failed}`가 남는다. 태스크 역할이
+자기 접두에만 쓸 수 있어 막히는 것이고 의도한 동작이니, 역할을 넓혀서 고치지 않는다. 새 이미지가 뜨면 사라진다.
+두 환경의 main.tf는 같다 (KAN-140).
+
+**옛 버킷 `accentury-staging-training-<계정 ID>`.** KAN-269 적용 뒤로는 Terraform이 관리하지 않는다
+(envs main.tf의 `removed` 블록, `destroy = false`). 버킷과 그 안의 음성은 그대로 남고 새 객체는 쌓이지 않는다.
+KAN-239 때 붙은 버킷 정책(GetObject 제한)과 읽기 역할도 지우지 않고 관리에서만 빼므로 읽기 제한은 그대로이고,
+CloudTrail 데이터 이벤트도 버킷이 정리될 때까지 계속 기록한다 (`bootstrap/audit.tf`). 만료 규칙만 staging
+apply가 없앤다. 이 버킷을 옮기거나 비우거나 지우는 일은 사람만 한다 - Terraform과 자동화는 손대지 않는다.
+
+**teardown.** 환경 destroy는 음성 버킷을 지우지 않는다. 그 환경의 두 파라미터와 태스크 역할 문장만 사라지고
+`staging/`, `prod/` 아래 객체는 그대로다.
+
+확인:
 
 ```
-aws ssm put-parameter --overwrite --type StringList \
-  --name /accentury/staging/ACCENTURY_TRAINING_TESTERIDS --value '<app_user.id>,<app_user.id>'
-aws ecs update-service --cluster accentury-staging --service backend --force-new-deployment
+aws s3 ls "s3://$(terraform output -raw training_bucket)/$(terraform output -raw training_key_prefix)/" --recursive | tail   # 환경/지역/버전/세션/문항/작업.wav|.json
 ```
 
-**넘길 때.** 로컬로 내려받지 않는다 - 노트북에 사본이 생기면 보유 기간 만료와 파기가 그 사본에 닿지 않는다.
-학습 담당에게 넘길 때는 학습 읽기 역할로 학습 쪽 버킷에 버킷 간 복사를 하고, 반출 기록(날짜, 대상 버킷, 객체 수,
-그 사본의 파기 예정일 = 이 버킷의 만료일)을 KAN-239에 코멘트로 남긴다. 학습 쪽 버킷도 같은 만료일을 가져야 한다.
-
-**teardown.** 버킷은 `force_destroy`라 destroy가 객체째 지운다. 파기 순서와 기록은 아래 "환경 teardown 파기 런북"
-절을 따른다.
-
-확인 (본문은 학습 읽기 역할로 - 다른 자격 증명의 GetObject는 버킷 정책이 거부한다):
-
-```
-# terraform output은 역할을 맡기 전에 읽는다 - 학습 읽기 역할은 state 버킷을 못 읽어 맡은 뒤에는 output이 403이다.
-B="$(terraform output -raw training_bucket)"; R="$(terraform output -raw training_reader_role_arn)"
-eval "$(aws sts assume-role --role-arn "$R" --role-session-name training-check \
-  --query 'Credentials.[AccessKeyId,SecretAccessKey,SessionToken]' --output text \
-  | awk '{print "export AWS_ACCESS_KEY_ID="$1" AWS_SECRET_ACCESS_KEY="$2" AWS_SESSION_TOKEN="$3}')"
-aws s3 ls "s3://$B/" --recursive | tail        # 지역/버전/speaker/문항/sampleId.wav|.json
-aws s3 cp "s3://$B/<키>.json" -                  # AI 원점수, 결과, 버전 (작업 ID와는 조인되지 않는다)
-unset AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY AWS_SESSION_TOKEN
-```
+객체 본문(`aws s3 cp`)은 `voice_reader_principal_arns`의 주체로만 읽힌다 - 그 밖의 자격 증명은 AccessDenied다.
 
 ### 이미 있는 SSM 파라미터 (재구축, 수동 생성분)
 
@@ -1367,9 +1547,12 @@ SecureString으로 두면 되고(AWS 관리 키라 별도 kms 권한 불요), �
 
 | 우선순위 | 규칙 | 하는 일 | 예외 |
 | --- | --- | --- | --- |
-| 10 | `rate-limit-costly-posts` | IP당 5분 창에 `POST /v0/sessions` + `POST …/recording` 합산 `waf_rate_limit`건 초과 시 429 | 폴링, 어휘 답안, 정적 자산은 세지 않음 |
+| 10 | `rate-limit-costly-posts` | IP당 5분 창에 `POST /v0/sessions` + `POST …/recording` + `POST …/feedback` 합산 `waf_rate_limit`건 초과 시 429 | 폴링, 어휘 답안, 정적 자산은 세지 않음 |
+| 15 | `rate-limit-auth` | IP당 5분 창에 `POST /v0/auth/login` + `POST /v0/auth/refresh` 합산 `waf_auth_rate_limit`건 초과 시 429 (KAN-244) | 다른 메서드는 세지 않음 |
+| 16 | `rate-limit-admin` | IP당 5분 창에 `/admin/` 아래 요청 `waf_admin_rate_limit`건 초과 시 429 (KAN-244) | 없음 (메서드 무관) |
 | 20 | `aws-common` | `AWSManagedRulesCommonRuleSet` (본문 8KB 상한, XSS, LFI/RFI, 경로 조작 등. SQLi 규칙은 이 그룹에 없음) | 경로가 `/recording`으로 끝나는 요청은 그룹 전체를 건너뜀 (multipart 음성이 본문 규칙에 걸리므로) |
 | 30 | `aws-known-bad-inputs` | `AWSManagedRulesKnownBadInputsRuleSet` (Log4j, Java 역직렬화 등) | 없음 |
+| 40 | `aws-ip-reputation` | `AWSManagedRulesAmazonIpReputationList` (아마존 위협 인텔리전스의 봇, 정찰, DDoS 출처 IP) (KAN-244) | 없음. `waf_enforce`와 `waf_ip_reputation_enforce`가 둘 다 true일 때만 차단 |
 
 차단 응답은 backend의 429 봉투와 같은 JSON(`RATE_LIMITED`, `retryable: true`,
 `retryAfterMs: 300000`) + `Retry-After: 300`이다. 앱과 웹이 backend 429와 똑같이
@@ -1413,6 +1596,36 @@ Count 관찰은 2026-08-28부터의 staging 사이클과 당일 부하 시험(�
 `POST /v0/sessions` 700건(92초)이 backend 429를 거쳐 WAF 429(`Retry-After: 300`)로 바뀌고 5분 뒤
 풀리는 것을 확인했다. prod는 처음부터 이 값으로 짓는다 (KAN-171).
 
+### 인증, 관리자 경로 rate 규칙과 IP 평판 규칙 (KAN-244)
+
+인증 경로(`waf_auth_rate_limit = 100`): 로그인은 요청마다 외부 IdP를 부른다(카카오 2회, 네이버 1회).
+backend의 AUTH 제한(IP당 분당 30)은 태스크별 인메모리라 태스크 수만큼 풀리므로, IP를 바꿔 가며 무효
+토큰을 보내면 우리 앱의 IdP 호출 쿼터가 소진돼 모든 사용자의 소셜 로그인이 502가 된다. 10번 규칙과 달리
+임계값을 backend 태스크 하나의 한도(5분 150)보다 낮게 둬 엣지에서 먼저 자른다. 정상 사용자는 5분에
+로그인 1회 + refresh 몇 회라 공유 Wi-Fi 수십 명도 안에 들어온다.
+
+관리자 경로(`waf_admin_rate_limit = 50`): 관리자 API는 공개 CloudFront로 열려 있고 공유 토큰 한 겹이다.
+IP 허용 목록은 쓰지 않는다 - E2E 스모크가 GitHub 호스티드 러너에서 관리자 API를 부르는데 러너 IP가
+고정되지 않는다. 대신 추측 속도를 IP당으로 묶고, backend는 인증 실패를 `관리자 인증 실패 ip=...`
+WARN으로 남긴다(토큰 값은 남기지 않는다). 활성 버전 전환 감사 행에는 `caller_ip`가 남는다. 스모크의
+관리자 호출은 실행당 2건이다. 실패 WARN에 낯선 IP가 반복되면 위 "시크릿 회전" 절대로 토큰을 회전한다.
+
+```
+# 서울 리전 로그 그룹 /accentury/<env>/backend
+fields @timestamp, @message
+| filter @message like /관리자 인증 실패/
+| parse @message /ip=(?<ip>\S+)/
+| stats count() by ip
+| sort count desc
+```
+
+IP 평판(`waf_ip_reputation_enforce`): 다른 규칙이 이미 Block인 뒤에 들어온 규칙이라 혼자 Count 관찰을
+거친다. 두 환경 false로 시작해 staging에서 일주일 관찰한다. 위 "Count 관찰 후 Block 전환" 3번의 WAF 로그
+그룹에서 `@message like /aws-ip-reputation/`으로 걸러 IP와 경로를 본다 (그룹 안 규칙 이름은
+`AWSManagedIPReputationList`, `AWSManagedReconnaissanceList`, `AWSManagedIPDDoSList`). 공용 VPN과 클라우드
+대역의 정상 사용자가 섞여 있으면 오탐이다. 오탐 기록을 KAN-244에 남긴 뒤
+staging부터 true로 apply하고 prod가 뒤따른다.
+
 ### rate limit 임계값 300의 근거 (2026-08-28)
 
 - 정상 사용자 1명의 5분 창: 세션 1 + 업로드 5문항(재녹음 포함 10건 이내) = 최대 11건.
@@ -1426,9 +1639,69 @@ Count 관찰은 2026-08-28부터의 staging 사이클과 당일 부하 시험(�
 
 ### 비용
 
-환경당 월 약 8달러(웹 ACL 5 + 규칙 3개 x 1) + 요청 100만 건당 0.60달러. 로그는 매치된
-요청만 7일 보존이라 1달러 미만. 두 환경 합산 월 16달러 안팎을 감수한다 (KAN-149 코멘트,
-2026-08-28).
+환경당 월 약 11달러(웹 ACL 5 + 규칙 6개 x 1) + 요청 100만 건당 0.60달러. 로그는 매치된
+요청만 7일 보존이라 1달러 미만. 두 환경 합산 월 22달러 안팎을 감수한다 (KAN-149 코멘트,
+2026-08-28. KAN-244에서 규칙 3개 추가).
+
+## 전송 구간과 엣지 보안 (KAN-245)
+
+보안 검토(KAN-238) #8, #9, #11, #14, #15를 한 번에 반영한 설정 묶음이다.
+
+| 항목 | 어디 | 내용 |
+| --- | --- | --- |
+| S3 TLS 강제 | `modules/edge`(web), `modules/ai-host`(boot), bootstrap(tfstate, KAN-242와 audit, 음성 버킷 voice는 KAN-269). 옛 학습 버킷(`accentury-staging-training`)은 Terraform 관리 밖이고 KAN-239의 버킷 정책이 실물로 남아 있다 | `aws:SecureTransport = false` 요청 전부 거부 |
+| 보안 응답 헤더 | `modules/edge`의 `aws_cloudfront_response_headers_policy.security`, 세 동작 모두 | HSTS 1년 + includeSubDomains(preload 없음), nosniff, `X-Frame-Options: DENY`, `strict-origin-when-cross-origin`, CSP는 Report-Only. 수집 지점(`report-uri`/`report-to`)이 아직 없어 위반은 브라우저 콘솔에만 찍힌다 - enforce 전환 후속은 수집 엔드포인트부터 |
+| JDBC 서버 인증서 검증 | `modules/config`의 `SPRING_DATASOURCE_URL`, `backend/Dockerfile` | `sslmode=verify-full` + 이미지 안 RDS 전역 CA 번들. 서버 쪽 `rds.force_ssl`은 PG16 기본 파라미터 그룹에서 이미 1 |
+| backend 아웃바운드 | `modules/network` | 443(IPv4, IPv6)과 SG 참조 3개(RDS 5432, Redis 6379, AI ALB 8000)만 |
+| 계정 감사, 위협 탐지 | `bootstrap/audit.tf` | CloudTrail 관리 이벤트 + 음성, tfstate 버킷 S3 데이터 이벤트, GuardDuty + S3 보호 |
+
+### JDBC 서버 인증서 검증의 적용 순서
+
+`sslrootcert`가 가리키는 CA 번들은 backend 이미지 안에 있다. SSM의 URL이 먼저 바뀌고 옛 이미지 태스크가 뜨면
+파일이 없어 DB 연결이 실패하고 기동하지 못한다. 그래서 환경마다:
+
+1. 이 변경이 든 이미지가 먼저 배포된다 (staging은 Dev push, prod는 Release 승격). URL이 그대로라 이 이미지는 옛
+   방식으로 붙는다.
+2. 그 뒤 `terraform apply`로 URL을 바꾸고, Actions "Image Deploy"를 같은 태그로 다시 돌려 태스크가 새 URL을
+   읽게 한다 (secrets는 태스크 시작 때 한 번 읽힌다).
+3. 이 apply 뒤로는 KAN-245 이전 이미지로 롤백하지 않는다. 꼭 돌아가야 하면 URL에서 두 파라미터를 먼저 뺀다.
+
+검증이 실제로 켜졌는지는 `sslrootcert`를 없는 경로로 바꾼 태스크가 기동에 실패하는 것으로 확인한다.
+CA 번들은 Dockerfile의 `ADD --checksum`이 해시를 고정한다. AWS가 번들을 갱신하면 빌드가 실패하므로 새 해시로 고친다.
+
+### backend 아웃바운드 축소의 적용 순서
+
+넓은 규칙(`backend_all_ipv4/ipv6`)과 좁은 규칙은 별개 리소스라 한 번의 apply에서 삭제와 생성이 동시에 돈다.
+삭제가 먼저 끝나면 그 사이 태스크의 바깥 연결이 끊긴다. 좁은 규칙부터 만든다 (KAN-165의 SG 교체 교훈):
+
+```
+terraform apply \
+  -target=module.network.aws_vpc_security_group_egress_rule.backend_https_ipv4 \
+  -target=module.network.aws_vpc_security_group_egress_rule.backend_https_ipv6 \
+  -target=module.network.aws_vpc_security_group_egress_rule.backend_to_rds \
+  -target=module.network.aws_vpc_security_group_egress_rule.backend_to_redis \
+  -target=module.network.aws_vpc_security_group_egress_rule.backend_to_ai_alb
+terraform apply    # 넓은 규칙 삭제와 나머지
+```
+
+VPC DNS, ECS 태스크 메타데이터, Time Sync는 SG가 거르지 않으므로 규칙이 필요 없다 (AWS VPC 문서). 새 바깥
+연결(443이 아닌 포트)을 쓰는 기능을 더하면 여기에 규칙을 함께 더해야 한다 - 빠뜨리면 그 연결만 타임아웃이 난다.
+
+### CloudTrail과 GuardDuty
+
+trail은 계정에 하나다(`accentury-account-audit`, 전 리전, 로그 파일 검증). 관리 이벤트는 읽기와 쓰기를 모두
+남겨 SSM `GetParameter`, Secrets Manager `GetSecretValue`도 기록된다. S3 데이터 이벤트는 음성 버킷(`accentury-voice-<account_id>`, KAN-269)과 tfstate
+버킷 객체만 남긴다. 옛 staging 학습 버킷(`accentury-staging-training`)도 사람이 정리할 때까지 대상에 남긴다. 로그는 `accentury-cloudtrail-<account_id>`에 1년 보관한다.
+
+```
+# 최근 음성 버킷 객체 읽기 (CloudTrail 콘솔 이벤트 기록은 데이터 이벤트를 보여 주지 않는다 - 버킷의 로그를 본다)
+aws s3 ls s3://accentury-cloudtrail-<account_id>/AWSLogs/<account_id>/CloudTrail/ap-northeast-2/ --recursive | tail
+# 관리 이벤트 (90일)
+aws cloudtrail lookup-events --lookup-attributes AttributeKey=EventName,AttributeValue=GetParameter --max-results 5
+```
+
+GuardDuty는 서울 리전 detector 하나다. 켜 둔 보호는 S3 데이터 이벤트와 RDS 로그인 이벤트뿐이고, AWS가 기본으로 켜는
+EKS 감사 로그, Lambda 네트워크 로그, EBS 악성코드 검사는 `audit.tf`가 끈다. 발견 사항은 콘솔 GuardDuty에서 본다.
 
 ## 경보와 알림 (KAN-134)
 
@@ -1699,13 +1972,19 @@ CloudWatch 표준 경보는 개당 월 0.10달러, 지표 math 경보(`alb-5xx`)
 | 로그 그룹 1개 | `/accentury/{env}/ai` (KAN-203, 아래 "ai 컨테이너 로그"). backend `/accentury/{env}/backend`는 KAN-165가 만든다 |
 
 경보는 앞 절과 **같은 SNS 토픽**으로 간다. 심각도별 채널을 나누지 않는다 - 3인 팀에 채널이
-여럿이면 어느 쪽도 보지 않게 된다. 모듈 출력 `alarm_names`가 12종 전부를 준다.
+여럿이면 어느 쪽도 보지 않게 된다. 모듈 출력 `alarm_names`가 경보 전부를 준다 (KAN-272 뒤 14종).
 
 | 경보 | 지표 | 조건 | 결측 처리 |
 | --- | --- | --- | --- |
 | `ai-temp-residue` | `accentury/ai` `TempFiles` (차원 env) | 5분 최대 >= 20이 2회 연속 | `notBreaching` |
 | `analysis-backlog-high` | `accentury/backend` `accentury.analysis.processing.value` | 1분 최대 >= 60이 5회 연속 | `notBreaching` |
 | `analysis-timeouts-high` | `accentury.analysis.timeouts.count`의 두 사유(stuck, lost) 합 | 5분 합계 > 5 | `notBreaching` |
+| `analysis-unscorable-high` (KAN-272) | `accentury.analysis.judged.count`의 `reason=unscorable` | 5분 합계 > 5 | `notBreaching` |
+
+`analysis-unscorable-high`는 KAN-272에서 더했다. AI가 분석 결과에 NaN을 내는 경우(`ANALYSIS_UNSCORABLE`)는
+계약대로 온 판정이라 회로에 실패로 세지 않고 사용자에게 재녹음만 열린다 - 모델이나 참조 데이터 회귀로 모든
+발화가 그렇게 되어도 다른 경보는 울지 않는다. 울면 AI 로그의 `채점 불가`(어느 값인지 `fields`, 어느 문장인지
+`scriptKey`와 `testVersion`)와 backend 로그의 `채점 불가 판정`을 본다.
 
 셋 다 결측을 장애로 세지 않는다. backend가 죽어 지표가 끊기는 것은 `no-healthy-target`이,
 AI 호스트가 죽는 것은 `ai-unhealthy`가 이미 잡는다 - 같은 사건에 메일 세 통을 보내지 않는다.
@@ -1900,6 +2179,8 @@ NFR-PF-01 판단에 안전한 쪽을 택한 것이고, 표본이 작은 새 태�
 0.40달러(`analysis-timeouts-high`는 지표 2개를 세는 math 경보라 0.20달러)다. 29개의 내역은
 `docs/wiki/observability.md`의 수집 경로 절에 표로 있다. 대시보드는 계정당
 3개까지 무료라 이 하나는 요금이 없다. 두 환경 합산 월 18달러 안팎이 늘어난다.
+KAN-272가 지표 3개(`accentury.analysis.judged`의 사유 셋)와 경보 1종(`analysis-unscorable-high`)을
+더해 환경당 월 약 1달러가 는다.
 
 ai 컨테이너 로그(KAN-203)는 요금이 수집량에 붙는다. 이 컨테이너가 남기는 것은 기동 줄 몇 개와
 요청당 종료 줄 한 줄(uvicorn 접근 로그 포함 두어 줄)이라, 하루 수백 문항 수준에서는 월 1MB대이고
@@ -2118,7 +2399,7 @@ Terraform 입력의 차이는 `diff -r infra/envs/staging infra/envs/prod`가 �
 | 내부 호출 토큰 (KAN-36) | 환경별 난수 | 환경별 난수 | `ACCENTURY_ANALYSIS_AITOKEN`, `ai/ACCENTURY_AI_INTERNAL_TOKEN` |
 | AI 호스트 (KAN-36) | c7i.xlarge, 루트 40GiB | 같은 값 | `ai_instance_type`, `ai_root_volume_size` (B단계 2026-09-10에 20에서 40으로) |
 | AI 호스트 오토스케일링 (KAN-201) | max 3 | 같은 값 | `ai_max_size` - ai-host 모듈 ASG `max_size`. min 1은 모듈 기본값 |
-| 학습 데이터 S3 (KAN-201, KAN-239) | 켬, 만료일 있음 | 끔 | `training_bucket_enabled` - 버킷, 수명주기 만료(`training_retention_until`), 버킷 정책, 학습 읽기 역할, 태스크 역할 PutObject, SSM `ACCENTURY_TRAINING_CONSENTEDBUCKET`, `ACCENTURY_TRAINING_TESTERIDS`, `ACCENTURY_TRAINING_PSEUDONYMKEY` |
+| 음성 저장 S3 (KAN-201, KAN-269) | 켬, 접두사 `staging/` | 켬, 접두사 `prod/` | `training_bucket_enabled` - 태스크 역할 PutObject(자기 접두사만), SSM `ACCENTURY_TRAINING_BUCKET`과 `ACCENTURY_TRAINING_KEYPREFIX`. 버킷은 bootstrap의 음성 전용 버킷 하나를 함께 쓴다 |
 | RDS 삭제 보호, 최종 스냅샷 | 없음, 생략 | 켬, 남김 | RDS |
 | 배포 역할 ECR push | 허용 | 불가 | `modules/deploy` image-deploy 정책 (KAN-128 승격 모델) |
 
@@ -2162,6 +2443,8 @@ terraform destroy
 - CloudFront 배포 삭제는 비활성화 전파 때문에 수 분 걸린다.
 - bootstrap의 state 버킷은 `prevent_destroy`로 보호된다. 두 환경 state가
   전부 필요 없어진 것이 확실할 때만 코드에서 보호를 풀고 지운다.
+- bootstrap의 음성 버킷(`accentury-voice-<account_id>`, KAN-269)도 `prevent_destroy`이고 `force_destroy`가 없다.
+  음성은 Terraform으로 지우지 않는다 ("음성 전용 S3" 절).
 - destroy 뒤에는 그 환경의 GitHub environment 변수 `DEPLOY_PAUSED`를 `true`로
   둔다. 환경이 없는데 `web/**` 변경이 병합되면 Web Deploy가 역할 부재로
   `AssumeRoleWithWebIdentity` 거부라는 헷갈리는 메시지로 실패하기 때문이다
@@ -2185,37 +2468,11 @@ terraform destroy
 - 프라이빗 영역의 `ai.accentury.internal` A 레코드는 KAN-201부터 Terraform 소유(ALB alias)라
   destroy가 함께 지운다. KAN-36 시절 인스턴스가 만든 레코드가 남아 있어도 영역이
   `force_destroy = true`라 레코드째 지운다. ASG는 인스턴스를 먼저 종료한 뒤 삭제된다.
-  학습 데이터 버킷(KAN-201, staging)도 `force_destroy`라 샘플째 사라진다 - 로컬로 내려받지 않는다 (아래 파기 런북). ai 컨테이너 로그 그룹 `/accentury/{env}/ai`(KAN-203)도
+  음성 전용 버킷(KAN-269)은 bootstrap 소유라 환경 destroy로 지워지지 않고, 옛 학습 버킷(`accentury-staging-training`)은 Terraform 관리 밖이라 그대로 남는다 - 둘 다 사람만 지운다. ai 컨테이너 로그 그룹 `/accentury/{env}/ai`(KAN-203)도
   Terraform 소유라 로그째 지워진다 - 스트림은 인스턴스마다 쌓이지만 그룹 하나에 딸려 있다.
 - 미확인 SNS 이메일 구독은 AWS가 지워 주지 않아 state에서만 빠지지만, 토픽이
   삭제되면 딸린 구독도 함께 사라져 잔존물이 남지 않는다 (KAN-134). 재구축 때는
   토픽이 새로 생기므로 확인 메일이 다시 오고 다시 눌러야 한다.
-
-## 환경 teardown 파기 런북 (KAN-239)
-
-destroy는 리소스를 지우지만 개인정보가 담긴 **잔존물**을 전부 지우지는 않는다. 환경을 내리거나 학습 데이터의
-보유 기간이 끝났을 때는 아래 순서를 밟고, 마지막에 기록을 남긴다. 학습 데이터만 파기하는 경우(보유 기간 만료)는
-1, 2단계에서 멈추고 4단계로 간다.
-
-1. **수집 중지.** tfvars `training_bucket_enabled = false`로 apply한다. 학습 파라미터 셋과 태스크 정의 secrets가
-   빠지고 backend가 새로 뜬다 - 파라미터만 지우면 태스크 정의가 없는 파라미터를 가리켜 기동에 실패하므로 이
-   경로여야 한다. 버킷은 `force_destroy`라 객체째 사라진다(버킷 정책은 객체 본문 읽기만 거부해 목록과 삭제는
-   막지 않는다). apply 전에 객체 수를 세 둔다 - 목록은 관리자 자격 증명으로도 된다
-   (`aws s3 ls s3://<버킷> --recursive --summarize | tail -2`).
-2. **학습 쪽 사본 파기.** 반출 기록(KAN-239 코멘트)에 있는 버킷 간 복사본을 학습 담당이 지운다.
-3. **destroy와 잔존물 삭제** (환경을 내릴 때만). `terraform destroy`(위 "teardown 절차") 뒤에 남는 것:
-
-   | 잔존물 | 개인정보 | 지우는 법 |
-   | --- | --- | --- |
-   | RDS 최종 스냅샷 `accentury-prod-final-<suffix>` | **있다** - prod는 `skip_final_snapshot = false`라 destroy가 `app_user`(이름, 이메일, 생년월일, 성별)가 담긴 스냅샷을 남긴다 | 보관 이유가 없으면 `aws rds delete-db-snapshot --db-snapshot-identifier <이름>` |
-   | CloudWatch 로그 그룹 | 세션 ID, 계정 id(`세션 생성` 로그) | 모듈 소유 그룹은 destroy가 지운다. `aws logs describe-log-groups --log-group-name-prefix /accentury`로 남은 것을 확인해 `delete-log-group` |
-   | Terraform state 옛 버전 | Redis AUTH 토큰 등 시크릿 (KAN-242 전) | state 버킷은 버전 관리가 켜져 있어 옛 버전이 남는다. 환경을 영구히 내릴 때만 그 환경 키의 옛 버전을 지운다 |
-   | ECR 이미지 | 없다 (코드와 모델) | 필요 없으면 `aws ecr batch-delete-image` |
-   | SSM `/accentury/{env}/IMAGE_TAG` | 없다 | 재구축할 거면 남긴다 (위 "teardown 절차") |
-
-4. **파기 기록.** KAN-239(또는 그 시점의 담당 티켓)에 코멘트로 남긴다: 날짜와 시각(UTC), 대상(버킷 이름, 스냅샷
-   이름 등), 파기 전 객체 수, 방법(apply, delete 명령), 확인 결과(`head-bucket` 404 등). 2026-09-28 첫 파기(382개)가
-   그 양식의 첫 예다.
 
 ## 설계 결정 기록
 
@@ -2238,8 +2495,10 @@ destroy는 리소스를 지우지만 개인정보가 담긴 **잔존물**을 전
   `infra/modules/edge/spa-rewrite.test.mjs`가 이 동작을 붙들고 있다.
 - **RDS 마스터 비밀번호**: `manage_master_user_password`로 RDS가 생성해
   Secrets Manager에 보관한다. 코드, tfvars, state 어디에도 평문이 없다.
-- **AMI 고정 (ai 호스트)**: AL2023 최신 AMI를 SSM 파라미터로 읽되 `ignore_changes = [image_id]`.
-  AMI 갱신이 "plan No changes" AC를 깨고 instance refresh를 유발하지 않게 한다.
+- **AMI는 tfvars에 명시 (ai 호스트, KAN-246)**: `ai_ami_id`에 AMI ID를 적는다. 처음에는 SSM의 "최신 AMI"
+  파라미터를 읽고 `ignore_changes = [image_id]`로 묶었는데(KAN-36), 손대지 않은 plan에 교체가 끼어드는 것은
+  막았지만 최초 생성 시점의 AMI에 영구히 고정돼 OS 보안 업데이트가 들어오지 않았다. 명시하면 plan은 여전히
+  조용하고, 갱신은 값 한 줄을 바꾸는 일이 된다 ("AI 호스트 AMI 갱신").
 - **PriceClass_200**: 한국이 포함되는 최소 티어.
 - **지표 수집은 Micrometer CloudWatch push (2026-09-05, KAN-38)**: 티켓이 남긴 선택지는
   "레지스트리 push"와 "구조화 로그 기반(Logs Insights)"이었다. push를 택한 이유는 셋이다 -
@@ -2259,7 +2518,7 @@ destroy는 리소스를 지우지만 개인정보가 담긴 **잔존물**을 전
     세션, 완료)
   - AI 회로 차단기 (`AiCircuitBreaker`: 닫힘/열림/반열림 상태, 연속 실패 카운터)
   - pollAfterMs 혼잡 판정 (진행 중 AI 전달 건수 임계치)
-  - 분석 디스패처 풀 (`dispatch-concurrency` 4워커의 인메모리 큐)
+  - 분석 디스패처 풀 (`dispatch-concurrency` 3워커의 인메모리 큐)
 
   ai는 임시 디렉터리 하나를 프로세스 하나가 전용으로 쓴다 (KAN-27). 워커를
   늘리면 기동 시 잔여물 정리가 형제 워커의 처리 중 오디오를 지운다.
@@ -2408,6 +2667,16 @@ destroy는 리소스를 지우지만 개인정보가 담긴 **잔존물**을 전
 - **trusted-proxies는 VPC CIDR 하나** (KAN-129): VPC 오리진 구조에서 CloudFront 발
   트래픽은 VPC 안 ENI 사설 IP로 들어오고 ALB도 VPC 안이라 XFF의 오른쪽 두 홉이
   같은 대역에 든다. CloudFront 오리진 페이싱 공인 대역은 매칭될 일이 없어 넣지 않는다.
+  **정정 (KAN-244, 2026-10-02 staging 실측)**: XFF에는 그 공인 대역의 엣지 IP도 한 홉 들어 있어,
+  VPC CIDR만 신뢰하면 backend가 엣지 IP(예: 54.182.245.160)를 접속자로 뽑았다. 전원이 엣지 서버
+  단위로 IP 한도를 나눠 쓰고 있었다. 대역을 신뢰 목록에 넣는 대신 API 경로의 오리진 요청 정책이
+  `CloudFront-Viewer-Address`를 넘기고, backend `ClientIps`가 신뢰 프록시 뒤에서 그 헤더를 먼저 읽는다
+  (`modules/edge`의 `aws_cloudfront_origin_request_policy.api`). 대역 목록은 AWS가 바꾸면 조용히 같은
+  문제로 돌아가지만, 헤더는 CloudFront가 직접 채우는 값이라 관리할 목록이 없다.
+  **실제 원인 (2026-10-03)**: 헤더를 넘긴 뒤에도 엣지 IP가 찍혔다. Spring Boot 4.1이 ECS(`AWS_EXECUTION_ENV`)를
+  감지해 `server.forward-headers-strategy`를 `NATIVE`로 켜고, Tomcat RemoteIpValve가 XFF로 `remoteAddr`를 엣지
+  IP로 먼저 바꿔 놓아 `ClientIps`가 신뢰 프록시 뒤라는 것을 몰랐다. backend `application.yml`에서 `none`으로
+  고정했다 (`ForwardHeadersBootTest`가 실제 Tomcat으로 재현한다).
 - **Spring 프로파일 이름은 `deploy`** (KAN-129): staging과 prod가 같은 이름을 쓴다.
   환경 이름을 프로파일로 쓰면 `application-staging.yml` 같은 환경별 파일이 생길 여지가
   남아 "환경 간 차이는 tfvars와 SSM 값뿐"이 깨진다.
@@ -2473,6 +2742,6 @@ destroy는 리소스를 지우지만 개인정보가 담긴 **잔존물**을 전
   *.accentury.app)를 건다. CloudFront는 오리진 인증서 도메인이 Origin domain 값
   또는 오리진으로 전달되는 Host 헤더와 맞으면 받아들이는데(AWS 문서 "Require
   HTTPS for communication between CloudFront and your custom origin"), API 동작이
-  Managed-AllViewer라 Host가 ALB까지 가므로 ALB DNS 이름과 인증서가 달라도
+  viewer 헤더를 전부 넘기는 정책(KAN-244부터 Managed-AllViewer 대신 사용자 정의 `api` 정책)이라 Host가 ALB까지 가므로 ALB DNS 이름과 인증서가 달라도
   된다. VPC 오리진 정책은 https-only, alb-sg 인바운드는 443만 연다. 인증서
   2장(us-east-1은 뷰어 구간, 서울은 오리진 구간)이 각각 쓰인다.

@@ -63,7 +63,7 @@ resource "aws_lb_target_group" "backend" {
 #   - CloudFront는 오리진 인증서가 신뢰 CA 발급(ELB는 ACM 가능)이고, 인증서 도메인이
 #     Origin domain 값 "또는 오리진으로 전달되는 Host 헤더" 중 하나와 일치하면 받아들인다
 #     (Require HTTPS for communication between CloudFront and your custom origin).
-#   - /v0/*, /admin/v0/* 동작은 Managed-AllViewer라 Host(accentury.app 등)가 ALB까지 온다.
+#   - /v0/*, /admin/v0/* 동작은 viewer 헤더를 전부 넘기는 정책(아래 api 정책)이라 Host(accentury.app 등)가 ALB까지 온다.
 #     그래서 ALB DNS 이름(internal-*.elb.amazonaws.com)과 인증서가 안 맞아도 문제없고,
 #     서울 리전 ACM 인증서(accentury.app + *.accentury.app, KAN-119)로 충분하다.
 #   - VPC 오리진 문서는 NLB TLS 리스너만 미지원으로 적고 ALB HTTPS에는 제약이 없다.
@@ -190,6 +190,29 @@ data "aws_iam_policy_document" "web_bucket" {
       values   = [aws_cloudfront_distribution.this.arn]
     }
   }
+
+  # TLS가 아닌 요청 거부 (KAN-245, 보안 검토 #11). CloudFront OAC는 HTTPS로 원본에 붙고, 웹 배포(aws s3 sync)도
+  # HTTPS라 영향이 없다. training(KAN-239)과 tfstate(KAN-242) 버킷과 같은 문장이다.
+  statement {
+    sid     = "DenyInsecureTransport"
+    effect  = "Deny"
+    actions = ["s3:*"]
+    resources = [
+      aws_s3_bucket.web.arn,
+      "${aws_s3_bucket.web.arn}/*",
+    ]
+
+    principals {
+      type        = "*"
+      identifiers = ["*"]
+    }
+
+    condition {
+      test     = "Bool"
+      variable = "aws:SecureTransport"
+      values   = ["false"]
+    }
+  }
 }
 
 resource "aws_s3_bucket_policy" "web" {
@@ -218,8 +241,80 @@ data "aws_cloudfront_cache_policy" "caching_optimized" {
   name = "Managed-CachingOptimized"
 }
 
-data "aws_cloudfront_origin_request_policy" "all_viewer" {
-  name = "Managed-AllViewer"
+# API 경로(/v0/*, /admin/v0/*)의 오리진 요청 정책 (KAN-244). Managed-AllViewer와 같이 viewer의 헤더,
+# 쿠키, 쿼리 문자열을 전부 넘기고, CloudFront 헤더는 CloudFront-Viewer-Address 하나만 더한다.
+#
+# backend가 요청 제한과 감사의 기준 IP를 정하려면 접속자 IP가 필요한데, XFF만으로는 안 된다. VPC
+# 오리진이라도 ALB가 XFF에 덧붙이는 직전 홉은 CloudFront 오리진 페이싱 공인 IP(예: 54.182.240.0/21)라,
+# 신뢰 목록(VPC CIDR)에 없는 그 홉을 backend가 접속자로 고른다 (2026-10-02 staging 실측, 실제 IP
+# 58.72.42.92가 54.182.245.160으로 찍혔다). CloudFront 대역을 신뢰 목록에 넣는 안은 AWS가 대역을
+# 바꾸면 조용히 같은 문제로 돌아가서 고르지 않았다. 이 헤더는 CloudFront가 직접 채우는 값이라
+# viewer가 위조할 수 없다 (AWS 문서 "trusted, immutable header").
+#
+# Managed-AllViewerAndCloudFrontHeaders를 쓰지 않는 이유: 도시, 위경도, 우편번호 같은 위치 헤더까지
+# 넘긴다. backend가 쓰지 않는 위치 정보를 받지 않는다.
+resource "aws_cloudfront_origin_request_policy" "api" {
+  name    = "${local.name}-api"
+  comment = "accentury ${var.env} API - all viewer values + CloudFront-Viewer-Address, KAN-244"
+
+  headers_config {
+    header_behavior = "allViewerAndWhitelistCloudFront"
+    headers {
+      items = ["CloudFront-Viewer-Address"]
+    }
+  }
+
+  cookies_config {
+    cookie_behavior = "all"
+  }
+
+  query_strings_config {
+    query_string_behavior = "all"
+  }
+}
+
+# 보안 응답 헤더 (KAN-245, 보안 검토 #14). 세 동작(/v0/*, /admin/v0/*, 웹 기본)에 같은 정책을 붙인다.
+#   - HSTS 1년 + includeSubDomains. preload는 넣지 않는다 - 브라우저 목록에서 빼기가 몇 달 걸려 되돌릴 수 없다.
+#   - nosniff, 프레이밍 전면 차단(DENY), strict-origin-when-cross-origin.
+#   - CSP는 Report-Only로 시작한다. 웹 번들이 쓰는 외부 출처(GA4, 광고)를 확인해 위반이 0건이 되면 강제로
+#     바꾸는 것은 후속이다 - 처음부터 강제하면 빠뜨린 출처 하나가 화면을 깨뜨린다.
+#     지금은 report-uri/report-to가 없어 위반이 각 사용자 브라우저 콘솔에만 찍힌다. 강제 전환 후속은 위반을
+#     모을 수집 지점(엔드포인트)을 먼저 만들고 여기에 붙이는 것부터다 (PR #18 리뷰).
+# override = true: backend나 S3가 같은 헤더를 보내도 이 값이 정본이다.
+resource "aws_cloudfront_response_headers_policy" "security" {
+  name    = "${local.name}-security-headers"
+  comment = "accentury ${var.env} security headers, KAN-245"
+
+  security_headers_config {
+    strict_transport_security {
+      access_control_max_age_sec = 31536000
+      include_subdomains         = true
+      preload                    = false
+      override                   = true
+    }
+
+    content_type_options {
+      override = true
+    }
+
+    frame_options {
+      frame_option = "DENY"
+      override     = true
+    }
+
+    referrer_policy {
+      referrer_policy = "strict-origin-when-cross-origin"
+      override        = true
+    }
+  }
+
+  custom_headers_config {
+    items {
+      header   = "Content-Security-Policy-Report-Only"
+      value    = "default-src 'self'; frame-ancestors 'none'; object-src 'none'; base-uri 'self'"
+      override = true
+    }
+  }
 }
 
 resource "aws_cloudfront_distribution" "this" {
@@ -262,8 +357,9 @@ resource "aws_cloudfront_distribution" "this" {
 
     # 캐싱 비활성 + 전 헤더 전달(Authorization 포함). correlation ID 박제와
     # 4xx TTL 우려(KAN-101)를 캐싱 비활성으로 해소한다.
-    cache_policy_id          = data.aws_cloudfront_cache_policy.caching_disabled.id
-    origin_request_policy_id = data.aws_cloudfront_origin_request_policy.all_viewer.id
+    cache_policy_id            = data.aws_cloudfront_cache_policy.caching_disabled.id
+    origin_request_policy_id   = aws_cloudfront_origin_request_policy.api.id
+    response_headers_policy_id = aws_cloudfront_response_headers_policy.security.id
 
     viewer_protocol_policy = "redirect-to-https"
     compress               = true
@@ -281,8 +377,9 @@ resource "aws_cloudfront_distribution" "this" {
     allowed_methods = ["GET", "HEAD", "OPTIONS", "PUT", "POST", "PATCH", "DELETE"]
     cached_methods  = ["GET", "HEAD"]
 
-    cache_policy_id          = data.aws_cloudfront_cache_policy.caching_disabled.id
-    origin_request_policy_id = data.aws_cloudfront_origin_request_policy.all_viewer.id
+    cache_policy_id            = data.aws_cloudfront_cache_policy.caching_disabled.id
+    origin_request_policy_id   = aws_cloudfront_origin_request_policy.api.id
+    response_headers_policy_id = aws_cloudfront_response_headers_policy.security.id
 
     viewer_protocol_policy = "redirect-to-https"
     compress               = true
@@ -294,9 +391,10 @@ resource "aws_cloudfront_distribution" "this" {
     allowed_methods = ["GET", "HEAD"]
     cached_methods  = ["GET", "HEAD"]
 
-    cache_policy_id        = data.aws_cloudfront_cache_policy.caching_optimized.id
-    viewer_protocol_policy = "redirect-to-https"
-    compress               = true
+    cache_policy_id            = data.aws_cloudfront_cache_policy.caching_optimized.id
+    response_headers_policy_id = aws_cloudfront_response_headers_policy.security.id
+    viewer_protocol_policy     = "redirect-to-https"
+    compress                   = true
 
     # SPA 재작성은 기본 동작에만 붙인다. /v0/*에는 붙이지 않는다 (KAN-126).
     function_association {

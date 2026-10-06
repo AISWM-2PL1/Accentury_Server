@@ -91,7 +91,7 @@ class ScoreVersionRolloutTest extends IntegrationTest {
 
     @AfterEach
     void restoreBaseline() {
-        activeVersions.activate(BASELINE, "테스트 정리");
+        activeVersions.activate(BASELINE, "테스트 정리", "127.0.0.1");
     }
 
     @Test
@@ -103,7 +103,7 @@ class ScoreVersionRolloutTest extends IntegrationTest {
         // 전환 전 세션 - 생성 시점의 sv-0.3에 고정된다.
         SessionHandle before = flow.createSession();
 
-        activeVersions.activate(REISSUE, "KAN-200 sv-0.4 전환");
+        activeVersions.activate(REISSUE, "KAN-200 sv-0.4 전환", "127.0.0.1");
         // 전환 뒤 세션 - 응답부터 sv-0.4다. 세트 1을 못 박는 것은 정답표를 상수로 두기 위해서다 (KAN-205).
         MvcResult created = mockMvc.perform(post("/v0/sessions")
                         .contentType(MediaType.APPLICATION_JSON).content("{ \"voiceSet\": 1 }"))

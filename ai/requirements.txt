@@ -1,5 +1,12 @@
-# 런타임 의존성 (KAN-27 스켈레톤).
-# 모델 추론 의존성(librosa, torch 등)은 KAN-22에서 더한다.
-fastapi>=0.115
-python-multipart>=0.0.9
+# 서비스 계층의 런타임 의존성 (KAN-27 스켈레톤). 모델 추론 의존성(torch, transformers 등)은 여기 없다 -
+# 운영 이미지의 베이스인 모델 전달본에 들어 있다 (ai/Dockerfile).
+#
+# 이 파일은 허용 범위이고, 이미지가 실제로 설치하는 버전은 requirements.lock이다 (KAN-246). 여기를 고치면
+# 잠금 파일을 다시 만든다 (README.md "의존성 잠금").
+#
+# 하한의 근거 (보안 검토 리포트 #12): python-multipart 0.0.18이 CVE-2024-53981을, starlette 0.40.0과 0.47.2가
+# CVE-2024-47874와 CVE-2025-54121을 고쳤다. fastapi 0.116.1은 starlette 0.47.2 이상을 받아들이는 첫 버전대다.
+fastapi>=0.116.1
+starlette>=0.47.2
+python-multipart>=0.0.18
 uvicorn>=0.30

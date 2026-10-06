@@ -62,14 +62,15 @@ public class ActiveVersionService {
      *
      * @param testVersion 활성으로 만들 발행본의 버전
      * @param reason      운영자가 남기는 사유 - 감사 이력에 그대로 저장된다. 선택 입력이다.
+     * @param callerIp    호출 IP - 감사 이력의 {@code caller_ip}로 저장된다 (KAN-244)
      * @throws ApiException 발행되지 않은 버전이면 404 {@code RESOURCE_NOT_FOUND},
      *                      MVP에서 활성화할 수 없는 방언이면 409 {@code ADMIN_DIALECT_NOT_ALLOWED}
      */
-    public ActiveVersionResponse activate(String testVersion, @Nullable String reason) {
+    public ActiveVersionResponse activate(String testVersion, @Nullable String reason, String callerIp) {
         // 대상이 요청에 실려 오므로 잠금 전에 검증할 수 있다 - 거절될 요청이 포인터 행을
         // 붙들면 정상 전환이 그 뒤에 줄을 선다.
         requireActivatable(testVersion);
-        return apply(ActiveVersionAudit.Action.ACTIVATE, pointer -> testVersion, reason);
+        return apply(ActiveVersionAudit.Action.ACTIVATE, pointer -> testVersion, reason, callerIp);
     }
 
     /**
@@ -85,10 +86,11 @@ public class ActiveVersionService {
      * 감사 이력에는 존재한 적 없는 "C 다음 B" 관계가 남는다. 그래서 활성 전환과 달리 롤백은
      * 검증도 잠금 안에서 한다 - 무엇을 검증할지가 잠금을 잡아야 정해지기 때문이다.
      *
+     * @param callerIp 호출 IP - 감사 이력의 {@code caller_ip}로 저장된다 (KAN-244)
      * @throws ApiException 되돌아갈 이전 버전이 없으면 409 {@code ADMIN_ROLLBACK_UNAVAILABLE}
      *                      (최초 발행 직후가 그렇다)
      */
-    public ActiveVersionResponse rollback(@Nullable String reason) {
+    public ActiveVersionResponse rollback(@Nullable String reason, String callerIp) {
         return apply(ActiveVersionAudit.Action.ROLLBACK, pointer -> {
             String target = pointer.previousTestVersion();
             if (target == null) {
@@ -96,7 +98,7 @@ public class ActiveVersionService {
             }
             requireActivatable(target);
             return target;
-        }, reason);
+        }, reason, callerIp);
     }
 
     /** 지금 활성인 버전과 롤백 목적지 - 관리자 목록 조회(§6)가 쓴다. */
@@ -143,7 +145,8 @@ public class ActiveVersionService {
      */
     private synchronized ActiveVersionResponse apply(ActiveVersionAudit.Action action,
                                                      Function<ActiveTestVersion, String> target,
-                                                     @Nullable String reason) {
+                                                     @Nullable String reason,
+                                                     String callerIp) {
         Instant now = Instant.now();
         Outcome outcome = Objects.requireNonNull(transactionTemplate.execute(tx -> {
             ActiveTestVersion pointer = activeVersions.lockById(ActiveTestVersion.CURRENT)
@@ -156,13 +159,13 @@ public class ActiveVersionService {
                         pointer.activatedAt(), false);
             }
             pointer.moveTo(testVersion, now);
-            audits.save(new ActiveVersionAudit(action, previous, testVersion, reason, now));
+            audits.save(new ActiveVersionAudit(action, previous, testVersion, reason, callerIp, now));
             return new Outcome(testVersion, previous, now, true);
         }));
 
         if (outcome.changed()) {
-            log.info("활성 테스트 버전 전환 action={} from={} to={} reason={}",
-                    action, outcome.previousVersion(), outcome.activeVersion(), reason);
+            log.info("활성 테스트 버전 전환 action={} from={} to={} reason={} ip={}",
+                    action, outcome.previousVersion(), outcome.activeVersion(), reason, callerIp);
         }
         return new ActiveVersionResponse(outcome.activeVersion(), outcome.previousVersion(),
                 outcome.activatedAt(), outcome.changed());

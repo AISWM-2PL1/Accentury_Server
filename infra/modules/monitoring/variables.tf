@@ -234,3 +234,14 @@ variable "analysis_timeout_threshold" {
     error_message = "analysis_timeout_threshold는 0 이상이어야 합니다."
   }
 }
+
+variable "analysis_unscorable_threshold" {
+  type        = number
+  description = "5분 동안 허용하는 채점 불가(ANALYSIS_UNSCORABLE) 건수 (KAN-272). 모델 결과에 NaN이 섞인 경우이고, 2026-10 prod에서는 분석의 약 5%(AI 1대 최대 처리량에서 5분에 2건 안팎)였다. 그 위에 선을 긋는다 - 모델이나 참조 데이터 회귀로 급증하면 운다."
+  default     = 5
+
+  validation {
+    condition     = var.analysis_unscorable_threshold >= 0
+    error_message = "analysis_unscorable_threshold는 0 이상이어야 합니다."
+  }
+}

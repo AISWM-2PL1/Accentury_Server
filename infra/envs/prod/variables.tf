@@ -56,29 +56,13 @@ variable "ai_max_size" {
 
 variable "training_bucket_enabled" {
   type        = bool
-  description = "staging 전용 학습 데이터 S3 버킷과 그 접근 권한, 버킷 정책, 학습 읽기 역할, SSM ACCENTURY_TRAINING_CONSENTEDBUCKET / TESTERIDS / PSEUDONYMKEY를 만들지 (KAN-201, KAN-239). staging true, prod false - prod는 FR-DP-01 그대로라 반드시 false다. 값을 바꾸면 태스크 정의 secrets가 바뀌어 backend 태스크가 새로 뜬다. false로 바꾸는 apply가 곧 수집 중지이자 버킷 파기다(force_destroy)."
+  description = "이 환경에서 음성 저장을 켤지 (KAN-201, KAN-269). true면 SSM ACCENTURY_TRAINING_BUCKET(음성 전용 버킷 accentury-voice-<계정 ID>)과 ACCENTURY_TRAINING_KEYPREFIX(환경 이름)가 생기고 태스크 역할이 그 버킷의 자기 환경 접두사 아래로 PutObject를 얻는다. 버킷 자체는 bootstrap 스택이 만들며 이 스위치와 무관하게 남는다. 저장 대상은 음성 저장에 동의한 세션뿐이다. 두 환경 모두 true다 (2026-10-04 결정). 값을 바꾸면 태스크 정의 secrets가 바뀌어 backend 태스크가 새로 뜬다."
   default     = false
 }
 
-variable "training_retention_until" {
+variable "ai_ami_id" {
   type        = string
-  description = "학습 데이터 보유 기간 만료일 (KAN-239) - 테스터 동의서의 보유 기간 끝날과 같은 날이다. S3 수명주기 만료일이라 UTC 자정의 RFC3339(예: 2026-12-31T00:00:00Z)만 받는다. training_bucket_enabled = true인데 없으면 plan이 실패한다."
-  default     = null
-
-  validation {
-    # 정규식은 모양만 본다 - 2026-13-45 같은 없는 날짜는 formatdate(RFC3339 파서)가 거른다 (PR #4 리뷰 P3).
-    condition = var.training_retention_until == null || (
-      can(regex("^\\d{4}-\\d{2}-\\d{2}T00:00:00Z$", var.training_retention_until))
-      && can(formatdate("YYYY", var.training_retention_until))
-    )
-    error_message = "training_retention_until은 UTC 자정의 RFC3339여야 한다 (예: 2026-12-31T00:00:00Z) - S3 수명주기 만료일 규칙이다."
-  }
-}
-
-variable "training_reader_principals" {
-  type        = list(string)
-  description = "학습 읽기 역할(accentury-<env>-training-reader)을 맡을 수 있는 주체 ARN 목록 (KAN-239). 비우면 이 계정 루트라 계정 안에서 sts:AssumeRole을 허용받은 IAM 주체가 맡는다. 학습 데이터의 객체 본문(GetObject)은 이 역할만 읽는다."
-  default     = []
+  description = "AI 호스트의 AMI ID (KAN-246). AL2023 x86_64. 월 1회 staging, prod 순으로 최신 값으로 바꾼다 (README \"AI 호스트 AMI 갱신\")."
 }
 
 variable "ai_root_volume_size" {
@@ -117,6 +101,21 @@ variable "waf_enforce" {
 variable "waf_rate_limit" {
   type        = number
   description = "WAF rate-based rule: IP당 5분 창의 세션 생성 + 음성 업로드 허용 수 (KAN-149). 산정 근거는 README 'WAF 웹 ACL'."
+}
+
+variable "waf_auth_rate_limit" {
+  type        = number
+  description = "WAF rate-based rule: IP당 5분 창의 로그인 + refresh 허용 수 (KAN-244). 근거는 README 'WAF 웹 ACL'."
+}
+
+variable "waf_admin_rate_limit" {
+  type        = number
+  description = "WAF rate-based rule: IP당 5분 창의 관리자 경로 요청 허용 수 (KAN-244). 근거는 README 'WAF 웹 ACL'."
+}
+
+variable "waf_ip_reputation_enforce" {
+  type        = bool
+  description = "IP 평판 관리형 규칙을 차단으로 돌릴지 (KAN-244). waf_enforce와 둘 다 true여야 차단한다. Count로 관찰한 뒤 true로 바꾼다."
 }
 
 variable "db_deletion_protection" {

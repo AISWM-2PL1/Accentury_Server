@@ -13,6 +13,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from app.config import Settings
+from app.engine import EngineBusy
 from app.main import create_app
 from tests.conftest import FAIL_ITEM, FAKE_MODEL_VERSION, FakeEngine, meta, post, residue
 
@@ -81,6 +82,55 @@ def test_추론_중_예외가_나도_오디오가_남지_않는다(settings):
             post(client)
 
     assert residue(settings) == []
+
+
+def test_엔진_예외는_문항과_추적_ID를_남기고_그대로_올라간다(settings, caplog):
+    # KAN-272. 서버가 찍는 스택트레이스에는 문항 ID가 없어, 500이 어느 문항에서 났는지 로그로
+    # 되찾을 수 없었다. 응답은 바뀌지 않는다 - 그대로 500이고 BE가 재전송한다
+    engine = FakeEngine(error=RuntimeError("전사: 내일 잔치가 있어서"))
+
+    with TestClient(create_app(settings, engine=engine)) as client:
+        with caplog.at_level(logging.ERROR, logger="app.analyze"):
+            with pytest.raises(RuntimeError):
+                post(client, item_id="v7")
+
+    실패 = [record.getMessage() for record in caplog.records if "분석 실패" in record.getMessage()]
+    assert len(실패) == 1
+    assert "itemId=v7" in 실패[0]
+    assert "correlationId=" in 실패[0]
+    assert "kind=RuntimeError" in 실패[0]
+    # 예외 메시지는 싣지 않는다 - 발화 내용이 섞일 수 있다 (NFR-SC-07)
+    assert "잔치" not in 실패[0]
+
+
+def test_엔진이_추론_전에_접으면_과부하_429다(settings, caplog):
+    # KAN-272. 추론을 시작하지 않은 거절이다 - BE는 429를 추론 전 거절로 보아 시도 예산을 깎지
+    # 않고 다시 보낸다 (§4.1). 500이나 503으로 나가면 사용자의 문항별 상한이 서버 사정으로 깎인다
+    engine = FakeEngine(error=EngineBusy("남은 시간이 모자라다"))
+
+    with TestClient(create_app(settings, engine=engine)) as client:
+        with caplog.at_level(logging.WARNING, logger="app.analyze"):
+            response = post(client, item_id="v3")
+
+    assert response.status_code == 429
+    assert response.json()["status"] == "FAILED"
+    거절 = [record.getMessage() for record in caplog.records if "추론 전 거절" in record.getMessage()]
+    assert len(거절) == 1
+    assert "itemId=v3" in 거절[0]
+    # 엔진 예외 로그(500 경로)로는 남지 않는다 - 고장이 아니라 과부하다
+    assert not [record for record in caplog.records if "엔진 예외" in record.getMessage()]
+    assert residue(settings) == []
+
+
+def test_판정_실패의_종료_로그에_품질_코드가_있다(client, caplog):
+    # 판정 실패가 어느 코드였는지 로그만으로 셀 수 있어야 한다 (KAN-272)
+    with caplog.at_level(logging.INFO, logger="app.analyze"):
+        response = post(client, item_id=FAIL_ITEM)
+
+    assert response.status_code == 422
+    종료 = [record.getMessage() for record in caplog.records if "분석 종료" in record.getMessage()]
+    assert len(종료) == 1
+    assert f"status=FAILED quality={response.json()['quality']['code']} " in 종료[0]
 
 
 def test_본문_상한을_넘으면_파싱_전에_413이다(tmp_path):

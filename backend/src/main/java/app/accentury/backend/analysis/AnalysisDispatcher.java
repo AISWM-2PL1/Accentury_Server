@@ -1,9 +1,9 @@
 package app.accentury.backend.analysis;
 
+import app.accentury.backend.training.VoiceConsent;
 import org.jspecify.annotations.Nullable;
 
 import java.util.Arrays;
-import java.util.UUID;
 
 /**
  * 검증이 끝난 업로드를 AI 분석으로 넘기는 경계 (KAN-23 정의, KAN-24 구현).
@@ -98,11 +98,15 @@ public interface AnalysisDispatcher {
      * @param scriptKey 정의의 실모델 참조 키 ("1|5" 형식, KAN-182) - 실모델이 문장을 찾는 값이다.
      *                  정의에 없는 문항(더미 정의)은 null이고 meta에서 생략된다. 스텁 엔진은
      *                  무시한다. 실모델 어댑터가 이 키로 문장을 찾는 부분은 KAN-22다.
-     * @param region    세션이 받은 출신 지역 코드 (KAN-201, {@code Region}) - AI에는 가지 않고 staging의
+     * @param region    세션이 받은 출신 지역 코드 (KAN-201, {@code Region}) - AI에는 가지 않고
      *                  학습 데이터 저장({@code TrainingSampleStore})만 읽는다. 보내지 않은 세션은 null이고
      *                  저장 쪽이 UNKNOWN으로 쓴다.
-     * @param ownerId   세션 소유 계정 ({@code test_session.user_id}, KAN-223) - AI에는 가지 않고 학습 데이터 저장이
-     *                  동의 테스터인지 가르는 데만 쓴다 (KAN-239). 익명 세션(웹)은 null이다.
+     * @param voiceConsent 이 세션의 음성 저장 동의 (KAN-269, {@code VoiceConsents}) - AI에는 가지 않고 학습 데이터
+     *                  저장만 읽는다. null이면 동의가 없는 세션이고 음성은 어디에도 남지 않는다.
+     * @param labelOnlyWithoutConsent 동의가 없을 때 음성 없이 라벨 JSON(점수와 출신 지역)만 남길 세션인가 (KAN-274) -
+     *                  AI에는 가지 않고 학습 데이터 저장만 읽는다. 계정에 묶이지 않은 익명 세션이면서 실사용자
+     *                  트래픽일 때만 true다. 계정 세션과 합성 트래픽(배포 스모크) 세션은 false이고, 동의가
+     *                  없으면 아무것도 남기지 않는다.
      * @param audio     WAV 원본 - 클라이언트 업로드를 그대로 패스스루한다 (§4.1).
      *                  소유권은 {@code dispatch()}로 넘어간다 (위 계약 참조).
      */
@@ -114,9 +118,26 @@ public interface AnalysisDispatcher {
             String testVersion,
             String scoreVersion,
             @Nullable String region,
-            @Nullable UUID ownerId,
             long durationMs,
+            @Nullable VoiceConsent voiceConsent,
+            boolean labelOnlyWithoutConsent,
             byte[] audio) {
+
+        /** 음성 저장 동의가 없는 계정 세션 모양의 요청 - 아무것도 남지 않는다 (KAN-269). */
+        public AnalysisRequest(String analysisJobId, String sessionId, String itemId, @Nullable String scriptKey,
+                               String testVersion, String scoreVersion, @Nullable String region, long durationMs,
+                               byte[] audio) {
+            this(analysisJobId, sessionId, itemId, scriptKey, testVersion, scoreVersion, region, durationMs,
+                    null, false, audio);
+        }
+
+        /** 라벨 전용 저장 필드가 없던 모양 (KAN-274 이전) - 동의가 없으면 아무것도 남지 않는다. */
+        public AnalysisRequest(String analysisJobId, String sessionId, String itemId, @Nullable String scriptKey,
+                               String testVersion, String scoreVersion, @Nullable String region, long durationMs,
+                               @Nullable VoiceConsent voiceConsent, byte[] audio) {
+            this(analysisJobId, sessionId, itemId, scriptKey, testVersion, scoreVersion, region, durationMs,
+                    voiceConsent, false, audio);
+        }
 
         /**
          * 오디오 버퍼를 0으로 덮어쓴다 - 분석이 종결되는 즉시 호출한다 (KAN-27, NFR-PR-03).

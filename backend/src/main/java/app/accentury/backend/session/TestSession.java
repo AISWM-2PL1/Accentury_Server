@@ -57,7 +57,7 @@ public class TestSession implements Persistable<String> {
 
     /**
      * 생성 시점에 고정되는 음성 문항 세트 번호 (1부터, KAN-182, §5.4). 세션의 유효 문항은
-     * {@code testVersion}과 이 번호로 정해지는 세트 하나(음성 5 + 어휘 5)뿐이다 -
+     * {@code testVersion}과 이 번호로 정해지는 세트 하나(구성은 정의의 setLayout, KAN-260)뿐이다 -
      * 제출 검증, 상태 조회, 완주 판정, 집계가 전부 이 세트만 본다. 기본 1이라 세트를
      * 모르는 클라이언트는 현행과 같다.
      */
@@ -89,6 +89,16 @@ public class TestSession implements Persistable<String> {
      */
     @Column(name = "user_id")
     private @Nullable UUID userId;
+
+    /**
+     * 웹 익명 세션의 음성 저장 선택 동의 (KAN-269) - 세션 생성 요청의 {@code voiceConsentVersion}이 서버 게시
+     * 버전과 같을 때만 값이 있다. 계정 세션은 쓰지 않는다 - 업로드 시점에 계정의 동의를 본다.
+     */
+    @Column(name = "voice_consent_version", length = 32)
+    private @Nullable String voiceConsentVersion;
+
+    @Column(name = "voice_consent_at")
+    private @Nullable Instant voiceConsentAt;
 
     /**
      * 이 세션이 실사용자인지 검증용 합성 트래픽인지 (KAN-138).
@@ -148,6 +158,21 @@ public class TestSession implements Persistable<String> {
         this.userId = userId;
         this.createdAt = createdAt;
         this.expiresAt = expiresAt;
+    }
+
+    /** 익명 세션의 음성 저장 동의를 기록한다 (KAN-269) - 저장 전에 한 번만 부른다. */
+    public TestSession withVoiceConsent(String version, Instant consentedAt) {
+        this.voiceConsentVersion = version;
+        this.voiceConsentAt = consentedAt;
+        return this;
+    }
+
+    public @Nullable String voiceConsentVersion() {
+        return voiceConsentVersion;
+    }
+
+    public @Nullable Instant voiceConsentAt() {
+        return voiceConsentAt;
     }
 
     public boolean isExpired(Instant now) {

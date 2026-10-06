@@ -23,8 +23,9 @@ output "alarm_names" {
     aws_cloudwatch_metric_alarm.ai_temp_residue.alarm_name,
     aws_cloudwatch_metric_alarm.analysis_backlog_high.alarm_name,
     aws_cloudwatch_metric_alarm.analysis_timeouts_high.alarm_name,
+    aws_cloudwatch_metric_alarm.analysis_unscorable_high.alarm_name,
   ]
-  description = "생성된 경보 이름 13종 (KAN-134의 ALB, RDS 3종 + KAN-165의 backend 서비스 2종 + KAN-36의 AI 4종 + KAN-38의 관측성 3종 + KAN-201의 AI 대상 그룹 1종). describe-alarms로 상태를 확인할 때 쓴다."
+  description = "생성된 경보 이름 14종 (KAN-134의 ALB, RDS 3종 + KAN-165의 backend 서비스 2종 + KAN-36의 AI 4종 + KAN-38의 관측성 3종 + KAN-201의 AI 대상 그룹 1종 + KAN-272의 채점 불가 1종). describe-alarms로 상태를 확인할 때 쓴다."
 }
 
 output "dashboard_name" {

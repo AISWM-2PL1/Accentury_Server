@@ -78,7 +78,9 @@ class AnalysisStatusApiTest extends IntegrationTest {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.items[0].status").value("PROCESSING"))
                 .andExpect(jsonPath("$.items[0].quality").doesNotExist())
-                .andExpect(jsonPath("$.items[0].error").doesNotExist());
+                .andExpect(jsonPath("$.items[0].error").doesNotExist())
+                // 혼잡하지 않으면 대기 안내도 없다 (KAN-272) - 분석 중인 시도가 있어도 필드 자체가 빠진다.
+                .andExpect(jsonPath("$.queue").doesNotExist());
     }
 
     @Test
@@ -239,6 +241,43 @@ class AnalysisStatusApiTest extends IntegrationTest {
         // 밀림이 풀리면 TTL 뒤에 기준 간격으로 돌아온다 (위에서 캐시를 비웠으므로 즉시).
         mockMvc.perform(statuses(session))
                 .andExpect(jsonPath("$.pollAfterMs").value(base));
+    }
+
+    // === 혼잡 안내 queue (§3.4, KAN-272) ===
+
+    @Test
+    void 혼잡하면_이_세션의_가장_오래된_분석_중_시도보다_앞선_건수를_싣는다() throws Exception {
+        // 대기 화면이 "앞에 N건이 있어요"를 보여 주고 폴링 상한을 늘리는 근거다 (§5.3 규칙 5).
+        // 건수는 전 세션 기준이다 - 다른 태스크가 접수한 작업도 같은 AI의 차례를 쓴다.
+        int threshold = properties.analysis().congestionThreshold();
+        // 접수 시각을 한 시간 전으로 둔다 - 이 클래스의 다른 테스트가 남긴 분석 중 작업(방금 접수)이
+        // 앞선 건수에 섞이지 않게 한다 (클래스 안에서는 DB를 비우지 않는다).
+        Instant mine = Instant.now().minusSeconds(3600);
+        SessionHandle session = createSession();
+        SessionHandle other = createSession();
+        List<AnalysisJob> backlog = new ArrayList<>();
+        backlog.add(saveJob(session, "v1", 1, mine));
+        // 이 세션의 뒤 문항은 앞선 건수에 들어가지 않는다 - 자기 자신은 줄에서 세지 않는다.
+        backlog.add(saveJob(session, "v2", 1, mine.plusSeconds(1)));
+        // 먼저 접수된 것 threshold건(앞에 선 줄)과 나중에 접수된 것 2건(뒤에 선 줄)
+        for (int i = 0; i < threshold; i++) {
+            backlog.add(saveJob(other, "v" + (i % 5 + 1), i / 5 + 1, mine.minusSeconds(30 - i)));
+        }
+        backlog.add(saveJob(other, "v1", 90, mine.plusSeconds(5)));
+        backlog.add(saveJob(other, "v2", 90, mine.plusSeconds(6)));
+        congestion.invalidate();
+        try {
+            mockMvc.perform(statuses(session))
+                    .andExpect(status().isOk())
+                    .andExpect(jsonPath("$.queue.ahead").value(threshold));
+            // 줄을 서지 않은 세션에는 싣지 않는다 - 혼잡해도 안내할 것이 없고 건수 조회도 나가지 않는다.
+            mockMvc.perform(statuses(createSession()))
+                    .andExpect(status().isOk())
+                    .andExpect(jsonPath("$.queue").doesNotExist());
+        } finally {
+            repository.deleteAll(backlog);
+            congestion.invalidate();
+        }
     }
 
     // === 단건 조회 (§3.4 - "동일 스키마 + modelVersion, scoreVersion") ===

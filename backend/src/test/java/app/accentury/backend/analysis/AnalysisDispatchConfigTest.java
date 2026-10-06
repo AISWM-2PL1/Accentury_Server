@@ -70,7 +70,8 @@ class AnalysisDispatchConfigTest {
 
     @Test
     void 기본_큐_용량은_큐_유실_한도_안에_소진되는_크기다() {
-        // 워커 1개가 1건 10초(KAN-57)로 비우므로 큐 30건 = 5분 = queued-timeout. 그 뒤는 스위퍼가 정리하니
+        // AI 1대가 1건 10초(KAN-57)로 비우므로 큐 30건 = 5분 = queued-timeout (워커 수와 무관하다 - AI가
+        // 한 번에 하나만 추론한다. AI가 2대 이상이면 더 빨리 빈다, KAN-272). 그 뒤는 스위퍼가 정리하니
         // 접수 시점에 503으로 미는 편이 낫다 (KAN-172).
         AccenturyProperties.Analysis analysis = PropertiesFixture.analysis();
         ThreadPoolTaskExecutor executor = new AnalysisDispatchConfig().analysisExecutor(
@@ -91,7 +92,7 @@ class AnalysisDispatchConfigTest {
                 Duration.ofMillis(500), Duration.ofSeconds(30));
         RestAiAnalysisClient client = new RestAiAnalysisClient(restClient, restClient, new ObjectMapper(), null);
         AnalysisDispatcher.AnalysisRequest request = new AnalysisDispatcher.AnalysisRequest(
-                "a_connect", "s_connect", "v1", null, "gn-2026.08.1", "sv-0.3", null, null, 3000, new byte[] {1, 2, 3});
+                "a_connect", "s_connect", "v1", null, "gn-2026.08.1", "sv-0.3", null, 3000, new byte[] {1, 2, 3});
 
         long started = System.nanoTime();
         AiAnalysisClient.AiUnavailableException e = assertThrows(AiAnalysisClient.AiUnavailableException.class,

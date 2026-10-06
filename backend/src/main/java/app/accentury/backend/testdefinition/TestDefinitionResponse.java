@@ -16,7 +16,8 @@ import java.util.List;
  *
  * @param voiceSet      이 응답이 담은 세트 번호 (1부터) - 세션 생성의 {@code voiceSet}과 같은 값
  * @param voiceSetCount 이 버전의 세트 수 - 앱이 "모든 세트 경험" UI를 만들 때 쓴다 (KAN-182)
- * @param items         세트의 음성 5 + 어휘 5, seq 1..10 교차 순서
+ * @param items         세트 문항, seq 1..세트 문항 수 - 순서는 정의의 setLayout이다 (KAN-260. 없으면
+ *                      음성 5 + 어휘 5 교차)
  */
 public record TestDefinitionResponse(
         String testVersion,

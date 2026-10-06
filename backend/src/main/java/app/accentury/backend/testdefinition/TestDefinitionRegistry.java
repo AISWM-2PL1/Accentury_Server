@@ -34,12 +34,13 @@ import java.util.Set;
  * (발행 거부 - KAN-10 AC, KAN-26 AC, §6). 로드 후 이 맵은 불변이라 잠금 없이 읽는다 -
  * 발행이 마이그레이션으로만 일어나므로 프로세스가 사는 동안 정의가 늘지 않는다.
  * <p>
- * <b>발행본은 풀이고 세션은 세트를 본다</b> (KAN-182). 발행본 하나는 음성 문장 풀(N >= 5)과
- * 어휘 5문항이고, 기동 시 {@link VoiceSets} 규칙으로 세트(음성 5 + 어휘 5)를 전부 유도해
- * 세트별 공개 응답과 ETag를 미리 만들어 둔다. 활성 전환의 비용은 그대로 포인터 읽기뿐이다.
- * 세션이 유효 문항으로 삼는 것은 자기 세트의 10문항이고, 제출 검증과 상태 조회, 완주 판정,
+ * <b>발행본은 풀이고 세션은 세트를 본다</b> (KAN-182). 발행본 하나는 음성 문장 풀과 어휘 풀이고,
+ * 기동 시 {@link VoiceSets} 규칙으로 세트를 전부 유도해 세트별 공개 응답과 ETag를 미리 만들어
+ * 둔다. 세트의 구성은 발행본의 {@link SetLayout}이 정한다 (KAN-260 - 없으면 음성 5 + 어휘 5,
+ * {@code gn-2026.10.1}부터 음성 3 + 어휘 4). 활성 전환의 비용은 그대로 포인터 읽기뿐이다.
+ * 세션이 유효 문항으로 삼는 것은 자기 세트의 문항이고, 제출 검증과 상태 조회, 완주 판정,
  * 집계는 전부 {@link #sessionDefinition}이 주는 그 목록만 쓴다 - 열어 두면 한 세션에 음성
- * 점수가 5개 넘게 쌓여 집계가 깨진다.
+ * 점수가 세트의 음성 문항 수보다 많이 쌓여 집계가 깨진다.
  * <p>
  * <b>활성 버전은 메모리에 들고 있지 않는다</b> (KAN-167). KAN-26은 활성 정의를 {@code volatile}
  * 참조로 두고 전환 서비스가 커밋 뒤에 갈아 끼웠는데, backend가 Fargate 태스크 여러 개로 돌면
@@ -56,14 +57,6 @@ public class TestDefinitionRegistry {
 
     /** MVP 대상 방언 - 경남 고정 (KAN-8 범위 제외). 경북 정의는 발행 불가 (§6) */
     static final String DIALECT_GYEONGNAM = "GYEONGNAM";
-
-    /**
-     * 문항 구성 확정(2026-07-27): 세션이 응시하는 것은 음성 5 + 어휘 5 = 10문항이다. 발행본의
-     * 음성과 어휘는 둘 다 풀이라 각각 5개 이상이면 되고(KAN-182 · 어휘 풀은 2026-09-04 확장),
-     * 5는 세트 하나가 각 풀에서 가져오는 수이자 풀의 최소 크기다 ({@link VoiceSets#SET_SIZE}).
-     */
-    static final int VOICE_SET_SIZE = VoiceSets.SET_SIZE;
-    static final int VOCABULARY_SET_SIZE = VoiceSets.SET_SIZE;
 
     /** 어휘 문항은 4지선다다 (SRS 확정, KAN-13). */
     static final int CHOICE_COUNT = 4;
@@ -124,10 +117,10 @@ public class TestDefinitionRegistry {
     }
 
     /**
-     * 세트 하나 - 세션이 실제로 응시하는 10문항.
+     * 세트 하나 - 세션이 실제로 응시하는 문항 (구성은 {@link SetLayout}).
      *
      * @param number     세트 번호 (1부터)
-     * @param definition 정답 포함 세트 정의 (VOICE 5 + VOCABULARY 5, seq 1..10 교차) - KAN-15 답안
+     * @param definition 정답 포함 세트 정의 ({@link SetLayout} 순서, seq 1..세트 문항 수) - KAN-15 답안
      *                   저장, KAN-21 채점의 정본
      * @param response   정답 제외 공개용 - 그대로 직렬화해 응답한다.
      * @param etag       응답 본문 SHA-256의 강한 ETag - 버전과 세트가 URL에 들어가 불변이라
@@ -157,7 +150,7 @@ public class TestDefinitionRegistry {
                     .sorted(Comparator.comparingInt(TestDefinition.Item::seq))
                     .toList();
             TestDefinition pool = new TestDefinition(definition.testVersion(), definition.scoreVersion(),
-                    definition.dialect(), definition.estimatedDurationSec(), ordered);
+                    definition.dialect(), definition.estimatedDurationSec(), definition.setLayout(), ordered);
 
             // 세트는 발행본에서 유도한다 (KAN-182) - 발행본에 손으로 나열하지 않는다.
             List<TestDefinition> setDefinitions = VoiceSets.derive(pool);
@@ -242,7 +235,7 @@ public class TestDefinitionRegistry {
     }
 
     /**
-     * 세션의 유효 문항 = 어휘 5 + 자기 세트의 음성 5 (KAN-182, §5.4).
+     * 세션의 유효 문항 = 자기 세트의 문항 (KAN-182, §5.4) - 구성은 정의의 {@link SetLayout}이다.
      * <p>
      * 세션이 고정한 {@code testVersion}과 {@code voiceSet}으로 세트 정의를 돌려주는 <b>하나뿐인</b>
      * 진입점이다. 제출 검증({@link #requireItem}), 상태 일괄 조회, 진행도, 완주 판정, 집계가 전부
@@ -257,7 +250,7 @@ public class TestDefinitionRegistry {
     /**
      * 세션 세트의 문항을 유형까지 검증해 찾는다 - 제출 API 공용 (KAN-23 업로드, KAN-15 답안).
      * 세트에 없는 문항은 <b>풀에 있어도</b> 422 ITEM_NOT_IN_VERSION, 유형이 다르면 409
-     * ITEM_WRONG_TYPE (§3.3). 풀 기준으로 열어 두면 한 세션에 음성 점수가 5개 넘게 쌓여 집계가
+     * ITEM_WRONG_TYPE (§3.3). 풀 기준으로 열어 두면 한 세션에 음성 점수가 세트 몫보다 많이 쌓여 집계가
      * 깨진다 (KAN-182).
      */
     public TestDefinition.Item requireItem(String testVersion, int voiceSet, String itemId,
@@ -316,8 +309,9 @@ public class TestDefinitionRegistry {
      * DB 제약으로 표현할 수 있는 것은 {@code testVersion} 중복(기본 키)뿐이고, 문항 구성과
      * guideF0 밴드 길이 같은 규칙은 여전히 여기서만 걸린다.
      * <p>
-     * 문항 구성은 "음성 N (N >= 5) + 어휘 M (M >= 5)"다 (KAN-182 - 풀 다중화로 완화, 어휘 풀은
-     * 2026-09-04 확장). seq는 풀 기준 1..N+M 연속이어야 한다. {@code scriptKey}는 정의 단위
+     * 문항 구성은 "음성 N (N >= v) + 어휘 M (M >= w)"다 (KAN-182 - 풀 다중화로 완화, 어휘 풀은
+     * 2026-09-04 확장). v와 w는 {@link SetLayout}이 세트 하나에 싣는 음성과 어휘 수이고, 필드가 없는
+     * 정의는 둘 다 5다 (KAN-260). seq는 풀 기준 1..N+M 연속이어야 한다. {@code scriptKey}는 정의 단위
      * all-or-nothing이고 풀 안에서 중복을 거부한다. 기존 더미 정의 {@code gn-2026.08.1}(scriptKey
      * 없음, 음성 5 + 어휘 5)은 그대로 통과한다 - 발행 후 불변(§5.4)을 지키려면 새 검증이 기존
      * 행을 깨뜨리면 안 된다.
@@ -329,9 +323,11 @@ public class TestDefinitionRegistry {
                 "MVP는 경남 정의만 발행할 수 있다 (§6): dialect=" + definition.dialect());
         require(definition.estimatedDurationSec() > 0, "estimatedDurationSec은 양수여야 한다");
 
+        SetLayout layout = setLayoutOf(definition);
         List<TestDefinition.Item> items = definition.items();
-        require(items != null && items.size() >= VOICE_SET_SIZE + VOCABULARY_SET_SIZE,
-                "문항은 음성 " + VOICE_SET_SIZE + "개 이상 + 어휘 " + VOCABULARY_SET_SIZE + "개 이상이어야 한다");
+        require(items != null && items.size() >= layout.size(),
+                "문항은 음성 " + layout.voiceCount() + "개 이상 + 어휘 " + layout.vocabularyCount()
+                        + "개 이상이어야 한다");
 
         Set<String> itemIds = new HashSet<>();
         Set<Integer> seqs = new HashSet<>();
@@ -364,8 +360,8 @@ public class TestDefinitionRegistry {
                 }
             }
         }
-        require(voice >= VOICE_SET_SIZE && vocabulary >= VOCABULARY_SET_SIZE,
-                "문항 구성이 음성 " + VOICE_SET_SIZE + " 이상, 어휘 " + VOCABULARY_SET_SIZE
+        require(voice >= layout.voiceCount() && vocabulary >= layout.vocabularyCount(),
+                "문항 구성이 음성 " + layout.voiceCount() + " 이상, 어휘 " + layout.vocabularyCount()
                         + " 이상이 아니다: 음성 " + voice + ", 어휘 " + vocabulary);
         // all-or-nothing (KAN-182) - 일부만 있으면 실모델이 나머지 문항의 문장을 못 찾는다.
         require(voiceWithScriptKey == 0 || voiceWithScriptKey == voice,
@@ -373,6 +369,20 @@ public class TestDefinitionRegistry {
                         + "개 중 " + voiceWithScriptKey + "개에만 있다");
         for (int seq = 1; seq <= items.size(); seq++) {
             require(seqs.contains(seq), "seq는 1부터 연속이어야 한다: " + seq + " 누락");
+        }
+    }
+
+    /**
+     * 정의의 세트 구성 (KAN-260). 형식이 틀린 {@code setLayout}은 발행 거부다 - 기동 시점에 잡지
+     * 않으면 세트 유도({@link VoiceSets#derive})가 같은 이유로 터지는데, 그 메시지에는 어느 버전인지가
+     * 없다.
+     */
+    private static SetLayout setLayoutOf(TestDefinition definition) {
+        try {
+            return SetLayout.of(definition.setLayout());
+        } catch (IllegalArgumentException e) {
+            throw new IllegalStateException("테스트 정의 발행 거부 - " + e.getMessage()
+                    + ": " + definition.testVersion(), e);
         }
     }
 

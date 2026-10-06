@@ -180,6 +180,6 @@ class DeployProfileBootTest {
     @Test
     void 관리자_토큰이_있으면_관리자_인증이_등록된다() {
         // 토큰이 없으면 이 빈 자체가 없어 관리자 API가 404다 (KAN-138 스모크, §6).
-        adminAuth.authorize("deploy-profile-boot-test-token-0123456789");
+        adminAuth.authorize("deploy-profile-boot-test-token-0123456789", "127.0.0.1");
     }
 }

@@ -65,7 +65,8 @@ public final class PropertiesFixture {
                                                         @Nullable String aiBaseUrl,
                                                         Duration processingTimeout,
                                                         Duration shutdownBudget) {
-        // ai-timeout 85초, 재전송 2회, 워커 1개 - 실모델 기준 코드 기본값과 같다 (KAN-172).
+        // ai-timeout 85초, 재전송 2회는 실모델 기준 코드 기본값과 같다 (KAN-172). 워커만 1개로 둔다 - 코드 기본값은
+        // 3이지만(KAN-272) 테스트는 전달 순서가 하나로 정해져야 읽기 쉽다.
         return new AccenturyProperties.Analysis(800, 3000, congestionThreshold, Duration.ofSeconds(1),
                 Duration.ofHours(24), processingTimeout, Duration.ofMinutes(5), aiBaseUrl,
                 Duration.ofSeconds(85), 2, 1,
@@ -138,7 +139,8 @@ public final class PropertiesFixture {
                 // 저장은 그대로 돈다.
                 new AccenturyProperties.Feedback(10, Duration.ofDays(365), null),
                 // 학습 데이터 버킷 없음 - 기본 상태다 (KAN-201). 저장 코드가 호출되지 않는다.
-                new AccenturyProperties.Training(null, null, null, null),
+                new AccenturyProperties.Training(null, null, null,
+                        AccenturyProperties.Training.VOICE_CONSENT_VERSION),
                 auth(),
                 trustedProxies);
     }

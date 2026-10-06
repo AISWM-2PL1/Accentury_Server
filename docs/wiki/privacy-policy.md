@@ -11,9 +11,10 @@
 
 - 티켓: **KAN-176** (방침 본문 작성)
 - 본문 정본: [`infra/privacy/privacy.html`](../../infra/privacy/privacy.html) — 14개 절
-- 계약 테스트: [`infra/privacy/privacy.test.mjs`](../../infra/privacy/privacy.test.mjs) 31건 (KAN-240에서 계정 절 4건과 방침 버전 3건 추가. KAN-239에서 환경별 본문 3건 추가. 1항 표 검사는 행 목록으로 확장한다 — KAN-164 행 포함. KAN-196 1단계에서 사업자 확정 3건, KAN-197 1단계에서 웹 사업자 1건, KAN-211 4단계에서 이용 후기 2건 추가), CI `edge-test` 잡에 결선 (`.github/workflows/test.yml`)
+- 계약 테스트: [`infra/privacy/privacy.test.mjs`](../../infra/privacy/privacy.test.mjs) 38건 (KAN-274에서 출신 지역, 로그인 없는 앱 판, 분석 정보 보관, 로그인 전용 문장 잔존 검사 4건 추가. KAN-269에서 선택 동의 3건을 더하고 환경별 본문 3건을 고쳐 썼다. 그 가운데 staging 전용 고지 검사는 두 환경 본문 일치 검사로 바꿨다. KAN-240에서 계정 절 4건과 방침 버전 3건 추가. KAN-239에서 환경별 본문 3건 추가. 1항 표 검사는 행 목록으로 확장한다 — KAN-164 행 포함. KAN-196 1단계에서 사업자 확정 3건, KAN-197 1단계에서 웹 사업자 1건, KAN-211 4단계에서 이용 후기 2건 추가), CI `edge-test` 잡에 결선 (`.github/workflows/test.yml`)
 - 이용 후기: **KAN-211** (2026-09-15). 앱 계정(KAN-223)이 생기기 전까지는 회신 이메일이 이 서비스가 받는 유일한 개인 식별 정보였다. 구현 정본은 [`feedback.md`](feedback.md)
 - 계정 PII: **KAN-240** (2026-09-29). 앱 소셜 로그인(KAN-223)의 `app_user`가 이메일, 이름, 생년월일, 성별, 출신 지역, IdP 식별값을 담는 첫 PII 테이블이라 1, 3, 5, 6, 7, 11, 12, 14항을 계정 기준으로 고쳤다. 방침 버전은 `2026-09-29`이고 서버가 가입 동의를 이 값과 정확 일치로만 받는다 (4절 「방침 버전」)
+- 음성 저장 선택 동의: **KAN-269** (2026-10-04). 음성 저장과 AI 모델 학습 활용에 선택 동의한 응시의 음성을 두 환경 모두 음성 전용 버킷에 보관한다. 「음성은 저장하지 않는다」를 선택 동의를 하지 않은 경우로 한정하고 1, 3, 5, 6, 7, 11, 12항을 고쳤다. staging 전용 고지 블록은 비웠다. 방침 버전은 `2026-10-04`다
 - 호스팅과 게시 경로: **KAN-133** — `infra/privacy/README.md`, `scripts/publish-privacy.sh`
 - 앱 안 링크: **KAN-177** — 인트로 하단 한 줄, 구현 완료. 계약과 여는 방법은 [`webview-bridge.md` §4](webview-bridge.md), URL 정본은 `web/src/legal/privacyPolicy.ts` · 스토어 등록: **KAN-174**(Play) **KAN-175**(App Store)
 - 광고 도입: **KAN-196**(앱 SDK·동의 UI·ATT·스토어 신고) **KAN-197**(웹 광고). 사업자는 **앱이 Google LLC의 Google AdMob**(2026-09-11 팀장 결정, Firebase 프로젝트 공유), **브라우저 단독 실행이 같은 회사의 Google AdSense**(2026-09-13 팀장 결정 — AdMob은 웹을 지원하지 않는다, [`ads-web-adsense.md`](ads-web-adsense.md)). KAN-196은 전 단계 완료, KAN-197도 전 단계 완료(2026-09-13 — 1단계 방침·동의 문안·문서, 2단계 웹 동의 저장, 3단계 태그·슬롯, 4단계 배포 변수·`ads.txt`). 코드는 닫혔고 **광고가 실제로 나오기까지 남은 것은 사람 손의 절차**다 — AdSense 가입·사이트 심사·변수 등록이고, 그 표가 [`ads-web-adsense.md`](ads-web-adsense.md) §10이다
@@ -31,10 +32,20 @@
 | 표의 행 | 핵심 주장 | 근거 | 계약 테스트 |
 |---|---|---|---|
 | 음성 녹음 | 분석이 끝나면 즉시 삭제 | `ai/app/tempstore.py:10-14` (컨텍스트 매니저가 성공·실패·예외·취소 모두 `finally`에서 삭제), KAN-27 | `음성은 분석 직후 즉시 삭제라고 적혀 있다`·`1항 표의 보유 기간이 행마다 코드와 맞는다` |
-| 음성 녹음 (staging 게시본만) | 내부 테스트 환경의 예외: 동의한 테스터 계정의 음성만 학습용으로 보관, 계정 정보 없이 가명 세션으로, 동의서의 보유 기간 끝날까지 | `backend` `training` 패키지(`TrainingSpeakers`가 동의 테스터 한정과 HMAC 가명화), `infra/envs/*/main.tf` 학습 버킷의 수명주기 만료일(`training_retention_until`)과 버킷 정책. 본문은 `<!-- staging-only -->` 블록이라 prod 게시본에는 없다(`scripts/publish-privacy.sh --render`). KAN-239 | `prod 본문에는 학습 수집 고지가 없고 음성 미보존 문구가 그대로다`, `staging 본문은 학습 수집의 목적과 대상과 기간을 적는다` |
+| 음성 저장과 학습 활용 (선택 동의) | 음성 저장과 AI 모델 학습 활용은 필수 방침 동의와 별개인 선택 동의이고 거부해도 이용 제한이 없다. 대상은 웹과 앱에서 동의한 응시자이며 동의 문안이 만 14세 이상 확인을 겸한다. 두 환경의 본문이 같다 | 2026-10-04 사용자 결정 (KAN-269, 5절 결정 기록). 구현은 `backend`의 `training` 패키지(`VoiceConsents`가 업로드마다 동의를 판정하고 `S3TrainingSampleStore`가 저장 직전에 다시 확인한다), `session/SessionService`(익명 세션의 `voiceConsentVersion`), `auth/UserService`(계정 동의 등록과 철회), `V6__voice_consent.sql`(동의 열과 대응표 `training_voice_owner`)이다. 앞 판(KAN-239)의 staging 전용 고지(동의한 테스터 계정만, 가명 세션, 보유 기간 끝날)는 지웠고 `<!-- staging-only -->` 블록은 비어 있다 | `prod 본문에 음성 저장 선택 동의 절이 있고 대상, 항목, 장소, 기간, 철회를 적는다`, `두 환경의 게시 본문이 같다 - 음성 고지에 환경별 차이가 없다`, `prod 본문은 표식 없이 끝까지 게시되고 옛 staging 고지가 없다` |
+| 음성 저장과 학습 활용 (선택 동의) | 보관 항목은 문항마다의 WAV와 라벨 파일(분석 작업 ID, 세션 ID, 문항 ID, 출신 지역 10개 권역 코드, 스크립트 키, 테스트 버전, 채점 버전, 음성 길이, 최종 분석 상태, AI 억양 원점수, 음질 코드, 모델 버전, AI 채점 버전, 오류 코드, 상관 ID, 동의 버전과 동의 시각, 저장 시각). ID는 가명화하지 않고 그대로 둔다 | KAN-269 결정. 라벨 필드가 늘거나 줄면 본문 목록과 계약 테스트의 항목 배열을 함께 고친다 | `prod 본문에 음성 저장 선택 동의 절이 있고…` |
+| 음성 저장과 학습 활용 (선택 동의) | 앱 계정은 계정 내부 ID와 음성이 저장된 세션 ID를 잇는 연결 표를 두고, 세션 만료와 탈퇴 뒤에도 남긴다. 내부 ID만 담는다 | KAN-269 결정. 철회나 탈퇴 때 그 계정의 음성을 찾기 위한 표다. 계정의 개인정보 열은 탈퇴 때 파기한다(KAN-241) | `prod 본문에 음성 저장 선택 동의 절이 있고…` |
+| 음성 저장과 학습 활용 (선택 동의) | 웹 익명 세션은 동의를 세션에 기록하고, 세션이 만료되면 저장된 음성을 특정인에게 귀속할 수 없어 개별 삭제 요청을 맞출 수 없다 | 웹 세션은 익명이고 30분 또는 완료 후 24시간 뒤 삭제된다(「테스트 세션」 행) | `prod 본문에 음성 저장 선택 동의 절이 있고…` |
+| 음성 저장과 학습 활용 (선택 동의) | 보관 장소는 서울 리전의 S3 버킷, 버전 기록 켬, 저장 시 암호화, HTTPS 전용, 읽기는 모델 학습 담당자로 제한 | KAN-269 결정: 공유 음성 전용 버킷 `accentury-voice-<account>`, 접두사 `staging/`과 `prod/`. Terraform은 `infra/bootstrap/voice.tf`(버킷, 버전 관리, 암호화, TLS 강제와 GetObject 제한 정책)와 `infra/modules/fargate`(태스크 역할의 환경 접두 PutObject)다 | `prod 본문에 음성 저장 선택 동의 절이 있고…`, `데이터 소재지가 서울 리전이라고 적혀 있다` |
+| 음성 저장과 학습 활용 (선택 동의) | 보유 기간은 「학습 목적 달성 시까지」이고 자동 만료가 없다 | KAN-269 결정. **이 문구는 잠정이다** - 개인정보 보호책임자의 검토를 기다린다(6절). 버킷에 수명주기 만료 규칙을 두지 않는다 | `1항 표의 보유 기간이 행마다 코드와 맞는다` (「음성 저장과 학습 활용 (선택 동의)」 행), `선택 동의가 5, 6, 7, 11, 12항에도 반영돼 있다` |
+| 음성 저장과 학습 활용 (선택 동의) | 철회: 앱은 앱 안에서 철회하고 그 뒤의 녹음은 저장하지 않는다. 이미 저장된 음성은 13항 문의처로 요청하면 운영자가 처리한다 | KAN-269 결정. 저장된 음성의 처리는 운영자 수작업이다 | `prod 본문에 음성 저장 선택 동의 절이 있고…`, `선택 동의가 5, 6, 7, 11, 12항에도 반영돼 있다` |
+| 분석 정보 (선택 동의하지 않은 익명 응시) | 브라우저 웹과 로그인 없는 앱의 익명 세션은 선택 동의하지 않아도 음성 문항의 분석 정보를 음성 없이 남긴다. 목적은 억양 분석 AI 모델의 개선과 출신 지역별 응시자 구성 파악이다. 항목은 선택 동의 건의 라벨에서 동의 버전과 동의 시각을 뺀 것이고 ID는 원문 그대로다. 로그인해 이용하는 앱은 남기지 않는다 | 2026-10-06 사용자 결정 (KAN-274). 구현은 `HttpAnalysisDispatcher.keepTrainingSample`과 `S3TrainingSampleStore.saveLabelOnly`. 키는 `<환경>/_no-audio/<region>/...json`이고 음성 트리와 접두를 갈랐다. 합성 트래픽(배포 스모크) 세션은 남기지 않는다(`VoiceUploadService`) | `선택 동의하지 않은 익명 응시의 분석 정보 보관이 적혀 있다`, `1항 표의 보유 기간이 행마다 코드와 맞는다` |
+| 분석 정보 (선택 동의하지 않은 익명 응시) | 세션이 만료되면 특정 이용자와 이을 수단이 없어 개별 삭제 요청을 맞출 수 없다. 후기에 이메일을 적어 보낸 응시만 예외로, 후기에 함께 남는 세션 식별자로 찾을 수 있다. 선택 동의한 익명 세션의 음성도 같다 | `SessionFeedback`이 `session_id`와 `contact_email`을 1년 동안 함께 보관한다 (KAN-211). Codex 리뷰 지적으로 추가 (KAN-274) | `선택 동의하지 않은 익명 응시의 분석 정보 보관이 적혀 있다` |
+| 테스트 세션 | 브라우저 웹과 로그인 없는 앱은 응시 전에 출신 지역을 선택 동의와 무관하게 묻고 세션에 기록한다. 웹은 응시마다, 앱은 한 번 묻고 기기에 저장한다 | 2026-10-06 사용자 결정 (KAN-274). 웹은 `App.tsx`의 `IntroRoute`(빌드 스위치 제거), 앱은 `needsAnonymousRegion`. 목적 문구는 계정 절의 출신 지역 항목과 같다 | `테스트 세션 절에 웹에서 출신 지역을 묻는다는 사실과 목적이 적혀 있다` |
+| 머리말, 계정 | 앱에는 로그인 없이 이용하는 판과 로그인해 이용하는 판이 있고, 계정에 관한 내용은 로그인해 이용하는 판에만 적용된다 | 첫 스토어 심사는 로그인을 끈 빌드로 받는다 (App 레포 `LOGIN_ENABLED`, KAN-270, KAN-274) | `로그인 없이 이용하는 앱 판의 처리가 적혀 있다`, `앱이 로그인으로만 이용된다는 문장이 남아 있지 않다` |
 | 음성 녹음 | 임시 파일 청소 기준 30분 | `ai/app/config.py:18`, `backend/src/main/resources/application.yml:167` (`upload.temp-retention: 30m`), `ai/app/tempstore.py:13,169-177` | `임시 파일 청소 기준 30분이 적혀 있다` |
 | 음성 녹음 | 기기에도 파일로 남기지 않음 | `app/src/main/java/com/accentury/app/audio/WavWriter.kt:14-15` (업로드는 `toWavBytes`만 쓴다), `ios/AccenturyTests/RecordingFileLifecycleTests.swift:20` (`testAFullRecordEnqueueDiscardCycleLeavesNoWavOnDisk`) | — |
-| 음성 녹음 | DB·S3에 저장 안 함 | 2026-09-01 팀 회의 결정 (`infra/privacy/README.md`에 기록), 엔티티에 오디오 컬럼 없음 (`backend/src/main/java/app/accentury/backend/session/TestSession.java`, `backend/src/main/java/app/accentury/backend/result/TestResult.java`, `backend/src/main/java/app/accentury/backend/vocab/VocabAnswer.java`) | — |
+| 음성 녹음 | **선택 동의를 하지 않은 경우** DB와 S3에 저장 안 함 | 2026-09-01 팀 회의 결정은 KAN-269(2026-10-04)로 선택 동의를 하지 않은 응시에만 남았다. 엔티티에 오디오 컬럼 없음 (`backend/src/main/java/app/accentury/backend/session/TestSession.java`, `backend/src/main/java/app/accentury/backend/result/TestResult.java`, `backend/src/main/java/app/accentury/backend/vocab/VocabAnswer.java`) | `「음성을 저장하지 않는다」는 선택 동의를 하지 않은 경우로 한정돼 있다` |
 | 계정 (앱) | 수집 항목은 `app_user`의 열 전부, 목적은 항목별, 보유는 **탈퇴까지** | `backend/src/main/resources/db/migration/V2__app_user.sql` (열 목록과 주석), `backend/src/main/java/app/accentury/backend/auth/AppUser.java`. 목적은 2026-09-29 사용자 결정(KAN-240): 이메일과 이름은 회원 식별과 문의 응대, 탈퇴 본인 확인 / 생년월일은 만 14세 미만 가입 제한 / 성별은 응시자 구성 파악과 서비스 개선 / 출신 지역은 응시 기록에 붙여 지역별 구성 파악과 억양 분석 개선. 코드에는 성별과 이름의 활용처가 아직 없다. 정리 잡이 없고 탈퇴(KAN-241)가 유일한 파기 경로다 | `1항 표의 보유 기간이 행마다 코드와 맞는다` (「계정 (앱)」 행), `1항에 계정 절이 있고 수집 항목과 목적과 보유 기간을 적는다` |
 | 계정 (앱) | 다섯 항목(이메일, 이름, 생년월일, 성별, 출신 지역)이 다 있어야 테스트를 시작한다 | `ProfileStatus`, 세션 생성의 403 `AUTH_PROFILE_INCOMPLETE` (`AuthApiTest.프로필이_미완료인_계정은_403이고_세션이_생기지_않는다`) |- |
 | 계정 (앱) | 계정 세션도 24시간 규칙 그대로이고 계정에 결과가 쌓이지 않음, 세션 출신 지역은 계정 값 | `test_session.user_id`(V2), `SessionService.create`가 계정 세션의 region을 계정에서 읽는다 (`AuthApiTest.Access_토큰으로_만든_세션은_계정에_귀속되고_출신지역은_계정의_값이다`) | `1항에 계정 절이 있고…` |
@@ -53,7 +64,7 @@
 | 익명 통계 | 재응시·만료로 되돌리지 않음 | `backend/src/main/java/app/accentury/backend/analytics/DailyCounter.java:33`, `backend/src/main/java/app/accentury/backend/analytics/AnalyticsCounters.java:45` (둘 다 "되돌리지 않는다"를 명시) | — |
 | 접속 IP | 메모리에서만 세고 저장 안 함 | `backend/src/main/java/app/accentury/backend/common/FixedWindowRateLimiter.java:9,12,20` (`ConcurrentHashMap` 인메모리 윈도우), `backend/src/main/java/app/accentury/backend/common/ClientIps.java:52-58` (판정만 하고 반환) | — |
 | 서버 운영 로그 | 14일 | `infra/modules/fargate/variables.tf:173-176` (`log_retention_days` 기본값 14) | `1항 표의 보유 기간이 행마다 코드와 맞는다` |
-| 보안 로그 | 7일, 인증 헤더는 가림 | `infra/modules/waf/variables.tf:21-24` (기본값 7), `infra/modules/waf/main.tf:286,313,319` (샘플 저장 끔 + `redacted_fields`) | `1항 표의 보유 기간이 행마다 코드와 맞는다` |
+| 보안 로그 | 7일, 인증 헤더는 가림 | `infra/modules/waf/variables.tf:47-50` (기본값 7), `infra/modules/waf/main.tf:525,548,554` (샘플 저장 끔 + `redacted_fields`) | `1항 표의 보유 기간이 행마다 코드와 맞는다` |
 | 이용 통계 이벤트 | 보존은 GA 설정에 따름 (기본값 2개월) | **미확인** — 콘솔 기본값이고 레포에 근거가 없다 (7항 참조) | — |
 | 비정상 종료 로그 | 90일 | **미확인** — Crashlytics 콘솔 기본값이고 레포에 근거가 없다 (7항 참조). 수집 항목 자체는 KAN-33, `docs/wiki/analytics.md` §8 | `1항 표의 보유 기간이 행마다 코드와 맞는다` (표기가 90일인지만 붙든다) |
 | 이용 후기 | 별점·본문·**회신 이메일(선택)**과 결과 스냅샷을 받고 **1년** 보관 | `backend/src/main/resources/db/migration/V1__baseline.sql:290-305` (옛 V12, KAN-220 재베이스라인으로 V1에 합쳐짐. 컬럼 전부 — 입력 셋과 스냅샷 다섯. 283-287행 주석이 「test_session에 FK를 걸지 않는다」와 그 이유를 적었다), `backend/src/main/java/app/accentury/backend/common/AccenturyProperties.java`의 `Feedback.retention` (`@DefaultValue("365d")`), `backend/src/main/resources/application.yml:179` (같은 값과 주석), `backend/src/main/java/app/accentury/backend/feedback/FeedbackRetention.java:36-43` (60분 주기 `purgeExpired`가 `created_at` 기준으로 지운다), KAN-211 | `1항 표의 보유 기간이 행마다 코드와 맞는다` (「이용 후기」 행)·`이용 후기 절이 있고 이메일이 선택·회신 전용이라고 적혀 있다` |
@@ -115,14 +126,14 @@
 | 10. 광고 | 브라우저 웹도 첫 화면의 같은 안내 시트로 묻되 **선택은 브라우저 저장소**에 둔다. 철회는 같은 인트로 링크, 브라우저 쿠키 차단·삭제, Google 광고 설정(https://adssettings.google.com) 셋 | 2026-09-13 팀장 결정 (KAN-197 1단계). 시트는 같은 컴포넌트이고 문안 중 사업자·수집 항목만 갈린다 — `web/src/ads/adConsentText.ts`의 `AdVendor` (`docs/wiki/ads-web-adsense.md` §3). 브리지가 없는 실행이라 네이티브 저장소에 닿을 길이 없다 (`webview-bridge.md` §8.1). 저장 배선은 KAN-197 2단계에서 끝났다 (2026-09-13) — 키 `accentury:adConsent`, `web/src/ads/webAdConsentStore.ts`. 시트와 철회 링크는 **광고 ID가 든 브라우저 빌드**에만 뜬다 (팀 결정 2026-09-13, PR #109 리뷰 — `web/src/ads/adConsent.ts`의 `resolveAdConsentSource`가 `adSenseIdsFromEnv`를 함께 본다). 이 행의 방침 문장은 그대로 참이다: 광고가 나가는 웹의 서술이고, 광고가 없는 빌드는 그 절이 말하는 대상이 아니다 | `브라우저 웹의 광고 사업자 Google AdSense가 2·4·8·10항에 적혀 있다` |
 | 10. 광고 | 거부 시 맞춤형이 아닌 일반 광고만. 이때 광고 식별자는 관심사 추정에는 쓰지 않고 빈도 제한·집계 보고·부정 사용 방지에만 쓴다. iOS ATT 거부 시 IDFA 미사용 | AdMob 비개인화 광고 요청(npa) — KAN-196 3단계(Android `AdRequests.kt`)·4단계(iOS `AdRequests.swift`)에서 배선 완료. npa=1은 식별자 전송을 막는 플래그가 아니다 — Google 「맞춤 광고 및 맞춤 설정되지 않은 광고」: 비맞춤 광고도 빈도 제한·집계 광고 보고·사기 및 악용 방지에 쿠키·모바일 광고 식별자를 쓴다 (https://support.google.com/admob/answer/7676680). 1단계 초안의 「광고 식별자 대신 IP 주소와 기기 정보」는 그래서 거짓이었고 리뷰 P1-4(2026-09-11)에서 고쳤다 | `맞춤형 광고 절이 있고 동의·거부 방법이 적혀 있다`·`비맞춤 광고에서 「광고 식별자 대신」이라고 적지 않는다` |
 | 10. 광고 | 보유 기간은 Google 개인정보처리방침, 국외 이전은 4항 | Google LLC는 국외 사업자. 방침 링크는 4항의 `https://policies.google.com/privacy`와 같다 | — |
-| 11. 안전성 확보 | HTTPS, 토큰 해시, 임시 파일 최소 권한, 로그 비식별, WAF, 관리자 토큰 | `backend/src/main/java/app/accentury/backend/session/TestSession.java:45-46`, `ai/app/tempstore.py:6-16`, `infra/modules/waf/main.tf:313,319`, `backend/src/main/java/app/accentury/backend/common/AccenturyProperties.java:29` (admin 시크릿) | — |
+| 11. 안전성 확보 | HTTPS, 토큰 해시, 임시 파일 최소 권한, 로그 비식별, WAF, 관리자 토큰 | `backend/src/main/java/app/accentury/backend/session/TestSession.java:45-46`, `ai/app/tempstore.py:6-16`, `infra/modules/waf/main.tf:548,554`, `backend/src/main/java/app/accentury/backend/common/AccenturyProperties.java:29` (admin 시크릿) | — |
 | 11. 안전성 확보 | 계정의 이메일, 이름, 생년월일과 로그인 토큰 원문을 로그에 남기지 않고, 로그에 세션과 계정의 대응을 남기지 않음. 로그인 토큰은 해시만 저장 | 명세서 §2.6 (KAN-223), `LogMasking`의 `rt_`와 JWT 패턴, `AuthApiTest.로그에_이메일_이름_토큰_원문이_남지_않는다`, `AuthApiTest.세션_생성_로그에_계정_id가_없고_계정_세션_여부만_남는다` |- |
 | 11. 안전성 확보 | 후기의 이메일은 로그와 내부 알림에 남기지 않음 | `FeedbackService` javadoc (§2.6), `FeedbackSlackNotifier.message` (연락처는 유무만), `LogMasking`의 `EMAIL` 패턴이 마지막 관문 | `후기 이메일이 내부 알림에 실리지 않는다고 적혀 있다` |
 | 12. 동의 방식 | 앱은 첫 로그인에서 방침 동의를 받고(동의 체크 전에는 로그인 버튼 비활성), 서버가 동의 시각과 버전을 계정에 기록. 서버는 게시 중인 버전만 받는다 | `AuthService.findOrCreateOnce` (가입 시 `privacyConsent`가 true이고 `privacyPolicyVersion`이 `AccenturyProperties.Auth.privacyPolicyVersion`과 정확히 같을 때만 계정 생성, 아니면 400 `AUTH_CONSENT_REQUIRED`), `AuthApiTest.방침_버전이_게시_중인_버전과_다르면_400이고_계정이_생기지_않는다`. 로그인 화면은 KAN-224 (`Accentury_App` 레포) | `5, 6, 7, 12항이 계정 기준으로 다시 쓰였다` |
 | 12. 동의 방식 | 웹은 동의 화면을 따로 두지 않되 광고는 별도 동의 | KAN-2 「동의 화면 범위 제외」 결정 + 2026-09-07 광고 결정의 부분 번복 (6항 참조) |- |
 | 12. 동의 방식 | **후기의 회신 이메일은 이용자가 직접 적는 선택 입력이고, 시트 안내 + 방침 링크를 읽은 뒤의 [보내기]를 동의로 본다** | 수집 고지는 입력칸 옆에 있다 — `web/src/feedback/feedbackText.ts`의 `FEEDBACK_EMAIL_HINT`(「답변을 원하시면 적어 주세요. 후기 확인에만 쓰고 다른 데 쓰지 않아요.」)와 그 아래 `FEEDBACK_DETAIL_LEAD` + `legal/PrivacyPolicyLink`. 광고 동의처럼 별도 시트를 세우지 않은 이유: 이메일은 **안 적으면 수집이 없는** 선택 입력이라, 적는 행위 자체가 의사 표시다. 12항 첫 문단의 「동의 화면을 따로 두지 않는다」와 어긋나지 않는다 | — |
 | 13. 보호책임자 | 이성주, team2pl1@gmail.com | 2026-09-07 팀 결정 | `연락처가 있다 (Play·App Store 심사가 요구하는 항목)` |
-| 14. 시행일 | 시행일 = 방침 버전 = `2026-09-29`. 머리와 14항 두 자리, `accentury-policy-version` 메타, backend `AccenturyProperties.Auth.PRIVACY_POLICY_VERSION`이 한 값 | KAN-240 (2026-09-29 사용자 결정: 계정 절이 들어간 개정본에 새 버전을 붙이고 시행일도 같은 날로). 앱 두 곳의 상수(`LoginScreenState.kt`, `LoginScreenState.swift`)도 같은 값이다 | `게시 HTML의 방침 버전이 BE 설정 기본값과 같다`, `application.yml이 방침 버전을 덮어쓰지 않는다`, `시행일 표기 두 자리가 방침 버전과 같고…` |
+| 14. 시행일 | 시행일 = 방침 버전 = `2026-10-04`. 머리와 14항 두 자리, `accentury-policy-version` 메타, backend `AccenturyProperties.Auth.PRIVACY_POLICY_VERSION`이 한 값 | KAN-269 (2026-10-04, 음성 저장 선택 동의 개정본). 그 앞 값은 KAN-240의 `2026-09-29`였다(2026-09-29 사용자 결정: 계정 절이 들어간 개정본에 새 버전을 붙이고 시행일도 같은 날로). 앱 두 곳의 상수(`LoginScreenState.kt`, `LoginScreenState.swift`)도 같은 값이다 | `게시 HTML의 방침 버전이 BE 설정 기본값과 같다`, `application.yml이 방침 버전을 덮어쓰지 않는다`, `시행일 표기 두 자리가 방침 버전과 같고…` |
 | 전 절 | 법정 필수 절이 빠지지 않음 | 「개인정보 보호법」 제30조 + 실제 처리(국외 이전, 자동 수집 장치, 광고) | `법정 필수 절이 모두 있다` |
 | 페이지 전체 | 외부 CSS·글꼴·스크립트 0 | KAN-133 AC "본문 교체는 S3 업로드 하나" | `외부 자원을 하나도 쓰지 않는다` |
 | 페이지 전체 | noindex 없음, 자리표시자 문구 없음 | KAN-133 → KAN-176 인계 | `자리표시자를 막던 noindex가 없다`·`자리표시자 문구가 남아 있지 않다` |
@@ -133,7 +144,7 @@ Play 데이터 안전 답안의 정본은 `Accentury_App` 레포의 `docs/wiki/p
 (KAN-174, App PR #5로 2026-09-24 병합). 레포 분리(KAN-221) 뒤라 그 문서는 이 레포에서 고치지 않는다.
 아래 「확정 답안」 열이 그 문서 §5, §6과 같은지는 App 레포에서 대조한다.
 App Store 라벨(KAN-175)의 정본도 이제 `Accentury_App` 레포 `docs/wiki/app-store-listing.md` §6이다. 아래 App Store
-표는 그 문서가 생기기 전의 답안 기록으로 남겨 둔다.
+표는 그 문서가 생기기 전의 2026-09-11 스냅샷이라, 어긋나면 §6이 이긴다.
 
 답안은 2026-09-11 사업자 확정(Google AdMob)으로 굳었다. KAN-174 문서는 광고 도입 결정 이전에
 쓰였으므로 지금 답과 확정 답안이 어긋나는 자리가 넷 있다.
@@ -144,7 +155,7 @@ App Store 라벨(KAN-175)의 정본도 이제 `Accentury_App` 레포 `docs/wiki/
 | 제3자와 공유하나 | **아니요** ("광고 네트워크로 보내는 곳도 없다") | 2항 제3자 제공 표 — Google LLC (Google AdMob) 1행 | **예**. 제공 항목은 광고 식별자·IP·기기 정보·노출/클릭 기록, 받는 곳은 Google AdMob |
 | 광고 ID 수집 | **수집하지 않음** (`google_analytics_adid_collection_enabled=false`) | 8항·10항 — 광고 SDK가 광고 식별자를 사용 | **수집함**. 목적은 「광고 또는 마케팅」. Analytics 쪽 false는 그대로 두고 AdMob SDK 몫을 따로 신고 |
 | 광고 포함 (§6 콘텐츠 등급) | **아니요** | 10항 「서비스에는 광고가 표시됩니다」 | **예**. 콘텐츠 등급 설문도 다시 제출 |
-| 음성 또는 사운드 녹음 | 수집됨, 「일시적으로만 처리되며 저장되지 않음」 | 1항 음성 행 + 「음성 녹음」 산문 | 변화 없음 |
+| 음성 또는 사운드 녹음 | 수집됨, 「일시적으로만 처리되며 저장되지 않음」 | 1항 음성 행, 「음성 녹음」 산문, 「음성 저장과 AI 모델 학습 활용 (선택 동의)」 | **바뀜 (KAN-269, 2026-10-04)**. 선택 동의한 응시의 음성을 보관하므로 「일시적으로만 처리」 체크를 푼다. App Store 라벨의 오디오 데이터도 「수집」으로 바뀐다. 답안 정본은 `Accentury_App` 레포 `docs/wiki/play-store-listing.md` §5와 `docs/wiki/app-store-listing.md` §6이고, 콘솔 양식은 계정 소유자가 직접 고친다 |
 | 앱 상호작용 | 수집됨, 목적 분석 | 1항 이용 통계 이벤트 행, 4항 | 변화 없음 |
 | 비정상 종료 로그 | 수집됨, 목적 분석 | 1항 비정상 종료 로그 행, 4항 | 변화 없음 |
 | 삭제 요청 방법 제공 | 아니요 | 6항 | **바뀜 (KAN-240)**. 앱 계정은 삭제(탈퇴)를 요청할 수 있다 (6항 임시 절차, 앱 안 탈퇴는 KAN-241). Play는 계정을 만드는 앱에 계정 삭제 방법을 요구한다 |
@@ -173,9 +184,9 @@ prod 게시(`scripts/publish-privacy.sh prod`) 전에는 아래를 전부 닫는
 | 3 | 10항 「광고 사업자(확정 후 기재)」 | 499 | **완료 (2026-09-11)** |
 | 4 | 10항 동의 설정 위치 「(도입 시 위치 확정)」 | 530 | **완료 (2026-09-11)** — 첫 실행 동의 시트 + 인트로 하단 링크로 확정 서술. UI 자체는 KAN-196 3단계가 만든다 |
 | 5 | 10항 「4항과 이 항, 2항의 제3자 제공 표를 함께 채웁니다 (확정 후 기재)」 | 539~541 | **완료 (2026-09-11)** — 확정 문장으로 교체 |
-| 6 | 시행일 「정식 게시일에 기재합니다」 | 머리, 14항 | **2026-09-29로 기재 (KAN-240)**. 시행일 = 방침 버전이다. prod 게시일이 이 날짜와 다르면 두 자리, 버전 메타, backend 상수, 앱 두 곳의 상수를 함께 게시일로 올린다 (4절 「방침 버전」) |
+| 6 | 시행일 「정식 게시일에 기재합니다」 | 머리, 14항 | **완료 (2026-09-29, KAN-240)** — 자리표시자는 남아 있지 않다. 시행일 = 방침 버전이다. prod 게시일이 이 날짜와 다르면 두 자리, 버전 메타, backend 상수, 앱 두 곳의 상수를 함께 게시일로 올린다 (4절 「방침 버전」) |
 | 9 | 계정 PII 반영 (KAN-240) | 1, 3, 5, 6, 7, 11, 12, 14항 | **본문 반영 완료 (2026-09-29)**. 앱 로그인(KAN-224)을 prod에 내기 전에 이 본문이 prod에 게시돼 있어야 하고, 스토어 신고(2절의 KAN-240 두 행)도 그 전에 고친다 |
-| 7 | 스토어 답안 일치 | — | KAN-174 §5·§6과 KAN-175 라벨이 2절 「확정 답안」대로 갱신됐는지 확인 |
+| 7 | 스토어 답안 일치 | — | 정본은 `Accentury_App` 레포 — App Store 라벨은 `docs/wiki/app-store-listing.md` §6 (KAN-175, 2026-09-23), Play 데이터 안전은 `docs/wiki/play-store-listing.md` §5·§6 (KAN-174). 둘이 2절 「확정 답안」대로 갱신됐는지 그 레포에서 확인한다 |
 | 8 | 10항의 웹 광고 고지와 실제 배선 일치 | 10항 (배너 1개·웹 재응시 광고 없음) | **코드와 배포 배선은 끝났다** (2026-09-13, KAN-197 4단계) — 대기 화면 배너(`web/src/ads/AdSlot.tsx`), 빌드 변수와 `ads.txt` 생성 스텝(`.github/workflows/web-deploy.yml`), 태그 있는 빌드·없는 빌드 양쪽의 완주 E2E. 남은 것은 코드가 아니라 **운영 절차**다: AdSense 사이트 승인 → 광고 단위 생성 → `gh variable set` 두 개 → Release 배포. 그 넷이 끝나 `https://accentury.app/ads.txt`가 열리고 대기 화면에서 광고 요청이 나가야 고지가 사실이 된다. 그때까지는 방침이 앞서 있다 (`docs/wiki/ads-web-adsense.md` §10 체크리스트) |
 
 1~5의 자리표시자는 확정 전에는 계약 테스트로 막지 않았다 — 막으면 확정 전 단계의 본문을 커밋할
@@ -189,7 +200,7 @@ prod 게시(`scripts/publish-privacy.sh prod`) 전에는 아래를 전부 닫는
 1. **계약 테스트가 깨진다** — `node --test 'infra/privacy/*.test.mjs'`. 깨지지 않는 사실이면 2번부터 사람이 시작한다.
 2. **본문을 고친다** — `infra/privacy/privacy.html`.
 3. **이 문서의 매핑을 갱신한다** — 1절의 해당 행. 근거 경로와 행 번호까지.
-4. **스토어 답안을 갱신한다** — `Accentury_App` 레포 `docs/wiki/play-store-listing.md` §5, §6 (KAN-174), App Store 라벨 (KAN-175). 신고와 실제 동작이 어긋나는 것이 정책 위반이다.
+4. **스토어 답안을 갱신한다** — `Accentury_App` 레포 `docs/wiki/play-store-listing.md` §5, §6 (KAN-174)과 `Accentury_App` 레포 `docs/wiki/app-store-listing.md` §6 (KAN-175). 신고와 실제 동작이 어긋나는 것이 정책 위반이다.
 5. **게시한다** — `scripts/publish-privacy.sh staging` → 확인 → `scripts/publish-privacy.sh prod` (3절 게이트를 먼저 닫는다).
 
 예를 들어 `infra/modules/fargate/variables.tf`의 `log_retention_days`를 14에서 30으로 올리면
@@ -220,8 +231,11 @@ prod 게시(`scripts/publish-privacy.sh prod`) 전에는 아래를 전부 닫는
 
 | 날짜 | 결정 | 본문에 남은 자리 |
 |---|---|---|
+| 2026-10-01 | **스토어 답안의 정본을 `Accentury_App` 레포 문서로 넘긴다 (KAN-175 심사 제출 준비).** 시행일은 KAN-240이 2026-09-29로 이미 기재했고 계약 테스트가 방침 버전·backend 상수와 함께 묶어 두어, 날짜를 다시 올리는 것은 prod 게시일에 네 자리와 앱 두 상수를 같이 올릴 때의 일이다. 이 회차는 문서 포인터만 고쳤다 | 3절 게이트 6·7행, 4절 4단계, 2절 머리 (본문 무변경) |
 | 2026-09-01 | 사용자 음성을 S3에 저장하지 않는다 | 1항 「음성은 데이터베이스나 S3 같은 영속 저장소에 저장하지 않습니다」 |
 | 2026-09-28 | **staging 게시본에만 학습 수집 예외를 적는다 (KAN-239).** staging 학습 버킷(KAN-201)이 고지와 달리 누구의 음성이든 모으고 있어, 수집 대상을 동의한 테스터 계정으로 한정하고 세션을 가명화한 뒤 그 사실을 staging 본문에 적었다. prod 게시본은 무변경이고(위 행의 문구 그대로) 파일은 하나로 두되 `staging-only` 주석 블록을 게시 스크립트가 prod에서 잘라낸다. 그 전까지 쌓인 382개 객체는 동의 여부를 확인할 수 없어 전량 파기했다 | 1항 음성 산문 뒤 staging-only 블록 |
+| 2026-10-04 | **KAN-239의 수집 한정을 되돌린다.** 사용자 결정으로 동의 테스터 한정, 세션과 작업 ID 가명화, 수명주기 만료일, 버킷 정책과 학습 읽기 역할, 스위치 이름(`consented-bucket`)을 KAN-201 상태로 되돌렸다. staging은 익명 웹 세션을 포함한 모든 음성을 다시 저장한다. staging 본문의 학습 수집 고지는 고치지 않기로 해 본문(동의한 테스터만, 가명, 보유 기간)과 구현이 어긋난 채다 | 1항 음성 산문 뒤 staging-only 블록 (무변경) |
+| 2026-10-04 | **음성 저장을 두 환경 공통의 선택 동의로 바꾼다 (KAN-269).** 위 행의 「본문과 구현이 어긋난 채」를 이 결정이 닫는다. 음성은 공유 음성 전용 버킷 `accentury-voice-<account>`에 접두사 `staging/`과 `prod/`로 나눠 저장한다. 저장 대상은 음성 저장과 AI 모델 학습 활용에 선택 동의한 응시뿐이고(웹과 앱 모두), 이 동의는 필수 방침 동의와 별개다. 세션 ID와 작업 ID는 가명화하지 않고 그대로 둔다. 앱 계정은 계정 ID와 음성 세션 ID를 잇는 연결 표를 두어 세션 만료와 탈퇴 뒤에도 남긴다. **prod도 이제 음성을 저장한다** - 2026-09-01 결정(「사용자 음성을 S3에 저장하지 않는다」)은 선택 동의를 하지 않은 응시에만 남는다. 방침 버전을 `2026-10-04`로 올렸다. staging 전용 고지 블록은 비웠고 자르는 경로는 남겼다 | 1항 표 「음성 녹음」, 「음성 저장과 학습 활용 (선택 동의)」, 「테스트 세션」 행과 「음성 녹음」 산문, 새 절 「음성 저장과 AI 모델 학습 활용 (선택 동의)」, 「계정」 절, 3항 AWS 행과 산문, 5, 6, 7, 11, 12, 14항, 머리말 |
 | 2026-09-29 | **앱 계정 PII를 방침에 반영한다 (KAN-240).** 방침 버전을 `2026-09-29`로 올리고 시행일도 같은 날로 적었다. 서버는 가입 동의를 이 버전과 정확 일치로만 받는다(형식 정규식 검사를 대체). 탈퇴 API(KAN-241) 전의 임시 탈퇴 절차는 보호책임자 이메일 요청이다. 성별, 이름, 이메일의 처리 목적은 회원 관리와 응시자 통계로 적었다(코드에는 아직 활용처가 없다). IdP 표는 티켓대로 3항에 뒀다. 세션 생성 로그에서 `userId`를 뺐다 | 1항 표 「계정 (앱)」, 「로그인 토큰」 행과 「계정」 절, 3항 제공자 표, 5, 6, 7, 11, 12, 14항 |
 | 2026-09-01 | 방침 URL은 `/privacy.html` (확장자 없는 경로는 SPA 재작성에 먹힌다) | 14항 URL, `infra/privacy/README.md` |
 | 2026-09-07 | 개인정보 보호책임자 이성주, 문의처 team2pl1@gmail.com | 13항 |
@@ -238,7 +252,10 @@ prod 게시(`scripts/publish-privacy.sh prod`) 전에는 아래를 전부 닫는
 
 - **Crashlytics 90일, GA4 2개월** — 둘 다 콘솔 기본값으로 적었고 레포에는 근거가 없다. 콘솔에서 실제 설정을 확인해 다르면 1항 표와 4항을 고친다.
 - **운영 주체 표기** — 지금은 「Accentury 팀(이박이일)」이다. 사업자 등록이 없어 상호·대표자·주소를 적지 않았다. 광고 수익이 생기면 사업자 표기가 필요한지 확인해야 한다.
-- **학습 수집 동의 철회 뒤 이미 보관된 음성** (KAN-239) - staging 본문은 「철회한 뒤로는 보관하지 않습니다」까지만 약속한다. 보관된 음성은 세션 가명으로만 묶여 있고 세션과 계정의 연결은 24시간 뒤 사라지므로, 철회한 사람의 지난 음성을 골라 지울 수단이 지금은 없다. 동의서 문안을 검토할 때 이 점을 어떻게 고지할지(보유 기간 만료 시 일괄 파기로 갈음할지, 가명과 계정의 대응표를 따로 둘지) 개인정보 담당이 정한다.
+- **선택 동의 음성의 보유 기간 문구** (KAN-269) - 본문은 「학습 목적 달성 시까지」로 적었고 자동 만료가 없다. 이 문구는 잠정이고 개인정보 보호책임자의 검토를 기다린다. 검토 결과에 따라 1항 표, 선택 동의 절, 5항 파기 목록, 계약 테스트의 해당 문자열을 함께 고친다.
+- **웹의 만 14세 미만** (KAN-269) - 웹에는 계정과 생년월일 확인이 없어, 음성 저장 선택 동의의 문안이 만 14세 이상 확인을 겸한다(7항). 본인 확인 수단이 따로 없다는 한계는 그대로다.
+- **방침 버전 날짜와 실제 prod 게시일** (KAN-269) - 버전과 시행일을 `2026-10-04`로 적었다. prod 게시일이 이 날짜와 다르면 게시일로 다시 맞춘다(4절 「방침 버전」의 네 자리와 앱 두 상수).
+- **앱 상수와 서버 배포의 순서** (KAN-269) - 서버는 가입 동의의 방침 버전이 게시 버전과 정확히 같지 않으면 가입을 거절한다. `2026-10-04` 상수를 담은 앱이 서버 배포보다 먼저이거나 함께 나가야 한다. 어긋난 동안에는 앱의 새 가입이 막힌다.
 - **연령 기준 세 가지의 관계** - Play 타겟층은 18세 이상만 신고했고(`Accentury_App` 레포 `docs/wiki/play-store-listing.md` §6, 「누구를 겨냥했나」이지 연령 제한이 아니다), 가입은 만 14세 이상만 받는다(7항, `ProfileRules.MINIMUM_AGE`). App Store 등급은 `app-store-listing.md`에서 정한다. 셋이 서로 모순은 아니지만, 14~17세 가입을 받는 것이 Play 18세 이상 신고와 함께 문제 되지 않는지 스토어 신고를 고칠 때 확인한다.
 - **만 14세 미만이 추가 정보 단계에서 거절될 때 이미 만들어진 계정 행** - IdP가 생년월일을 주지 않은 경우(구글, 애플) 계정 행은 로그인 때 만들어지고, 생년월일은 추가 정보 화면에서 거절된다. 이때 생년월일은 저장하지 않지만 IdP가 준 이메일과 이름은 계정 행에 남는다. 7항은 「그 생년월일은 저장하지 않는다」까지만 약속한다. 거절된 계정 행을 지울지는 탈퇴(KAN-241)와 함께 정한다.
 - **이메일로 본인 확인이 안 되는 계정의 탈퇴 요청** (KAN-240 Codex 리뷰 P2) - 애플 전달용 주소 사용자와 이메일 등록 전에 멈춘 계정은 6항의 「계정 이메일로 요청」을 따를 수 없어, 방침은 「확인 방법을 따로 안내」까지만 약속한다. 앱 안 탈퇴(KAN-241)가 나오면 사라지는 문제지만, 그 전에 요청이 오면 무엇으로 본인임을 확인할지 개인정보 담당이 정한다.

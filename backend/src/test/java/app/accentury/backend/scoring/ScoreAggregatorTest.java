@@ -14,7 +14,8 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
- * sv-0.3 집계식과 등급 판정(KAN-21 AC), sv-0.4 억양 전처리(KAN-200 AC)의 단위 명세.
+ * sv-0.3 집계식과 등급 판정(KAN-21 AC), sv-0.4 억양 전처리(KAN-200 AC), 7문항 세트와
+ * sv-0.5(KAN-260)의 단위 명세.
  * <p>
  * 실제 발행 seed(score-versions/sv-0.3.json, sv-0.4.json)를 로드한 레지스트리로 검증한다 -
  * 코드가 아니라 설정 파일의 가중치와 경계, 계수 규칙이 실제로 쓰임을 함께 확인하기 위해서다.
@@ -334,7 +335,87 @@ class ScoreAggregatorTest {
                 () -> aggregator.aggregate("sv-0.3", voiceOnly, voiceScores(80, 80, 80, 80, 80), Map.of()));
     }
 
+    // === KAN-260 - 7문항 세트(음성 3 + 어휘 4, sv-0.5) ===
+
+    @Test
+    void 일곱_문항_세트는_억양_평균과_단어_정답률로_검산된다() {
+        // 원점수 90, 80, 70 → 평균 80 x 계수 0.80 = 64. 단어 3/4 = 75. 종합 (64 x 2 + 75) / 3 = 67.67 → 68.
+        AggregateScore score = aggregator.aggregate("sv-0.5", sevenItemDefinition(),
+                Map.of("v1", 90, "v2", 80, "v3", 70), sevenItemAnswers(3));
+
+        assertEquals("sv-0.5", score.scoreVersion());
+        assertEquals(64, score.intonation());
+        assertEquals(75, score.vocabulary());
+        assertEquals(68, score.overall());
+        assertEquals("HONORARY", score.tier().code());
+    }
+
+    @Test
+    void 일곱_문항_세트의_점수는_0에서_100이고_단어는_다섯_단계다() {
+        AggregateScore lowest = aggregator.aggregate("sv-0.5", sevenItemDefinition(),
+                Map.of("v1", 0, "v2", 0, "v3", 0), sevenItemAnswers(0));
+        assertEquals(0, lowest.intonation());
+        assertEquals(0, lowest.vocabulary());
+        assertEquals(0, lowest.overall());
+        assertEquals("OUTSIDER", lowest.tier().code());
+
+        AggregateScore highest = aggregator.aggregate("sv-0.5", sevenItemDefinition(),
+                Map.of("v1", 100, "v2", 100, "v3", 100), sevenItemAnswers(4));
+        assertEquals(100, highest.intonation());
+        assertEquals(100, highest.vocabulary());
+        assertEquals(100, highest.overall());
+        assertEquals("NATIVE", highest.tier().code());
+
+        List<Integer> vocabularySteps = new ArrayList<>();
+        for (int correct = 0; correct <= 4; correct++) {
+            vocabularySteps.add(aggregator.aggregate("sv-0.5", sevenItemDefinition(),
+                    Map.of("v1", 50, "v2", 50, "v3", 50), sevenItemAnswers(correct)).vocabulary());
+        }
+        assertEquals(List.of(0, 25, 50, 75, 100), vocabularySteps);
+    }
+
+    @Test
+    void 일곱_문항_세트에_음성_점수가_넘치면_집계_거부다() {
+        // 세트 밖 음성 점수가 섞이면 집계 버그다 - 10문항 세션의 점수 5개가 7문항 정의로 들어온 경우.
+        assertThrows(IllegalArgumentException.class, () -> aggregator.aggregate("sv-0.5",
+                sevenItemDefinition(), voiceScores(80, 80, 80, 80, 80), sevenItemAnswers(4)));
+    }
+
     // === 픽스처 ===
+
+    /** gn-2026.10.1과 같은 구성의 세트 - v, v, w, v, w, w, w. 어휘 정답은 항상 a 선택지다. */
+    private static TestDefinition sevenItemDefinition() {
+        List<TestDefinition.Item> items = new ArrayList<>();
+        int voice = 1;
+        int vocabulary = 1;
+        int seq = 1;
+        for (char slot : "VVWVWWW".toCharArray()) {
+            if (slot == 'V') {
+                items.add(new TestDefinition.Item("v" + voice++, seq++, TestDefinition.ItemType.VOICE, "밥 뭇나?",
+                        new TestDefinition.GuideF0("semitone", 10, List.of(-0.8, 0.3, 2.8), null, null),
+                        null, null));
+            } else {
+                String w = "w" + vocabulary++;
+                items.add(new TestDefinition.Item(w, seq++, TestDefinition.ItemType.VOCABULARY,
+                        "'정구지'는 표준어로 무엇일까요?", null, List.of(
+                                new TestDefinition.Choice(w + "a", "부추"),
+                                new TestDefinition.Choice(w + "b", "미나리"),
+                                new TestDefinition.Choice(w + "c", "쑥갓"),
+                                new TestDefinition.Choice(w + "d", "시금치")),
+                        w + "a"));
+            }
+        }
+        return new TestDefinition("gn-2026.10.1", "sv-0.5", "GYEONGNAM", 180, "VVWVWWW", items);
+    }
+
+    /** 어휘 4문항 중 앞에서부터 {@code correct}개 정답 */
+    private static Map<String, String> sevenItemAnswers(int correct) {
+        Map<String, String> answers = new HashMap<>();
+        for (int i = 1; i <= 4; i++) {
+            answers.put("w" + i, "w" + i + (i <= correct ? "a" : "b"));
+        }
+        return answers;
+    }
 
     private static ScorePolicyRegistry policies() {
         return new ScorePolicyRegistry(JsonMapper.builder().build());

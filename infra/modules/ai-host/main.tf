@@ -27,14 +27,6 @@ locals {
   ecr_registry = "${data.aws_caller_identity.current.account_id}.dkr.ecr.${data.aws_region.current.region}.amazonaws.com"
 }
 
-# AL2023 x86_64 최신 AMI를 SSM 퍼블릭 파라미터에서 읽는다. 값은 시간이 지나면 바뀌므로 image_id를
-# ignore_changes로 고정한다 - 그래야 AMI 갱신이 "plan 변경 없음" AC를 깨고 instance refresh를 유발하는
-# 일이 없다. GPU(g4dn)로 가면 NVIDIA 드라이버 AMI와 docker runtime 설정이 함께 바뀌므로 그때 이 파라미터
-# 이름을 변수로 뺀다 (KAN-57 판정 후).
-data "aws_ssm_parameter" "al2023_ami" {
-  name = "/aws/service/ami-amazon-linux-latest/al2023-ami-kernel-default-x86_64"
-}
-
 # ---- 컨테이너 로그 그룹 (KAN-203) ----
 
 # ai 컨테이너의 stdout과 stderr가 여기 쌓인다. compose의 로깅 드라이버가 json-file이던 동안 로그는 호스트
@@ -178,6 +170,39 @@ resource "aws_s3_bucket_public_access_block" "boot" {
   restrict_public_buckets = true
 }
 
+# TLS가 아닌 요청 거부 (KAN-245, 보안 검토 #11). 호스트는 부팅 때 aws s3 cp(HTTPS)로 받으므로 영향이 없다.
+data "aws_iam_policy_document" "boot_bucket" {
+  statement {
+    sid     = "DenyInsecureTransport"
+    effect  = "Deny"
+    actions = ["s3:*"]
+    resources = [
+      aws_s3_bucket.boot.arn,
+      "${aws_s3_bucket.boot.arn}/*",
+    ]
+
+    principals {
+      type        = "*"
+      identifiers = ["*"]
+    }
+
+    condition {
+      test     = "Bool"
+      variable = "aws:SecureTransport"
+      values   = ["false"]
+    }
+  }
+}
+
+resource "aws_s3_bucket_policy" "boot" {
+  bucket = aws_s3_bucket.boot.id
+  policy = data.aws_iam_policy_document.boot_bucket.json
+
+  # 같은 버킷의 퍼블릭 액세스 차단과 정책을 동시에 바꾸면 S3가 OperationAborted로 거절할 수 있어 순서를
+  # 고정한다 (tfstate 버킷과 같은 이유). Deny뿐이라 퍼블릭 정책으로 판정되지 않는다.
+  depends_on = [aws_s3_bucket_public_access_block.boot]
+}
+
 locals {
   # 키는 모듈 안 파일 이름이고 그대로 ai-host/ 아래의 오브젝트 키가 된다. 호스트에 놓이는 경로는
   # user_data의 fetch 호출이 정한다 - compose만 이름이 docker-compose.yml로 바뀐다.
@@ -314,15 +339,18 @@ resource "aws_route53_record" "ai" {
 # ---- 시작 템플릿 + ASG(min 1, max 3 - tfvars) ----
 
 # 인스턴스 자체가 아니라 ASG가 소유한다 (KAN-36). 대상 그룹 상태 검사 실패 시 자동 교체되고, user_data(compose,
-# 스크립트)가 바뀌면 새 템플릿 버전으로 instance refresh가 돈다. 1대일 때는 교체 동안 분석이 끊기고 backend
-# 회로가 열렸다가(KAN-28) 새 인스턴스가 healthy가 되면 닫힌다 - 2대 이상이면 최소 1대가 남는다 (instance_refresh).
+# 스크립트)나 AMI(var.ami_id)가 바뀌면 새 템플릿 버전으로 instance refresh가 돈다. 교체는 새 인스턴스를 먼저
+# 띄우고 옛 인스턴스를 나중에 종료하는 순서라 1대일 때도 분석이 끊기지 않는다 (KAN-246, 아래 instance_refresh).
 resource "aws_launch_template" "ai" {
   # 오브젝트가 먼저 올라가 있어야 첫 부팅의 fetch가 성공한다. 버킷 자체는 IAM 정책을 통해 이미 엮여 있지만
   # 오브젝트는 참조가 없어 순서가 보장되지 않는다 (KAN-129의 SSM 파라미터 선행과 같은 성격).
   depends_on = [aws_s3_object.boot]
 
-  name_prefix   = "${local.name}-"
-  image_id      = data.aws_ssm_parameter.al2023_ami.insecure_value
+  name_prefix = "${local.name}-"
+  # AMI는 tfvars에 명시한다 (KAN-246). SSM의 "최신 AMI" 파라미터를 직접 읽으면 값이 시간에 따라 바뀌어
+  # 손대지 않은 plan에 교체가 끼어든다. 그걸 막으려고 ignore_changes로 묶어 뒀더니(KAN-36) 이번에는 최초
+  # 생성 시점의 AMI에 영구히 고정돼 OS 보안 업데이트가 들어오지 않았다. 갱신 절차는 README "AI 호스트 AMI 갱신".
+  image_id      = var.ami_id
   instance_type = var.instance_type
 
   iam_instance_profile {
@@ -378,8 +406,6 @@ resource "aws_launch_template" "ai" {
   }
 
   lifecycle {
-    ignore_changes = [image_id]
-
     precondition {
       condition     = contains(var.config_parameter_names, local.required_parameter)
       error_message = "config 모듈의 SSM 파라미터 ${local.required_parameter}가 config_parameter_names에 있어야 합니다 (KAN-36)."
@@ -423,14 +449,17 @@ resource "aws_autoscaling_group" "ai" {
     version = aws_launch_template.ai.latest_version
   }
 
-  # 템플릿이 바뀌면 인스턴스를 갈아 끼운다. 50%는 대수에 따라 다르게 읽힌다 - 1대일 때는 내림으로 0대
-  # 유지(KAN-36과 같이 종료 뒤 새 인스턴스, 그동안 끊김), 2대나 3대일 때는 최소 1대가 healthy로 남아 분석이
-  # 이어진다. 워밍업은 대상 그룹 healthy(모델 적재 완료)까지 기다린 뒤의 여유다.
+  # 템플릿이 바뀌면 인스턴스를 갈아 끼운다. 먼저 띄우고 나중에 종료한다 (KAN-246) - 최소 100%라 지금 대수가
+  # 줄지 않고, 최대 200%라 그 위로 새 인스턴스를 얹을 수 있다. 1대일 때 새 인스턴스 1대가 대상 그룹 healthy가
+  # 되고 워밍업이 지난 뒤에야 옛 인스턴스가 빠지므로(진행 중 추론은 deregistration_delay 동안 마무리) 교체 중에도
+  # 분석이 이어진다. 예전 값 50%는 1대일 때 내림으로 0대 유지라 교체 동안 분석이 끊겼다 (KAN-36, KAN-201).
+  # 교체하는 몇 분 동안 인스턴스가 평소의 두 배가 된다. 워밍업은 대상 그룹 healthy(모델 적재 완료) 뒤의 여유다.
   instance_refresh {
     strategy = "Rolling"
 
     preferences {
-      min_healthy_percentage = 50
+      min_healthy_percentage = 100
+      max_healthy_percentage = 200
       instance_warmup        = 120
     }
   }
@@ -489,11 +518,14 @@ resource "aws_autoscaling_policy" "scale_in" {
   }
 }
 
-# 혼잡 임계치 이상이 2분 연속이면 +1. 업로드가 몰린 순간(다섯 문항 연속 제출)은 1분이면 빠지므로 2분을 요구한다.
+# 혼잡 임계치 이상이 1분이면 +1 (KAN-272, 2026-10-06 - 그 전에는 2분 연속). 2분을 요구한 것은 한 사람이 문항을
+# 연달아 제출한 순간에 늘리지 않기 위해서였는데, 그 경우는 진행 중이 5건을 넘지 않아 임계치 6에 닿지 않는다.
+# 6건이면 이미 두 사람 이상이 겹친 것이고 대기열이 1분이다. 2026-10-06 prod에서는 부하 시작(14:52)부터 2번째
+# 인스턴스 기동(14:56)까지 4분이 걸렸고 그 사이 진행 중이 19건까지 쌓였다 - 판정에서 1분을 줄인다.
 # treat_missing_data = notBreaching: backend가 죽어 지표가 끊긴 것은 no-healthy-target(monitoring)이 잡는다.
 resource "aws_cloudwatch_metric_alarm" "scale_out" {
   alarm_name        = "${local.name}-scale-out"
-  alarm_description = "accentury ${var.env}: 진행 중 분석이 ${var.scale_out_threshold}건 이상으로 2분 연속이라 AI 호스트를 1대 늘립니다. (KAN-201)"
+  alarm_description = "accentury ${var.env}: 진행 중 분석이 ${var.scale_out_threshold}건 이상이라 AI 호스트를 1대 늘립니다. (KAN-201, KAN-272)"
 
   namespace   = var.scaling_metric_namespace
   metric_name = "accentury.analysis.processing.value"
@@ -501,7 +533,7 @@ resource "aws_cloudwatch_metric_alarm" "scale_out" {
 
   statistic           = "Maximum"
   period              = 60
-  evaluation_periods  = 2
+  evaluation_periods  = 1
   comparison_operator = "GreaterThanOrEqualToThreshold"
   threshold           = var.scale_out_threshold
   treat_missing_data  = "notBreaching"

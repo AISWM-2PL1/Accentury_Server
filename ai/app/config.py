@@ -28,8 +28,8 @@ DEFAULT_SWEEP_INTERVAL_SECONDS = 5 * 60
 #:
 #: 75초는 KAN-57의 c7i.xlarge 실측(bf16 + MFA align_one, 1건 P95 11.1초)으로 정했다 (KAN-172).
 #: 이 상한은 :mod:`app.track1`의 단일 lock 대기와 워커 재적재 대기까지 포함하므로 정상 추론
-#: 하나(11초)가 아니라 다음 둘을 덮어야 한다 - 롤링 배포 중 backend 태스크 최대 6개(상한 3 x
-#: 200%)가 겹친 6 x 11초 = 67초, 워커가 죽은 뒤(OOM 또는 한 번의 취소) 재적재 31초 + 추론
+#: 하나(11초)가 아니라 다음 둘을 덮어야 한다 - 한 호스트에 겹친 호출 6건(backend 태스크당 전달
+#: 워커 3개 x 롤링 배포 중 태스크 2개, KAN-272)의 6 x 11초 = 67초, 워커가 죽은 뒤(OOM 또는 한 번의 취소) 재적재 31초 + 추론
 #: 11초 = 42초. 그보다 짧으면(예: 25초나 40초) 이미 lock을 잡고 추론 중인 요청을 상한이 끊어
 #: 멀쩡한 워커를 죽이고, 재전송이 재적재를 기다리다 또 끊겨 새 워커를 또 죽이는 연쇄가 된다
 #: (Codex astra 리뷰 P1, 실제 어댑터로 재현).
@@ -39,6 +39,21 @@ DEFAULT_SWEEP_INTERVAL_SECONDS = 5 * 60
 #: 호출 자체를 멈추므로(KAN-28) 연쇄가 자기수렴한다 - 합까지 덮으려고 값을 늘리지 않는 이유다.
 #: 환경별로는 SSM이 덮어쓴다 (infra/modules/config).
 DEFAULT_ANALYSIS_TIMEOUT_SECONDS = 75.0
+
+#: 추론 1건을 시작하려면 분석 상한까지 남아 있어야 하는 시간 (초, KAN-272).
+#:
+#: 상한은 lock 대기를 포함하므로 오래 기다린 요청은 lock을 잡았을 때 남은 시간이 추론 1건
+#: (P95 11.1초, prod 최대 11.4초)에 못 미칠 수 있다. 그대로 시작하면 **추론 도중** 상한이 발화해
+#: 멀쩡한 워커를 죽이고(:mod:`app.track1`의 취소 처리) 재적재 31초가 뒤 요청까지 민다. 그래서 남은
+#: 시간이 이 값보다 적으면 시작하지 않고 과부하(429)로 돌려준다 - 추론 전 거절이라 BE는 시도
+#: 예산을 깎지 않고 다시 보낸다 (§4.1).
+#:
+#: 15초면 lock을 75 - 15 = 60초 안에 잡은 요청만 추론한다. 한 호스트에 6건이 겹쳐도(여섯 번째가
+#: 55.5초에 시작해 66.6초에 끝난다) 전부 통과하고, 일곱 번째(66.6초)부터 걸린다. backend의 전달
+#: 워커가 태스크당 3개가 되면서(KAN-272) 태스크 3개가 AI 1대에 몰리면 9건이 겹칠 수 있다.
+#: 워커 재적재 직후의 첫 추론(콜드 22.9초)까지는 덮지 않는다 - 그 요청이 45초 넘게 기다린 뒤였다면
+#: 여전히 상한에 걸린다. 0이면 이 검사를 끈다.
+DEFAULT_INFERENCE_RESERVE_SECONDS = 15.0
 
 #: 오디오 파트 상한 - BE가 §3.3에서 이미 1MB로 끊지만, 사설망이라고 무한정 받아 디스크를
 #: 채우게 두지 않는다 (Codex sol 리뷰 P2). BE와 같은 값이라 정상 요청은 걸리지 않는다.
@@ -76,6 +91,8 @@ class Settings:
     sweep_interval_seconds: float = DEFAULT_SWEEP_INTERVAL_SECONDS
     #: 분석 1건의 상한. 임시파일 수명을 유한하게 묶는 장치다 (KAN-27, Codex sol 리뷰 P1)
     analysis_timeout_seconds: float = DEFAULT_ANALYSIS_TIMEOUT_SECONDS
+    #: 추론을 시작하려면 상한까지 남아 있어야 하는 시간 (KAN-272, 위 상수 주석). 0이면 검사하지 않는다
+    inference_reserve_seconds: float = DEFAULT_INFERENCE_RESERVE_SECONDS
     #: 받아들이는 오디오 파트의 상한 (§3.3과 같은 1MB)
     max_audio_bytes: int = DEFAULT_MAX_AUDIO_BYTES
     #: 요청 본문 전체의 상한 - multipart 파싱 전에 끊는다 (audio + meta + 오버헤드)
@@ -119,6 +136,11 @@ class Settings:
             analysis_timeout_seconds=float(
                 source.get(
                     "ACCENTURY_AI_ANALYSIS_TIMEOUT_SECONDS", DEFAULT_ANALYSIS_TIMEOUT_SECONDS
+                )
+            ),
+            inference_reserve_seconds=float(
+                source.get(
+                    "ACCENTURY_AI_INFERENCE_RESERVE_SECONDS", DEFAULT_INFERENCE_RESERVE_SECONDS
                 )
             ),
             max_audio_bytes=int(

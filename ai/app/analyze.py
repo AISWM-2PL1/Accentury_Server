@@ -21,7 +21,7 @@ from typing import Annotated
 from fastapi import APIRouter, File, Form, Request, UploadFile
 from fastapi.responses import JSONResponse
 
-from app.engine import AnalysisOutcome, AnalysisRequest
+from app.engine import AnalysisOutcome, AnalysisRequest, EngineBusy
 from app.stages import StageRecord
 
 log = logging.getLogger(__name__)
@@ -139,6 +139,43 @@ async def analyze(
                 status_code=503,
                 content={"status": "FAILED", "detail": "분석 시간 초과", "processingMs": processing_ms},
             )
+        except EngineBusy:
+            # 엔진이 추론을 시작하지 않고 접었다 (KAN-272) - 차례를 기다리다 상한까지 남은 시간이
+            # 추론 1건에 모자랐다. 추론 전 거절이라 과부하 셰딩(429)이다: BE는 시도 예산을 깎지
+            # 않고 재전송 예산 안에서 다시 보낸다 (§4.1). 기다린 시간(lockWait)은 지표로 남긴다 -
+            # 이 로그가 보이면 한 호스트에 호출이 너무 많이 겹친 것이다
+            processing_ms = round((time.monotonic() - started) * 1000)
+            log.warning(
+                "과부하로 추론 전 거절 correlationId=%s itemId=%s bytes=%d ms=%d stages=%s",
+                correlation_id,
+                item_id,
+                size,
+                processing_ms,
+                stages.as_log(),
+            )
+            stage_metrics.record(stages)
+            return JSONResponse(
+                status_code=429,
+                content={
+                    "status": "FAILED",
+                    "detail": "과부하 - 추론 전 거절",
+                    "processingMs": processing_ms,
+                },
+            )
+        except Exception as error:
+            # 엔진이 예외로 끝난 요청이다 - 그대로 올려 500이 되고 BE가 재전송한다 (§4.1).
+            # 여기서 한 줄을 남기는 이유는 서버가 찍는 스택트레이스에 문항 ID와 추적 ID가 없어서다.
+            # 2026-10-05의 500 122건은 어느 문항에서 났는지 로그로 되찾을 수 없었다 (KAN-272).
+            # 예외의 **종류**만 싣는다 - 메시지에는 발화 내용이 섞일 수 있다 (§2.6, NFR-SC-07)
+            log.error(
+                "분석 실패 (엔진 예외) correlationId=%s itemId=%s bytes=%d ms=%d kind=%s",
+                correlation_id,
+                item_id,
+                size,
+                round((time.monotonic() - started) * 1000),
+                type(error).__name__,
+            )
+            raise
 
     processing_ms = round((time.monotonic() - started) * 1000)
     # 예산을 넘겼는데 상한이 발화하지 않았다면, 엔진이 await 없이 돌아 asyncio.timeout이
@@ -160,13 +197,16 @@ async def analyze(
     # 로그만으로도 어느 모델과 점수 규칙이 그 결과를 냈는지 추적된다
     # 단계 시간과 콜드/웜도 같은 줄에 싣는다 (KAN-204) - 요청 하나의 시간이 어디로 갔는지를
     # 추적 ID 하나로 되찾을 수 있어야 한다. 값은 전부 소요 시간이라 발화 내용과 무관하다
+    # 품질 코드도 싣는다 (KAN-272) - 판정 실패가 어느 코드였는지 로그만으로 셀 수 있어야 한다.
+    # 사용자 응답에 그대로 나가는 값이고 점수가 아니다
     log.info(
-        "분석 종료 correlationId=%s itemId=%s bytes=%d status=%s ms=%d scoreVersion=%s "
+        "분석 종료 correlationId=%s itemId=%s bytes=%d status=%s quality=%s ms=%d scoreVersion=%s "
         "modelVersion=%s warm=%s stages=%s",
         correlation_id,
         item_id,
         size,
         outcome.status,
+        outcome.quality_code,
         processing_ms,
         score_version,
         engine.model_version,

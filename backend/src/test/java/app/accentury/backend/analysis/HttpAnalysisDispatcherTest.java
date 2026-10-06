@@ -7,6 +7,7 @@ import app.accentury.backend.observability.ServiceMetrics;
 import app.accentury.backend.session.TestSessionRepository;
 import app.accentury.backend.training.TrainingSample;
 import app.accentury.backend.training.TrainingSampleStore;
+import app.accentury.backend.training.VoiceConsent;
 import ch.qos.logback.classic.Level;
 import ch.qos.logback.classic.Logger;
 import ch.qos.logback.classic.spi.ILoggingEvent;
@@ -45,6 +46,10 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * 오므로 한 번으로 끝낸다. 동기 실행기로 돌려 결과를 바로 검증한다.
  */
 class HttpAnalysisDispatcherTest extends IntegrationTest {
+
+    /** 음성 저장에 동의한 익명 세션 - 학습 샘플 테스트의 기본값이다 (KAN-269). */
+    private static final VoiceConsent CONSENT =
+            new VoiceConsent("2026-10-04", Instant.parse("2026-10-04T00:00:00Z"), null);
 
     @Autowired
     private AnalysisJobRepository repository;
@@ -221,6 +226,39 @@ class HttpAnalysisDispatcherTest extends IntegrationTest {
         assertEquals(AnalysisJobStatus.RETRYABLE_FAILED, saved.status());
         assertEquals("AUDIO_TOO_QUIET", saved.errorCode());
         assertEquals(1, client.calls); // 같은 오디오에 같은 답 - 재시도 가능한 실패만 다시 큐잉한다 (AC).
+    }
+
+    @Test
+    void 채점_불가는_재전송_없이_재녹음_가능한_실패로_끝나고_건수가_남는다() {
+        // KAN-272. 같은 음성은 몇 번을 분석해도 NaN이다 - 재전송 예산(2회)이 남아 있어도 쓰지 않는다.
+        SimpleMeterRegistry registry = new SimpleMeterRegistry();
+        AnalysisMetrics metrics = TestMetrics.analysisMetrics(registry);
+        AnalysisJob job = saveProcessingJob();
+        ScriptedClient client = new ScriptedClient()
+                .then(AiAnalysisClient.Rejected.judged("ANALYSIS_UNSCORABLE", true));
+
+        new HttpAnalysisDispatcher(client, new SyncTaskExecutor(), transitions,
+                new AnalysisBacklog(), openCircuitNever(), metrics, 2, 0).dispatch(request(job));
+
+        AnalysisJob saved = repository.findById(job.id()).orElseThrow();
+        assertEquals(AnalysisJobStatus.RETRYABLE_FAILED, saved.status());
+        assertEquals("ANALYSIS_UNSCORABLE", saved.errorCode());
+        assertEquals(1, client.calls);
+        assertEquals(1.0, registry.get(ServiceMetrics.ANALYSIS_JUDGED).tag("reason", "unscorable").counter().count());
+    }
+
+    @Test
+    void 계약_위반은_판정_건수에_세지_않는다() {
+        SimpleMeterRegistry registry = new SimpleMeterRegistry();
+        AnalysisMetrics metrics = TestMetrics.analysisMetrics(registry);
+        AnalysisJob job = saveProcessingJob();
+        ScriptedClient client = new ScriptedClient().then(AiAnalysisClient.Rejected.contractViolation());
+
+        new HttpAnalysisDispatcher(client, new SyncTaskExecutor(), transitions,
+                new AnalysisBacklog(), openCircuitNever(), metrics, 0, 0).dispatch(request(job));
+
+        assertEquals(0.0, registry.get(ServiceMetrics.ANALYSIS_JUDGED).counters().stream()
+                .mapToDouble(counter -> counter.count()).sum());
     }
 
     @Test
@@ -659,19 +697,66 @@ class HttpAnalysisDispatcherTest extends IntegrationTest {
     }
 
     @Test
-    void 세션_ID와_소유_계정이_샘플에_실려_저장소가_대상을_가른다() {
-        // 동의 테스터인지는 저장소(TrainingSpeakers)가 가른다 (KAN-239) - 디스패처는 둘 다 그대로 넘긴다.
+    void 음성_저장_동의가_없는_계정_세션의_요청은_성공해도_학습_샘플로_남지_않는다() {
+        // 동의는 선택이다 (KAN-269) - 분석과 상태 전이는 그대로 끝나고 음성만 어디에도 남지 않는다.
+        // 계정 세션은 라벨도 남기지 않는다 - 라벨 전용 저장은 익명 세션만이다 (KAN-274).
         AnalysisJob job = saveProcessingJob();
-        UUID owner = UUID.randomUUID();
         RecordingStore store = new RecordingStore();
         ScriptedClient client = new ScriptedClient()
-                .then(new AiAnalysisClient.Completed(78, "OK", "rmvpe-0.2", "sv-0.3"));
+                .then(new AiAnalysisClient.Completed(78, "OK", "rmvpe-0.2", "sv-ai-0.1"));
 
-        dispatcher(client, 0, store).dispatch(request(job, "GYEONGNAM", owner));
+        dispatcher(client, 0, store).dispatch(request(job, "GYEONGNAM", null));
+
+        assertTrue(store.samples.isEmpty(), "동의 없는 세션의 음성이 저장소로 넘어갔다");
+        assertEquals(AnalysisJobStatus.COMPLETED, repository.findById(job.id()).orElseThrow().status());
+    }
+
+    @Test
+    void 음성_저장_동의가_없는_익명_세션의_요청은_음성_없이_라벨만_남는다() {
+        // 익명 세션은 동의하지 않아도 점수와 출신 지역을 남긴다 (KAN-274). 음성 배열은 샘플에 실리지 않는다.
+        AnalysisJob job = saveProcessingJob();
+        RecordingStore store = new RecordingStore();
+        ScriptedClient client = new ScriptedClient()
+                .then(new AiAnalysisClient.Completed(78, "OK", "rmvpe-0.2", "sv-ai-0.1"));
+
+        dispatcher(client, 0, store).dispatch(anonymousRequest(job, "GYEONGNAM"));
 
         TrainingSample sample = store.only();
-        assertEquals(job.sessionId(), sample.sessionId());
-        assertEquals(owner, sample.ownerId());
+        assertFalse(sample.audioStored(), "동의 없는 세션의 음성이 샘플에 실렸다");
+        assertNull(sample.audio());
+        // 저장소 호출이 예외 없이 끝났다 - 대역이 저장 시점의 작업 상태까지 읽었다 (Codex 리뷰 P3).
+        assertEquals(AnalysisJobStatus.COMPLETED, store.statusAtSave);
+        assertNull(sample.consent());
+        assertEquals("GYEONGNAM", sample.region());
+        assertEquals(TrainingSample.Outcome.COMPLETED, sample.outcome());
+        assertEquals(78, sample.intonationScore());
+        assertEquals(AnalysisJobStatus.COMPLETED, repository.findById(job.id()).orElseThrow().status());
+    }
+
+    @Test
+    void 동의가_없는_익명_세션의_판정_실패도_라벨만_남는다() {
+        RecordingStore store = new RecordingStore();
+        ScriptedClient client = new ScriptedClient()
+                .then(AiAnalysisClient.Rejected.judged("AUDIO_TOO_QUIET", true));
+
+        dispatcher(client, 0, store).dispatch(anonymousRequest(saveProcessingJob(), null));
+
+        TrainingSample sample = store.only();
+        assertFalse(sample.audioStored());
+        assertEquals("UNKNOWN", sample.region());
+        assertEquals(TrainingSample.Outcome.RETRYABLE_FAILED, sample.outcome());
+        assertEquals("AUDIO_TOO_QUIET", sample.errorCode());
+    }
+
+    @Test
+    void 샘플은_요청의_동의를_그대로_싣는다() {
+        RecordingStore store = new RecordingStore();
+        ScriptedClient client = new ScriptedClient()
+                .then(new AiAnalysisClient.Completed(78, "OK", "rmvpe-0.2", "sv-ai-0.1"));
+
+        dispatcher(client, 0, store).dispatch(request(saveProcessingJob()));
+
+        assertEquals(CONSENT, store.only().consent());
     }
 
     @Test
@@ -788,7 +873,9 @@ class HttpAnalysisDispatcherTest extends IntegrationTest {
         @Override
         public void save(TrainingSample sample) {
             samples.add(sample);
-            audioSeen = sample.audio().clone();
+            // 라벨 전용 건(KAN-274)은 음성이 없다 - 여기서 NPE가 나면 호출부가 삼켜서 테스트가 저장 실패 경로를 보게 된다.
+            byte[] audio = sample.audio();
+            audioSeen = audio == null ? null : audio.clone();
             statusAtSave = repository.findById(sample.analysisJobId()).orElseThrow().status();
         }
 
@@ -853,12 +940,18 @@ class HttpAnalysisDispatcherTest extends IntegrationTest {
 
     private static AnalysisDispatcher.AnalysisRequest request(AnalysisJob job,
                                                               @Nullable String region) {
-        return request(job, region, null);
+        return request(job, region, CONSENT);
+    }
+
+    /** 음성 저장에 동의하지 않은 익명 세션의 요청 (KAN-274). */
+    private static AnalysisDispatcher.AnalysisRequest anonymousRequest(AnalysisJob job, @Nullable String region) {
+        return new AnalysisDispatcher.AnalysisRequest(job.id(), job.sessionId(), job.itemId(), null,
+                "gn-2026.08.1", "sv-0.3", region, 3000, null, true, new byte[] {1, 2, 3});
     }
 
     private static AnalysisDispatcher.AnalysisRequest request(AnalysisJob job, @Nullable String region,
-                                                              @Nullable UUID ownerId) {
+                                                              @Nullable VoiceConsent consent) {
         return new AnalysisDispatcher.AnalysisRequest(job.id(), job.sessionId(), job.itemId(), null,
-                "gn-2026.08.1", "sv-0.3", region, ownerId, 3000, new byte[] {1, 2, 3});
+                "gn-2026.08.1", "sv-0.3", region, 3000, consent, new byte[] {1, 2, 3});
     }
 }

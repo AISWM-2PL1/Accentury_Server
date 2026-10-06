@@ -18,6 +18,16 @@ variable "security_group_id" {
   description = "ai-sg (backend-sg만 8000, SSH 없음. KAN-121, KAN-36, KAN-165)."
 }
 
+variable "ami_id" {
+  type        = string
+  description = "AI 호스트의 AMI ID (KAN-246). AL2023 x86_64여야 한다 - user_data가 dnf와 AL2023 루트 디바이스(/dev/xvda)를 전제한다. 값을 바꾸면 시작 템플릿이 새 버전이 되어 인스턴스가 교체된다. 최신 값은 SSM 퍼블릭 파라미터 /aws/service/ami-amazon-linux-latest/al2023-ami-kernel-default-x86_64에서 읽는다 (README \"AI 호스트 AMI 갱신\"). GPU(g4dn)로 가면 NVIDIA 드라이버 AMI와 docker runtime 설정이 함께 바뀐다 (KAN-57 판정 후)."
+
+  validation {
+    condition     = can(regex("^ami-[0-9a-f]{8,17}$", var.ami_id))
+    error_message = "ami_id는 ami-로 시작하는 AMI ID여야 합니다."
+  }
+}
+
 variable "instance_type" {
   type        = string
   description = "인스턴스 타입. x86_64 전제 - 이미지도 linux/amd64로 빌드해야 한다. c7i.xlarge (KAN-36, 2026-09-01 결정으로 A단계부터)."
@@ -133,7 +143,7 @@ variable "scaling_metric_namespace" {
 
 variable "scale_out_threshold" {
   type        = number
-  description = "진행 중 분석이 이 건수 이상으로 2분 연속이면 +1 (KAN-201). backend의 폴링 혼잡 임계치(congestion-threshold 6, KAN-172)와 같은 값 - 서버가 폴링 간격을 올려 압력을 빼는 것과 같은 지점에서 처리량도 늘린다. AI가 1건 10초라 6건은 대기열 1분이다."
+  description = "진행 중 분석이 이 건수 이상인 분이 1번 나오면 +1 (KAN-201. 판정은 KAN-272에서 2분 연속에서 1분으로 줄였다). backend의 폴링 혼잡 임계치(congestion-threshold 6, KAN-172)와 같은 값 - 서버가 폴링 간격을 올려 압력을 빼는 것과 같은 지점에서 처리량도 늘린다. AI가 1건 10초라 6건은 대기열 1분이다."
   default     = 6
 }
 

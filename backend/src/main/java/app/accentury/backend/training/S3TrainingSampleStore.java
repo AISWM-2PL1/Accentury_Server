@@ -18,17 +18,24 @@ import java.util.LinkedHashMap;
 import java.util.Map;
 
 /**
- * 학습 샘플을 S3 버킷에 WAV 1개 + 메타 JSON 1개로 보존한다 (KAN-201 객체 규약).
+ * 학습 샘플을 S3 버킷에 WAV 1개 + 메타 JSON 1개로 보존한다 (KAN-201 객체 규약, KAN-269).
  * <p>
- * <b>동의한 테스터 계정의 세션만 남긴다</b> (KAN-239, {@link TrainingSpeakers}). 익명 세션과 목록 밖 계정의
- * 세션은 S3를 부르지 않고 카운터({@code result=skipped})만 올린다 - 로그는 남기지 않는다(웹 업로드마다 한 줄이다).
+ * 음성까지 남기는 샘플은 전부 음성 저장에 동의한 세션의 것이다. 동의가 없는 익명 세션의 요청은 호출부
+ * ({@code HttpAnalysisDispatcher})가 음성을 뺀 <b>라벨 전용</b> 샘플로 만들어 넘기고 (KAN-274), 여기서는 메타 JSON
+ * 하나만 {@code <env>/_no-audio/<region>/...} 아래에 쓴다. 음성 트리와 접두를 갈라 「음성 트리의 칸은 언제나 WAV와
+ * JSON 한 쌍」이라는 규약을 지킨다 - 같은 트리에 JSON만 있는 칸이 섞이면 학습 쪽이 JSON을 보고 없는 WAV를 찾는다.
+ * 동의가 없는 계정 세션의 요청은 호출부가 샘플을 만들지 않는다.
  * <p>
- * 키는 {@code <region>/<testVersion>/<speaker>/<itemId>/<sampleId>.wav|.json}이다. speaker는 세션 ID의, sampleId는
- * 분석 작업 ID의 가명(HMAC)이라 같은 세션의 문항은 한 접두에 모이고 DB와 로그의 ID와는 이어지지 않는다. 로그에도
- * 작업 ID와 객체 키를 한 줄에 함께 남기지 않는다 - 그 한 줄이 가명과 원문의 대응표가 된다. 첫 조각이
- * 지역이라 지역별 데이터셋을 접두 나열 한 번으로 뽑고, 재녹음은 같은 문항에 새 분석 작업을 만들므로
+ * 키는 {@code <env>/<region>/<testVersion>/<sessionId>/<itemId>/<analysisJobId>.wav|.json}이다. 첫 조각은
+ * 환경 접두({@code staging}, {@code prod})다 - 두 환경이 음성 전용 버킷 하나를 나눠 쓰고, 태스크 역할은 자기
+ * 접두에만 쓸 수 있다. 다음 조각이 지역이라 지역별 데이터셋을 접두 나열 한 번으로 뽑고, 재녹음은 같은 문항에 새 분석 작업을 만들므로
  * 작업 ID가 키에 있어 덮어쓰지 않는다. WAV를 먼저 올리고 JSON을 나중에 올린다 - JSON이 있는데 WAV가
  * 없는 반쪽 샘플보다 WAV만 있고 JSON이 없는 쪽이 학습 데이터로 골라내기 쉽다(메타 없는 WAV는 버린다).
+ * <p>
+ * 계정 세션이면 WAV를 올리기 전에 계정과 세션의 대응표({@link TrainingVoiceOwners})부터 남긴다. 순서가 반대면
+ * 대응표 기록이 실패했을 때 누구 것인지 찾을 수 없는 음성이 버킷에 남는다 - 음성 없는 대응표 행은 해가 없다.
+ * 그보다 먼저, 업로드 때 받은 동의가 지금도 유효한지 다시 본다 ({@link VoiceConsents#stillInEffect}) - 저장은
+ * 큐 대기와 분석이 끝난 뒤라 그 사이의 철회와 탈퇴를 여기서 걸러야 한다.
  * <p>
  * <b>실패는 삼킨다.</b> 상태 전이는 이미 끝난 뒤라 사용자 응답에는 영향이 없고, 여기서 예외가 새면
  * 호출부의 오류 경로가 종결을 한 번 더 시도한다. WARN 로그 1줄과 카운터
@@ -50,43 +57,66 @@ public class S3TrainingSampleStore implements TrainingSampleStore {
 
     private final S3Client s3;
     private final String bucket;
-    private final TrainingSpeakers speakers;
+    private final String envPrefix;
+    private final TrainingVoiceOwners owners;
+    private final VoiceConsents consents;
     private final ObjectMapper objectMapper;
     private final Clock clock;
     private final Counter saved;
+    private final Counter labelSaved;
     private final Counter failed;
     private final Counter skipped;
 
-    public S3TrainingSampleStore(S3Client s3, String bucket, TrainingSpeakers speakers, ObjectMapper objectMapper,
-                                 Clock clock, MeterRegistry meterRegistry) {
+    public S3TrainingSampleStore(S3Client s3, String bucket, String envPrefix, TrainingVoiceOwners owners,
+                                 VoiceConsents consents, ObjectMapper objectMapper, Clock clock,
+                                 MeterRegistry meterRegistry) {
         this.s3 = s3;
         this.bucket = bucket;
-        this.speakers = speakers;
+        this.envPrefix = envPrefix;
+        this.owners = owners;
+        this.consents = consents;
         this.objectMapper = objectMapper;
         this.clock = clock;
         this.saved = counter(meterRegistry, "saved");
+        this.labelSaved = counter(meterRegistry, "label_saved");
         this.failed = counter(meterRegistry, "failed");
         this.skipped = counter(meterRegistry, "skipped");
     }
 
     private static Counter counter(MeterRegistry registry, String result) {
         return Counter.builder(ServiceMetrics.TRAINING_SAMPLES)
-                .description("staging 학습 샘플 저장 시도 - 태그 result는 saved | failed | skipped (KAN-201, KAN-239)")
+                .description("학습 샘플 저장 시도 - 태그 result는 saved | label_saved | failed | skipped "
+                        + "(KAN-201, KAN-269, KAN-274)")
                 .tag("result", result)
                 .register(registry);
     }
 
     @Override
     public void save(TrainingSample sample) {
-        if (!speakers.consented(sample.ownerId())) {
+        String prefix = sample.keyPrefix(envPrefix);
+        VoiceConsent consent = sample.consent();
+        byte[] audio = sample.audio();
+        if (consent == null || audio == null) {
+            saveLabelOnly(sample, prefix);
+            return;
+        }
+        // 동의는 업로드 때 판정했지만 저장은 분석이 끝난 뒤다 - 그 사이에 계정이 철회하거나 탈퇴했으면 남기지 않는다.
+        if (!consents.stillInEffect(consent)) {
             skipped.increment();
             return;
         }
-        String speaker = speakers.speaker(sample.sessionId());
-        String sampleId = speakers.sampleId(sample.analysisJobId());
-        String prefix = sample.keyPrefix(speaker, sampleId);
+        if (consent.ownerId() != null) {
+            try {
+                owners.record(sample.sessionId(), consent.ownerId(), Instant.now(clock));
+            } catch (RuntimeException e) {
+                failed.increment();
+                // 예외 메시지는 남기지 않는다 - DB 드라이버의 메시지에 계정 id가 실리면 세션 id와 한 줄에 놓인다 (KAN-240).
+                log.warn("대응표 기록 실패로 학습 샘플을 저장하지 않는다 - 분석 결과에는 영향 없음 jobId={} 사유={}",
+                        sample.analysisJobId(), e.getClass().getSimpleName());
+                return;
+            }
+        }
         try {
-            byte[] audio = sample.audio();
             s3.putObject(PutObjectRequest.builder()
                             .bucket(bucket)
                             .key(prefix + ".wav")
@@ -99,27 +129,51 @@ public class S3TrainingSampleStore implements TrainingSampleStore {
                             .key(prefix + ".json")
                             .contentType(JSON_CONTENT_TYPE)
                             .build(),
-                    RequestBody.fromString(objectMapper.writeValueAsString(metadata(sample, speaker, sampleId))));
+                    RequestBody.fromString(objectMapper.writeValueAsString(metadata(sample))));
             saved.increment();
-            // 식별자와 크기를 싣지 않는다 - 작업 ID와 바이트 수는 S3 목록의 크기, 시각과 맞춰 가명과 원문 ID를 다시
-            // 잇는 단서가 된다 (PR #4 리뷰 P3). 저장 건수는 카운터가 센다.
-            log.info("학습 샘플 저장");
+            log.info("학습 샘플 저장 jobId={} key={} bytes={}", sample.analysisJobId(), prefix, audio.length);
         } catch (RuntimeException e) {
             failed.increment();
             // 사유는 한 줄로 충분하다 - 권한, 네트워크, 직렬화 어느 쪽이든 메시지에 드러난다.
-            log.warn("학습 샘플 저장 실패 - 분석 결과에는 영향 없음 jobId={} 사유={}", sample.analysisJobId(), e.toString());
+            log.warn("학습 샘플 저장 실패 - 분석 결과에는 영향 없음 jobId={} key={} 사유={}",
+                    sample.analysisJobId(), prefix, e.toString());
+        }
+    }
+
+    /**
+     * 라벨 전용 건 - 음성 저장에 동의하지 않은 익명 세션의 분석 결과다 (KAN-274). WAV 없이 메타 JSON 하나만
+     * {@code _no-audio} 접두 아래에 쓴다. 계정이 없는 세션이라 동의 재확인과 대응표 기록은 없다.
+     */
+    private void saveLabelOnly(TrainingSample sample, String prefix) {
+        try {
+            s3.putObject(PutObjectRequest.builder()
+                            .bucket(bucket)
+                            .key(prefix + ".json")
+                            .contentType(JSON_CONTENT_TYPE)
+                            .build(),
+                    RequestBody.fromString(objectMapper.writeValueAsString(metadata(sample))));
+            labelSaved.increment();
+            log.info("라벨 전용 샘플 저장 jobId={} key={}", sample.analysisJobId(), prefix);
+        } catch (RuntimeException e) {
+            failed.increment();
+            log.warn("라벨 전용 샘플 저장 실패 - 분석 결과에는 영향 없음 jobId={} key={} 사유={}",
+                    sample.analysisJobId(), prefix, e.toString());
         }
     }
 
     /**
      * 메타 JSON 본문 - 필드 순서는 티켓 표와 같고, 없는 값(판정 실패의 점수, 성공의 오류 코드)은 키를
-     * 아예 내지 않는다. 키와 같은 값(sampleId, speaker, 문항 ID와 지역)을 본문에도 둔다 - 객체를 옮겨 담아
-     * 키를 잃어도 자립한다. 세션 ID와 작업 ID의 원문, 소유 계정, AI 호출 상관 ID는 싣지 않는다 (KAN-239).
+     * 아예 내지 않는다. 키와 같은 값(작업, 세션, 문항 ID와 지역)을 본문에도 둔다 - 객체를 옮겨 담아
+     * 키를 잃어도 자립한다. 동의 버전과 동의 시각도 싣는다 (KAN-269) - 익명 세션의 동의 기록은 세션 행과 함께
+     * 만료 삭제되므로 음성 옆의 이 값이 동의 증빙이다. 소유 계정 id는 싣지 않는다 (대응표에만 있다).
+     * <p>
+     * {@code audioStored}는 이 JSON 옆에 WAV가 있는가다 (KAN-274). 라벨 전용 건은 false이고 동의 버전과 동의 시각 키가
+     * 없다. 이 키가 없는 옛 JSON(KAN-274 이전)은 전부 음성이 있는 건이다.
      */
-    Map<String, Object> metadata(TrainingSample sample, String speaker, String sampleId) {
+    Map<String, Object> metadata(TrainingSample sample) {
         Map<String, Object> body = new LinkedHashMap<>();
-        body.put("sampleId", sampleId);
-        body.put("speaker", speaker);
+        body.put("analysisJobId", sample.analysisJobId());
+        body.put("sessionId", sample.sessionId());
         body.put("itemId", sample.itemId());
         body.put("region", sample.region());
         putIfPresent(body, "scriptKey", sample.scriptKey());
@@ -132,6 +186,13 @@ public class S3TrainingSampleStore implements TrainingSampleStore {
         putIfPresent(body, "modelVersion", sample.modelVersion());
         putIfPresent(body, "aiScoreVersion", sample.aiScoreVersion());
         putIfPresent(body, "errorCode", sample.errorCode());
+        body.put("correlationId", sample.correlationId());
+        body.put("audioStored", sample.audioStored());
+        VoiceConsent consent = sample.consent();
+        if (consent != null) {
+            body.put("voiceConsentVersion", consent.version());
+            body.put("voiceConsentAt", consent.consentedAt().toString());
+        }
         body.put("savedAt", Instant.now(clock).toString());
         return body;
     }

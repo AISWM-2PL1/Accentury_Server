@@ -49,6 +49,17 @@ V2__<version>.sql부터 다시 번호를 매긴다. V1 파일의 주석에는 �
         --sentences-from gn-2026.09.3 --published-at 2026-09-15T09:00:00Z \\
         --out ../../backend/src/main/resources/db/migration/V11__gn_2026_09_4_sentences.sql
 
+세트 구성만 바꾼 재발행 (KAN-260 - gn-2026.10.1 = gn-2026.09.4 본문 + 7문항 세트 + sv-0.5)
+    python3 build_definition.py --reissue-from ../../backend/src/main/resources/db/migration/V1__baseline.sql \\
+        --same-content-as gn-2026.09.4 --test-version gn-2026.10.1 --score-version sv-0.5 \\
+        --set-layout VVWVWWW --estimated-duration-sec 180 --published-at 2026-10-04T00:00:00Z \\
+        --out ../../backend/src/main/resources/db/migration/V5__gn_2026_10_1_seven_items.sql
+
+--reissue-from은 재료(가이드 곡선, 인계본) 대신 이미 발행된 마이그레이션에서 --same-content-as
+버전의 본문을 읽어 문항 목록을 그대로 옮긴다. 재료 파일이 손에 없어도 되고, 문항 본문이 원본과
+바이트 단위로 같은지를 실행할 때마다 대조한다. --set-layout은 세트 하나의 구성과 출제 순서다
+(V = 음성, W = 어휘. 생략하면 필드를 싣지 않아 음성 5 + 어휘 5 교차로 읽힌다).
+
 --sentences는 KAN-159 전달본의 문장 목록 JSON이다. 가이드 곡선 문장의 대본을 script_key로
 찾은 인계본 대본으로 덮어쓴다. 가이드 문장 중 인계본에 없는 키는 출시 문항에서 뺀다 - 인계본에서
 빠진 문장은 더 이상 채점하지 않으므로(인계본 규칙) 남겨 둘 수 없다. 대본이 바뀌어도
@@ -317,8 +328,9 @@ def first_content_header(previous_version: str, voices: int, vocabulary: int, se
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__,
                                      formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument("--guide-f0", required=True, type=Path,
-                        help="KAN-17 가이드 곡선 산출물 JSON. 갈아 끼우는 자리는 여기다")
+    parser.add_argument("--guide-f0", type=Path,
+                        help="KAN-17 가이드 곡선 산출물 JSON. 갈아 끼우는 자리는 여기다 "
+                             "(--reissue-from이 아니면 필수)")
     parser.add_argument("--test-version", default="gn-2026.09.1")
     parser.add_argument("--score-version", default="sv-0.3")
     parser.add_argument("--dialect", default="GYEONGNAM")
@@ -340,9 +352,25 @@ def main() -> None:
     parser.add_argument("--choice-seed", metavar="TEST_VERSION",
                         help="어휘 선택지 섞기 시드 (생략하면 testVersion). 대본만 바꾼 재발행은 "
                              "원본 testVersion을 넘겨 어휘 문항을 그대로 둔다 (KAN-210)")
+    parser.add_argument("--reissue-from", type=Path, metavar="MIGRATION_SQL",
+                        help="재료 대신 이 마이그레이션에 발행된 --same-content-as 버전의 본문에서 "
+                             "문항을 그대로 옮긴다 (KAN-260)")
+    parser.add_argument("--set-layout", metavar="PATTERN",
+                        help="세트 하나의 구성과 출제 순서 - V(음성)와 W(어휘)의 문자열 (KAN-260). "
+                             "--reissue-from과 함께 쓴다")
+    parser.add_argument("--estimated-duration-sec", type=int, default=ESTIMATED_DURATION_SEC,
+                        help=f"예상 소요 시간 (기본 {ESTIMATED_DURATION_SEC})")
     parser.add_argument("--out", type=Path, help="마이그레이션 SQL 경로 (생략하면 표준출력)")
     parser.add_argument("--json-out", type=Path, help="발행본 JSON도 따로 남길 경로")
     args = parser.parse_args()
+
+    if args.reissue_from:
+        reissue(args)
+        return
+    if args.guide_f0 is None:
+        raise SystemExit("--guide-f0가 필요하다 (--reissue-from 재발행이 아니면)")
+    if args.set_layout:
+        raise SystemExit("--set-layout은 --reissue-from과 함께 쓴다")
 
     included = [k.strip() for k in args.include_excluded.split(",") if k.strip()]
     sentences, excluded = load_guide(args.guide_f0, included)
@@ -366,7 +394,7 @@ def main() -> None:
         "testVersion": args.test_version,
         "scoreVersion": args.score_version,
         "dialect": args.dialect,
-        "estimatedDurationSec": ESTIMATED_DURATION_SEC,
+        "estimatedDurationSec": args.estimated_duration_sec,
         "items": items,
     }
 
@@ -381,6 +409,104 @@ def main() -> None:
                                  encoding="utf-8")
 
     report(sentences, excluded, definition, args, sql, changed, dropped, included)
+
+
+def published_definition(migration: Path, test_version: str) -> dict:
+    """마이그레이션 파일에서 test_version 행의 본문을 찾아 읽는다 (KAN-260 --reissue-from)."""
+    text = migration.read_text(encoding="utf-8")
+    marker = f"values ('{test_version}',"
+    at = text.find(marker)
+    if at < 0:
+        raise SystemExit(f"{migration}에 {test_version} 발행 행이 없다")
+    start = text.index("$definition$", at) + len("$definition$")
+    end = text.index("$definition$", start)
+    return json.loads(text[start:end])
+
+
+def validate_layout(pattern: str, voices: int, vocabulary: int) -> tuple[int, int]:
+    """setLayout 형식과 풀 크기를 백엔드 발행 검증(SetLayout, TestDefinitionRegistry)과 같게 본다."""
+    if not pattern or set(pattern) - {"V", "W"} or "V" not in pattern or "W" not in pattern:
+        raise SystemExit(f"--set-layout은 V와 W로만, 각각 하나 이상 있어야 한다: {pattern}")
+    v, w = pattern.count("V"), pattern.count("W")
+    if voices < v or vocabulary < w:
+        raise SystemExit(f"풀이 세트보다 작다: 음성 {voices} < {v} 또는 어휘 {vocabulary} < {w}")
+    return v, w
+
+
+def reissue(args) -> None:
+    """이미 발행된 본문의 문항을 그대로 두고 버전 속성만 바꾼 재발행 (KAN-260)."""
+    if not args.same_content_as:
+        raise SystemExit("--reissue-from에는 원본 testVersion(--same-content-as)이 필요하다")
+    if args.same_content_as == args.test_version:
+        raise SystemExit("--same-content-as는 다른 testVersion이어야 한다 - 정의는 발행 후 불변이다 (KAN-26)")
+    if args.sentences or args.sentences_from or args.guide_f0:
+        raise SystemExit("--reissue-from은 재료(--guide-f0, --sentences)를 읽지 않는다")
+    source = published_definition(args.reissue_from, args.same_content_as)
+    voices = sum(1 for item in source["items"] if item["type"] == "VOICE")
+    vocabulary = len(source["items"]) - voices
+
+    definition = {
+        "testVersion": args.test_version,
+        "scoreVersion": args.score_version,
+        "dialect": source["dialect"],
+        "estimatedDurationSec": args.estimated_duration_sec,
+    }
+    if args.set_layout:
+        v, w = validate_layout(args.set_layout, voices, vocabulary)
+        definition["setLayout"] = args.set_layout
+    else:
+        v, w = SET_SIZE, SET_SIZE
+    definition["items"] = source["items"]
+
+    # 문항 본문이 원본과 바이트 단위로 같아야 한다 - 같은 직렬화 규칙으로 다시 써서 대조한다.
+    same = (json.dumps(definition["items"], ensure_ascii=False, indent=2)
+            == json.dumps(source["items"], ensure_ascii=False, indent=2))
+    if not same:
+        raise SystemExit("문항 본문이 원본과 다르다")
+
+    sets = max(-(-voices // v), -(-vocabulary // w))
+    body = json.dumps(definition, ensure_ascii=False, indent=2)
+    if "$definition$" in body:
+        raise SystemExit("본문에 달러 인용 구분자가 들어 있다 - 다른 구분자를 써야 한다")
+    sql = f"""\
+{layout_header(definition, args.same_content_as, voices, vocabulary, v, w, sets)}
+insert into test_definition (test_version, dialect, score_version, body, published_at)
+values ('{definition["testVersion"]}', '{definition["dialect"]}', '{definition["scoreVersion"]}', $definition${body}$definition$,
+        timestamp with time zone '{args.published_at}');
+"""
+    if args.out:
+        args.out.write_text(sql, encoding="utf-8")
+    else:
+        print(sql)
+    if args.json_out:
+        args.json_out.write_text(body, encoding="utf-8")
+    print(f"[발행본] {definition['testVersion']} 음성 {voices} + 어휘 {vocabulary},"
+          f" 세트 구성 {args.set_layout or 'VWVWVWVWVW'} = 세트 {sets}개", file=sys.stderr)
+    print(f"[대조]   문항 {len(definition['items'])}개가 {args.same_content_as}과 바이트 단위로 같다",
+          file=sys.stderr)
+    print(f"[크기]   마이그레이션 {len(sql.encode('utf-8')) / 1024:.0f}KB", file=sys.stderr)
+
+
+def layout_header(definition: dict, same_content_as: str, voices: int, vocabulary: int,
+                  v: int, w: int, sets: int) -> str:
+    """세트 구성을 바꾼 재발행의 머리말 (KAN-260)."""
+    layout = definition.get("setLayout", "VWVWVWVWVW")
+    return f"""\
+-- KAN-260: {same_content_as}의 문항 본문 그대로 세트 구성을 {layout}(음성 {v} + 어휘 {w} = {v + w}문항)로
+-- 바꾼 재발행 - 음성 {voices}문항 + 어휘 {vocabulary}문항 = 세트 {sets}개.
+--
+-- 문항 본문(문장, scriptKey, guideF0, 어휘 선택지와 정답)은 {same_content_as}과 바이트 단위로 같다.
+-- 이 파일은 손으로 쓰지 않는다 - tools/content/build_definition.py --reissue-from 이 발행된
+-- {same_content_as}의 본문을 읽어 만들고, 실행할 때마다 문항 본문을 원본과 대조한다.
+--
+-- 바뀐 것은 버전 속성 넷이다: testVersion, scoreVersion({definition["scoreVersion"]}), estimatedDurationSec
+-- ({definition["estimatedDurationSec"]}), setLayout. 세트 구성을 코드가 아니라 본문에 싣는 것은 규칙도 정의와 함께
+-- 발행 후 불변이어야 해서다 (KAN-26) - 필드가 없는 기존 정의는 음성 5 + 어휘 5 교차로 읽혀 세트와
+-- 응답 본문, ETag가 그대로이고, 배포 전에 만든 10문항 세션도 10문항으로 완료되고 재집계된다.
+--
+-- 활성 전환은 이 파일이 하지 않는다. 2단계 롤아웃(KAN-26)이라 새 정의를 먼저 배포하고
+-- 활성 전환은 그 다음 PUT /admin/v0/active-version 호출이다. 이 정의는 그에 더해 앱과 웹이
+-- 문항 수를 세트 응답에서 읽게 된 뒤(KAN-261)에 전환한다."""
 
 
 def report(sentences, excluded, definition, args, sql, changed, dropped, included) -> None:

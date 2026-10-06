@@ -22,7 +22,7 @@ AI가 실모델이 되면서 **합성 사인파로는 점수가 나오지 않는
 
 전 구간(결과 검산, 등급, 공유 카드)까지 보려면 **대본을 읽은 실제 녹음**을 준다.
 ``--voice-wav``에 ``<itemId>.wav``가 든 디렉터리를 주면 문항마다 그 파일을 올리고, 분석이
-성공하면 스크립트가 결과를 고정 집계식(sv-0.3, sv-0.4)으로 검산한다. 발행본은 문항마다 문장이 다르므로
+성공하면 스크립트가 결과를 고정 집계식(sv-0.3, sv-0.4, sv-0.5)으로 검산한다. 발행본은 문항마다 문장이 다르므로
 (KAN-182의 세트) 파일 하나로는 한 문항만 맞고 나머지는 게이트에 걸린다 - 그때는 스크립트가
 통과가 아니라 실패로 끊는다. 세션이 고른 세트는 정의 조회 로그의 itemId로 확인한다.
 
@@ -41,12 +41,12 @@ AI가 실모델이 되면서 **합성 사인파로는 점수가 나오지 않는
 통과한다. 여기 적힌 표는 **독립 오라클**이고, 그래서 서버가 모르는 점수 버전을 내려주면
 조용히 넘어가지 않고 멈춘다 (:func:`verify_result`).
 
-sv-0.4(KAN-200)는 억양 점수를 고정 수식에 넣기 전에 5문항 평균에 구간별 계수를 곱하는
-전처리를 더했을 뿐 가중치와 등급 경계는 sv-0.3과 같다. 이 검산은 응답에 실린 억양 점수를
-입력으로 종합 점수와 등급을 되짚으므로 두 버전에 같은 표를 쓴다 - 전처리 자체(원점수 →
+sv-0.4(KAN-200)는 억양 점수를 고정 수식에 넣기 전에 음성 문항 평균에 구간별 계수를 곱하는
+전처리를 더했을 뿐 가중치와 등급 경계는 sv-0.3과 같다. sv-0.5(KAN-260)는 값이 sv-0.4와 같고
+7문항 세트(음성 3 + 어휘 4)를 채점하는 정의가 선언하는 버전이다. 이 검산은 응답에 실린 억양
+점수를 입력으로 종합 점수와 등급을 되짚으므로 세 버전에 같은 표를 쓴다 - 전처리 자체(원점수 →
 억양 점수)는 응답만으로는 되짚을 수 없고, backend 단위 테스트(ScoreAggregatorTest)와
-문항 원점수 로그 대조가 맡는다. 경계가 재보정되는 버전(sv-0.5, KAN-21 로드맵)이 오면 그때
-버전별 표로 가른다.
+문항 원점수 로그 대조가 맡는다. 경계가 재보정되는 버전이 오면 그때 버전별 표로 가른다.
 """
 
 from __future__ import annotations
@@ -74,9 +74,9 @@ from typing import Any, Dict, List, Optional, Sequence, Tuple
 # 고정 집계식 (API 명세서 §4.3, KAN-21, KAN-200) - 서버와 독립인 검산 오라클
 # ---------------------------------------------------------------------------
 
-#: 이 스크립트가 검산할 수 있는 점수 버전. 세션이 다른 버전을 고정하면 멈춘다. 둘은 가중치와
-#: 등급 경계가 같고 sv-0.4는 억양 입력 전처리만 다르다 (모듈 주석 참고).
-SUPPORTED_SCORE_VERSIONS = ("sv-0.3", "sv-0.4")
+#: 이 스크립트가 검산할 수 있는 점수 버전. 세션이 다른 버전을 고정하면 멈춘다. 셋은 가중치와
+#: 등급 경계가 같고 sv-0.4와 sv-0.5는 억양 입력 전처리만 다르다 (모듈 주석 참고).
+SUPPORTED_SCORE_VERSIONS = ("sv-0.3", "sv-0.4", "sv-0.5")
 
 INTONATION_WEIGHT = 2
 VOCABULARY_WEIGHT = 1
@@ -92,7 +92,7 @@ VOCABULARY_WEIGHT = 1
 #: ``V1__baseline.sql``의 gn-2026.09.4 하나이고, 나머지 버전의 행은 옛 파일에서 온 기록이다). 발행 후 불변이므로 (§5.4) 이 숫자도 상수다 - gn-2026.08.1의 정답은 w1a, w2b, w3a,
 #: w4b, w5a라 첫 선택지는 3개, 둘째 선택지는 2개, 셋째와 넷째는 0개를 맞힌다.
 #:
-#: 어휘 풀이 세트로 갈린 발행본(KAN-182)에서는 **세트 1의 5문항**이 기준이다. 이 스모크는 세션
+#: 어휘 풀이 세트로 갈린 발행본(KAN-182)에서는 **세트 1의 어휘 문항**이 기준이다. 이 스모크는 세션
 #: 생성에 ``voiceSet: 1``을 명시해 (``SMOKE_VOICE_SET``) 언제나 세트 1을 응시한다 - 생략하면
 #: 서버가 세트를 고르므로 (KAN-205) 어느 세트가 나올지 모르고, 그러면 이 정답 수 표를 상수로
 #: 둘 수 없다. 세트 1의 어휘는 풀의 poolIndex 1..5(seq 오름차순)이라
@@ -102,6 +102,10 @@ VOCABULARY_WEIGHT = 1
 #: gn-2026.09.3은 음성 대본만 09-01 인계본으로 바꾸고 어휘 선택지 시드를 gn-2026.09.1로 고정한
 #: 재발행이라(KAN-210, V10) 역시 같다. gn-2026.09.4(V11)는 인계본 2차로 음성 문장만 바뀌고 어휘
 #: 시드가 같아 역시 같다.
+#:
+#: gn-2026.10.1(V5, KAN-260)은 gn-2026.09.4의 문항 본문 그대로 세트를 음성 3 + 어휘 4로 바꾼
+#: 재발행이다. 세트 1의 어휘는 w1..w4(정답 w1b, w2c, w3a, w4a)라 첫 선택지는 2개, 둘째는 1개,
+#: 셋째는 1개, 넷째는 0개를 맞히고 한 문항이 25점이다.
 #:
 #: 새 testVersion을 발행하면 여기 한 줄을 더한다. 모르는 버전을 만나면 조용히 넘어가지 않고
 #: 멈춘다 - 급하면 ``--expect-vocabulary``로 넘긴다.
@@ -130,7 +134,15 @@ EXPECTED_VOCABULARY: Dict[Tuple[str, int], int] = {
     ("gn-2026.09.4", 1): 20,
     ("gn-2026.09.4", 2): 40,
     ("gn-2026.09.4", 3): 0,
+    ("gn-2026.10.1", 0): 50,
+    ("gn-2026.10.1", 1): 25,
+    ("gn-2026.10.1", 2): 25,
+    ("gn-2026.10.1", 3): 0,
 }
+
+#: 세트 하나의 (음성, 어휘) 문항 수로 허용하는 구성 (§3.2). 10문항 세트(gn-2026.09.4까지)와
+#: 7문항 세트(gn-2026.10.1부터, KAN-260)다. 진행도의 분모(§3.5 totalCount)는 세트 문항 수다.
+SET_COMPOSITIONS: Tuple[Tuple[int, int], ...] = ((5, 5), (3, 4))
 
 #: (code, name, rank, minScore) - minScore는 하한(포함)이라 경계값(20/40/60/80)은
 #: 상위 등급으로 간다 (KAN-21 AC). rank 오름차순이다.
@@ -168,8 +180,8 @@ DEFAULT_REQUEST_TIMEOUT = 15.0
 
 #: 세션 하나의 분석이 전부 끝나기를 기다리는 상한.
 #:
-#: 실모델은 문항 하나를 전사와 정렬로 채점하고(08-30 실측 14~30초) 배포에서는 전달 워커가
-#: 1개라(KAN-22의 dispatch-concurrency) 5문항이 차례로 돈다. 그래서 스텁 시절의 180초로는
+#: 실모델은 문항 하나를 전사와 정렬로 채점하고(08-30 실측 14~30초) AI가 호스트마다 추론을
+#: 한 번에 하나만 돌려(전달 워커가 3개여도 AI 1대면 같다, KAN-272) 문항이 차례로 돈다. 그래서 스텁 시절의 180초로는
 #: 정상 실행도 이 상한에 걸린다. BE의 queued-timeout(5분)보다 길게 두어, 여기서 걸리는 것이
 #: "분석이 밀렸다"가 아니라 "BE 쪽 정리도 안 돌았다"는 뜻이 되게 한다.
 DEFAULT_ANALYSIS_TIMEOUT = 420.0
@@ -194,7 +206,9 @@ ADMIN_TOKEN_HEADER = "X-Admin-Token"
 #: 표시 없이 두드려도 통계가 오염되지 않는 대상 - 로컬 스택뿐이다.
 LOCAL_HOSTS = frozenset({"localhost", "127.0.0.1", "::1", "[::1]", "0.0.0.0"})
 
-#: AI가 "요청은 정상인데 점수를 낼 수 없다"고 판정한 사유 (§2.4, ai/app/engine.py의 같은 집합).
+#: AI가 "요청은 정상인데 점수를 낼 수 없다"고 판정한 사유 (§2.4). ai/app/engine.py의 집합에서
+#: `ANALYSIS_UNSCORABLE`(KAN-272, 결과에 NaN이 섞인 채점 불가)만 뺀 것이다 - 그 코드는 사용자 발화가
+#: 아니라 모델 쪽 결함의 신호라, 스모크가 재응시 갈래로 받아 주지 않고 실패로 본다.
 #:
 #: 합성 오디오로 도는 기본 실행이 닿아야 하는 실패는 이 넷뿐이다. `ANALYSIS_TIMEOUT`이나
 #: `ANALYSIS_UNAVAILABLE`, `INTERNAL_ERROR`는 **인프라가 고장 난 것**이고, 그것을 재응시
@@ -597,8 +611,9 @@ def fetch_definition(client: Client, session: Session) -> Definition:
 
     voice = [item for item in items if item.get("type") == "VOICE"]
     vocab = [item for item in items if item.get("type") == "VOCABULARY"]
-    expect(len(voice) == 5 and len(vocab) == 5,
-           "문항 구성이 음성 5 + 어휘 5가 아니다: 음성 %d, 어휘 %d" % (len(voice), len(vocab)))
+    expect((len(voice), len(vocab)) in SET_COMPOSITIONS,
+           "문항 구성이 음성 5 + 어휘 5도, 음성 3 + 어휘 4도 아니다: 음성 %d, 어휘 %d"
+           % (len(voice), len(vocab)))
     expect(len(voice) + len(vocab) == len(items),
            "VOICE도 VOCABULARY도 아닌 문항이 있다: %s" % [i.get("type") for i in items])
 
@@ -724,9 +739,11 @@ def submit_vocab(
     expect(response.status == 200, "어휘 제출이 200이 아니다: " + response.describe())
     body = response.json()
     expect(body.get("accepted") is True, "어휘 제출이 수락되지 않았다: %s" % body)
-    expect(body.get("totalCount") == 10, "totalCount가 10이 아니다 (§3.5): %s" % body)
-    # 진행도는 전체 10문항 기준이고, 음성은 업로드 시도가 1건이라도 있으면 센다 (§3.5).
-    # 음성 5건을 먼저 올린 뒤라 이 시점의 기대값은 5 + 지금까지 제출한 어휘 수다.
+    total = len(scenario.definition.voice_items) + len(scenario.definition.vocab_items)
+    expect(body.get("totalCount") == total,
+           "totalCount가 세트 문항 수 %d가 아니다 (§3.5): %s" % (total, body))
+    # 진행도는 세트 전체 문항 기준이고, 음성은 업로드 시도가 1건이라도 있으면 센다 (§3.5).
+    # 음성을 먼저 전부 올린 뒤라 이 시점의 기대값은 음성 문항 수 + 지금까지 제출한 어휘 수다.
     expect(body.get("answeredCount") == expected_answered,
            "answeredCount가 기대와 다르다 (§3.5): 기대 %d, 응답 %s" % (expected_answered, body))
     # 정오를 유추할 수 있는 어떤 필드도 없어야 한다 (KAN-13).
@@ -738,7 +755,7 @@ def submit_vocab(
 
 
 def submit_all_vocab(client: Client, scenario: Scenario) -> None:
-    """어휘 5문항을 순서대로 제출한다. 진행도 기대값은 음성 문항 수에서 이어진다 (§3.5)."""
+    """세트의 어휘 문항을 순서대로 제출한다. 진행도 기대값은 음성 문항 수에서 이어진다 (§3.5)."""
     answered = len(scenario.definition.voice_items)
     for item in scenario.definition.vocab_items:
         answered += 1

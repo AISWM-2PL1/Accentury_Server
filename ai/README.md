@@ -77,7 +77,9 @@ AI 서버는 backend와 다른 EC2에서 돕니다 (KAN-36 A단계). 같은 comp
   - 품질 코드는 비어 있지 않고 40자 이하입니다 (BE의 `analysis_job.quality_code` 컬럼 폭).
     성공 경로의 코드는 BE가 검사 없이 저장하고 사용자에게도 내보냅니다.
   - 실패면 품질 코드가 §2.4 판정 코드여야 합니다. 허용 목록은 `AUDIO_TOO_QUIET`,
-    `AUDIO_TOO_LONG`, `AUDIO_FORMAT_UNSUPPORTED`, `ANALYSIS_MISREAD` 넷입니다
+    `AUDIO_TOO_LONG`, `AUDIO_FORMAT_UNSUPPORTED`, `ANALYSIS_MISREAD`, `ANALYSIS_UNSCORABLE` 다섯입니다
+    (마지막 것은 KAN-272에서 더했습니다. 실모델 어댑터는 요청 meta의 `acceptsVerdicts`에 이 코드가
+    있을 때만 냅니다 - 배포가 AI 먼저라 이 코드를 모르는 옛 backend가 부르는 구간이 있습니다)
     (`engine.py`의 `JUDGED_QUALITY_CODES`). 기본값 `OK`도, 오타도, 지어낸 서술적 코드도
     거절됩니다 - BE의 `ErrorCode`에 없는 이름은 계약 위반이 되고 그 문항은 재시도 없이
     죽습니다. BE가 §2.4에 판정 코드를 더하면 이 집합에도 더합니다.
@@ -258,6 +260,48 @@ ACCENTURY_AI_ANALYSIS_ENGINE=fake .venv/bin/uvicorn app.main:app --port 8000
 # 또는 루트에서 docker compose up -d --build  (DB + 가짜 AI + BE)
 ```
 
+## 의존성 잠금 (KAN-246)
+
+서비스 계층의 의존성은 파일 세 개로 관리합니다.
+
+| 파일 | 역할 |
+| --- | --- |
+| `requirements.txt` | 허용 범위입니다 (`fastapi>=0.116.1` 등). 사람이 고칩니다. |
+| `requirements.lock` | 이미지가 실제로 설치하는 버전과 해시입니다. `uv`가 만들고 손으로 고치지 않습니다. `ai/Dockerfile`과 `ai/Dockerfile.fake`가 `pip install --require-hashes`로 설치합니다. |
+| `model-base.constraints` | 모델 전달본 이미지(`accentury/ai-model`)에 이미 깔려 있는 패키지의 버전 목록입니다. 잠금 파일을 만들 때 제약으로 씁니다. 확장자가 `.txt`가 아닌 것은 Dependabot이 `.txt`를 요구사항 파일로 보고 이 목록의 버전을 올리려 들 수 있기 때문입니다. |
+
+제약 파일이 있는 이유는 운영 이미지가 모델 전달본 위에 얹히기 때문입니다. 전달본과 겹치는 패키지
+(`typing_extensions` 등)를 다른 버전으로 잠그면 설치할 때 전달본 쪽 패키지가 바뀌어 채점 모델이 깨질 수
+있고, CI의 테스트는 가짜 엔진으로 돌아서 이것을 잡지 못합니다. 제약을 걸면 겹치는 패키지는 전달본과 같은
+버전으로 잠기고 pip는 그것을 건드리지 않습니다.
+
+**잠금 파일을 다시 만드는 때**는 `requirements.txt`를 고쳤을 때, CI의 `pip-audit`가 취약점을 보고했을 때,
+모델 태그(`ai/Dockerfile`의 `MODEL_TAG`)를 바꿨을 때입니다. Dependabot은 이 파일을 갱신하지 않습니다.
+
+```bash
+cd ai
+
+# 1. 모델 태그를 바꿨을 때만 - 전달본의 패키지 목록을 다시 받습니다 (ECR 로그인 필요, infra/README.md "모델 교체")
+docker run --rm --platform linux/amd64 --entrypoint pip \
+  325771561913.dkr.ecr.ap-northeast-2.amazonaws.com/accentury/ai-model:<MODEL_TAG> freeze \
+  | grep -v ' @ ' > model-base.constraints     # 머리말 주석은 다시 붙입니다
+
+# 2. 잠금 파일을 만듭니다. --upgrade를 빼면 지금 잠긴 버전을 되도록 유지하고, 넣으면 범위 안의 최신으로 올립니다
+uv pip compile requirements.txt -c model-base.constraints \
+  --generate-hashes --universal --python-version 3.12 --upgrade -o requirements.lock
+
+# 3. 취약점과 테스트를 확인합니다
+pip-audit --require-hashes --disable-pip -r requirements.lock
+pytest
+```
+
+`--python-version 3.12`는 전달본 이미지와 `Dockerfile.fake`의 파이썬 버전입니다. `--universal`은 플랫폼을
+가리지 않는 잠금이라 로컬(arm64)과 CI(amd64)가 같은 파일로 빌드합니다. 잠금 파일이 바뀐 PR은 staging 배포의
+스모크와 계약 적합성 스위트로 실모델 위에서 확인합니다 - 전달본과의 궁합은 거기서만 드러납니다.
+
+CI(`test.yml`의 `ai-test`)는 `ai/`가 바뀐 PR마다 잠금 파일을 `pip-audit`로 검사합니다. 테스트 자체는
+`requirements-dev.txt`의 범위로 설치한 환경에서 돕니다.
+
 ## 설정 (환경 변수)
 
 | 변수 | 기본값 | 용도 |
@@ -266,6 +310,7 @@ ACCENTURY_AI_ANALYSIS_ENGINE=fake .venv/bin/uvicorn app.main:app --port 8000
 | `ACCENTURY_AI_TEMP_RETENTION_SECONDS` | `1800` | 잔존 파일 삭제 기준 (30분) |
 | `ACCENTURY_AI_SWEEP_INTERVAL_SECONDS` | `300` | 청소 잡 주기 |
 | `ACCENTURY_AI_ANALYSIS_TIMEOUT_SECONDS` | `75` | 분석 1건의 상한 (lock 대기와 재적재 대기 포함) - 넘기면 503이고 워커가 죽습니다 (재적재가 뒤따릅니다). backend의 읽기 타임아웃 85초보다 짧아야 합니다 (KAN-172) |
+| `ACCENTURY_AI_INFERENCE_RESERVE_SECONDS` | `15` | 추론을 시작하려면 위 상한까지 남아 있어야 하는 시간 (KAN-272). 차례를 기다린 요청이 lock을 잡았을 때 남은 시간이 이보다 적으면 추론을 시작하지 않고 429(추론 전 거절)를 돌려줍니다 - 시작해 놓고 추론 도중 상한에 걸리면 멀쩡한 워커가 죽기 때문입니다. 상한보다 작아야 하고(아니면 기동을 거부합니다) `0`이면 검사를 끕니다 |
 | `ACCENTURY_AI_MAX_AUDIO_BYTES` | `1048576` | 오디오 파트 상한 (§3.3과 동일) |
 | `ACCENTURY_AI_MAX_REQUEST_BYTES` | `2097152` | 요청 본문 전체 상한 - multipart 파싱 전에 끊습니다 |
 | `ACCENTURY_AI_ANALYSIS_ENGINE` | `track1` | 붙일 분석 엔진 - `track1`(실모델) 또는 `fake`(개발 기계용, 해시 점수). 모르는 이름이면 기동이 실패합니다 |

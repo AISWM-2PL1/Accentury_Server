@@ -5,6 +5,7 @@ import app.accentury.backend.common.ErrorCode;
 import app.accentury.backend.session.Region;
 import app.accentury.backend.training.TrainingSample;
 import app.accentury.backend.training.TrainingSampleStore;
+import app.accentury.backend.training.VoiceConsent;
 import org.jspecify.annotations.Nullable;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -48,8 +49,8 @@ import java.util.concurrent.atomic.AtomicReference;
  * 기다린다 - 순서는 {@link AnalysisDrainLifecycle}이 잡는다. 그래서 제출한 작업을 큐 안에서도
  * 알아볼 수 있게 {@link Task}로 감싸 추적한다.
  * <p>
- * staging에서는 종결 뒤, 버퍼를 지우기 전에 학습 샘플을 남긴다 (KAN-201, {@link TrainingSampleStore}) -
- * AI가 계약대로 답한 건(성공과 판정 실패)만이고, 계약 위반과 AI 불가는 원점수도 판정도 없어 남기지
+ * 음성 저장에 동의한 세션이면 종결 뒤, 버퍼를 지우기 전에 학습 샘플을 남긴다 (KAN-201, KAN-269,
+ * {@link TrainingSampleStore}). 동의하지 않은 익명 세션은 음성 없이 라벨만 남긴다 (KAN-274). 어느 쪽이든 AI가 계약대로 답한 건(성공과 판정 실패)만이고, 계약 위반과 AI 불가는 원점수도 판정도 없어 남기지
  * 않는다. 저장 실패는 분석 결과에 영향을 주지 않는다.
  */
 class HttpAnalysisDispatcher implements AnalysisDispatcher {
@@ -253,9 +254,11 @@ class HttpAnalysisDispatcher implements AnalysisDispatcher {
             }
             AiAnalysisClient.Outcome outcome = analyzeWithRetry(request, correlationId);
             apply(request.analysisJobId(), outcome, acceptedNanos);
+            logUnscorable(request, outcome);
             // 상태 전이가 끝난 뒤, 아래 finally의 wipeAudio() 전이다 (KAN-201). 사용자는 이미 종결을 볼 수
-            // 있고, 워커 점유 시간만 저장 왕복만큼 늘어난다 (staging 한정 - 그 밖은 NONE이라 즉시 돌아온다).
-            keepTrainingSample(request, outcome);
+            // 있고, 워커 점유 시간만 저장 왕복만큼 늘어난다. 수집을 켠 환경에서 동의한 세션(WAV와 JSON)과 동의하지
+            // 않은 익명 세션(JSON 하나, KAN-274)이 왕복하고, 동의하지 않은 계정 세션은 즉시 돌아온다.
+            keepTrainingSample(request, outcome, correlationId);
         } catch (RuntimeException e) {
             // 종결을 놓치면 사용자는 타임아웃 스위퍼까지 대기 화면에 묶인다 - 어떤 예외도 종결로 바꾼다.
             log.error("분석 전달 워커 실패 jobId={}", request.analysisJobId(), e);
@@ -360,6 +363,23 @@ class HttpAnalysisDispatcher implements AnalysisDispatcher {
         }
     }
 
+    /**
+     * 채점 불가 판정을 어느 문항이었는지와 함께 남긴다 (KAN-272).
+     * <p>
+     * 채점 불가는 사용자의 발화가 아니라 모델 쪽 결함의 신호다 - 어느 문장에서 나는지를 backend 로그만으로
+     * 셀 수 있어야 한다 (AI 로그에는 어느 값이 NaN인지까지 있다. 추적 ID로 둘을 잇는다). itemId는 정의
+     * 버전이 바뀌면 다른 문장을 가리키므로 testVersion을, 모델이 문장을 찾는 키인 scriptKey를 함께 싣는다.
+     * 셋 다 콘텐츠 식별자다 - 세션이나 사용자를 가리키는 값은 싣지 않는다.
+     */
+    private static void logUnscorable(AnalysisRequest request, AiAnalysisClient.@Nullable Outcome outcome) {
+        if (outcome instanceof AiAnalysisClient.Rejected rejected
+                && rejected.cause() == AiAnalysisClient.Rejected.Cause.JUDGED
+                && ErrorCode.ANALYSIS_UNSCORABLE.name().equals(rejected.errorCode())) {
+            log.warn("채점 불가 판정 jobId={} itemId={} scriptKey={} testVersion={}",
+                    request.analysisJobId(), request.itemId(), request.scriptKey(), request.testVersion());
+        }
+    }
+
     /** AI가 답은 했지만 계약(§4.1)을 어겼는가 - 재전송 대상은 아니지만 가용성 실패다 (KAN-28). */
     private static boolean contractViolation(AiAnalysisClient.Outcome outcome) {
         return outcome instanceof AiAnalysisClient.Rejected rejected
@@ -395,9 +415,16 @@ class HttpAnalysisDispatcher implements AnalysisDispatcher {
                     metrics.recordCompleted(System.nanoTime() - acceptedNanos);
                 }
             }
-            case AiAnalysisClient.Rejected rejected -> transitions.fail(jobId,
-                    rejected.retryable() ? AnalysisJobStatus.RETRYABLE_FAILED : AnalysisJobStatus.FAILED,
-                    rejected.errorCode());
+            case AiAnalysisClient.Rejected rejected -> {
+                transitions.fail(jobId,
+                        rejected.retryable() ? AnalysisJobStatus.RETRYABLE_FAILED : AnalysisJobStatus.FAILED,
+                        rejected.errorCode());
+                // 계약대로 온 판정만 센다 (KAN-272) - 계약 위반은 판정이 아니라 AI 쪽 고장이고
+                // 회로와 ERROR 로그가 따로 말한다.
+                if (rejected.cause() == AiAnalysisClient.Rejected.Cause.JUDGED) {
+                    metrics.recordJudged(rejected.errorCode());
+                }
+            }
             case null -> {
                 // analyzeWithRetry가 이미 종결했다.
             }
@@ -405,34 +432,44 @@ class HttpAnalysisDispatcher implements AnalysisDispatcher {
     }
 
     /**
-     * 학습 샘플로 남길 건이면 저장소에 넘긴다 (KAN-201). AI가 계약대로 답한 건 전부다 - 성공
+     * 학습 샘플로 남길 건이면 저장소에 넘긴다 (KAN-201). 음성까지 남기는 것은 음성 저장에 동의한 세션의 요청만이다
+     * (KAN-269). 동의가 없는({@code voiceConsent}가 null) <b>실사용자 익명 세션</b>은 음성 없이 라벨만 남긴다 (KAN-274) -
+     * 샘플의 {@code audio}와 {@code consent}를 null로 만들어 넘기고, 저장소가 JSON 하나만 별도 접두에 쓴다. 동의가
+     * 없는 계정 세션과 합성 트래픽 세션은 샘플을 만들지 않는다. 어느 쪽이든 동의가 없으면 음성은 이 뒤의 파기로 사라진다. 그중 AI가 계약대로
+     * 답한 건 전부다 - 성공
      * ({@link AiAnalysisClient.Completed})과 판정 실패({@link AiAnalysisClient.Rejected}의 JUDGED, 부정 샘플도
      * 학습에 쓴다). 계약 위반은 원점수도 판정도 없고, null(재전송 예산 소진, 타임아웃, 회로 열림, 종료 중)은
      * AI에 닿지 못했거나 답을 못 받은 것이라 남기지 않는다.
-     * <p>
-     * 누구의 샘플인지(동의 테스터 계정인지)는 저장소가 가른다 (KAN-239, {@code TrainingSpeakers}) - 테스터 목록과
-     * 가명 키가 학습 설정에 있어서다. 여기서는 세션 소유 계정을 실어 보내기만 한다.
      * <p>
      * 저장소가 예외를 삼키기로 되어 있지만 한 번 더 감싼다 - 여기서 새면 바깥 catch가 이미 종결된 작업을
      * INTERNAL_ERROR로 다시 종결하려 들고(조건부 UPDATE 0행이라 무해하지만 ERROR 로그가 남는다), 저장
      * 구현의 실수가 분석 경로의 오류로 보인다.
      */
-    private void keepTrainingSample(AnalysisRequest request, AiAnalysisClient.@Nullable Outcome outcome) {
+    private void keepTrainingSample(AnalysisRequest request, AiAnalysisClient.@Nullable Outcome outcome,
+                                    String correlationId) {
+        VoiceConsent consent = request.voiceConsent();
+        if (consent == null && !request.labelOnlyWithoutConsent()) {
+            return;
+        }
+        // 동의가 없으면 음성 배열을 샘플에 싣지 않는다 - 저장소가 실수로도 음성을 쓸 수 없게 여기서 끊는다.
+        byte @Nullable [] audio = consent == null ? null : request.audio();
         TrainingSample sample = switch (outcome) {
             case AiAnalysisClient.Completed completed -> new TrainingSample(
-                    request.analysisJobId(), request.sessionId(), request.ownerId(), request.itemId(),
+                    request.analysisJobId(), request.sessionId(), request.itemId(),
                     Region.forStorage(request.region()).name(), request.scriptKey(),
                     request.testVersion(), request.scoreVersion(), request.durationMs(),
                     TrainingSample.Outcome.COMPLETED, completed.intonationScore(), completed.qualityCode(),
-                    completed.modelVersion(), completed.scoreVersion(), null, request.audio());
+                    completed.modelVersion(), completed.scoreVersion(), null, correlationId, consent,
+                    audio);
             case AiAnalysisClient.Rejected rejected when rejected.cause() == AiAnalysisClient.Rejected.Cause.JUDGED ->
                     new TrainingSample(
-                            request.analysisJobId(), request.sessionId(), request.ownerId(), request.itemId(),
+                            request.analysisJobId(), request.sessionId(), request.itemId(),
                             Region.forStorage(request.region()).name(), request.scriptKey(),
                             request.testVersion(), request.scoreVersion(), request.durationMs(),
                             rejected.retryable() ? TrainingSample.Outcome.RETRYABLE_FAILED
                                     : TrainingSample.Outcome.FAILED,
-                            null, null, null, null, rejected.errorCode(), request.audio());
+                            null, null, null, null, rejected.errorCode(), correlationId, consent,
+                            audio);
             case AiAnalysisClient.Rejected ignored -> null;   // CONTRACT_VIOLATION
             case null -> null;
         };

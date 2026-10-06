@@ -85,9 +85,14 @@ resource "aws_elasticache_subnet_group" "redis" {
   tags = { Name = "${local.name}-redis" }
 }
 
-# AUTH 토큰. ElastiCache 규칙(16~128자, 출력 가능한 ASCII 중 @ " / 공백 제외)에 맞게 영숫자만 쓴다. state에 평문이
-# 남는다 - 관리자 토큰과 같은 수용 범위다 (S3 암호화 + 버전 관리 버킷, KAN-140). backend에는 config 모듈이 SSM
-# SecureString SPRING_DATA_REDIS_PASSWORD로 넘긴다. 재발급은 envs 루트에서
+# AUTH 토큰. ElastiCache 규칙(16~128자, 출력 가능한 ASCII 중 @ " / 공백 제외)에 맞게 영숫자만 쓴다. backend에는
+# config 모듈이 SSM SecureString SPRING_DATA_REDIS_PASSWORD로 넘긴다.
+#
+# 이 값은 state에 평문으로 남는다 (여기 random_password, 복제 그룹의 auth_token, config의 SSM value 세 곳). 다른
+# 시크릿처럼 ephemeral + write-only로 빼지 못하는 것은 aws provider 6.61.0의 aws_elasticache_replication_group에
+# write-only 인자(auth_token_wo 같은 것)가 없어서다 - provider 바이너리로 확인했다 (KAN-242, 2026-10-01). 위험을
+# 수용한다: Redis는 사설 서브넷에 있고 redis-sg가 backend-sg의 6379만 받으므로, 토큰을 알아도 VPC 안의 backend
+# 자리에 있지 않으면 쓸 수 없다. provider에 write-only 인자가 생기면 config의 세 시크릿과 같은 방식으로 옮긴다. 재발급은 envs 루트에서
 # `terraform apply -replace='module.data.random_password.redis_auth_token'` 뒤 backend 태스크를 새로 띄운다 -
 # 갱신 전략이 ROTATE라 apply 동안 옛 토큰도 받으므로 떠 있는 태스크가 끊기지 않는다.
 resource "random_password" "redis_auth_token" {
