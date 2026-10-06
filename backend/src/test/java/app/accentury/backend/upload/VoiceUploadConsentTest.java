@@ -28,8 +28,10 @@ import java.util.UUID;
 import java.util.concurrent.CopyOnWriteArrayList;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.multipart;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
@@ -96,6 +98,8 @@ class VoiceUploadConsentTest extends IntegrationTest {
         upload(session, "v1", "anon-none");
 
         assertNull(lastConsent());
+        // 익명 세션이라는 사실은 함께 넘어간다 (KAN-274) - 동의가 없어도 라벨(점수와 출신 지역)은 남기기 때문이다.
+        assertTrue(lastRequest().anonymousSession());
     }
 
     @Test
@@ -118,6 +122,8 @@ class VoiceUploadConsentTest extends IntegrationTest {
         upload(session, "v1", "account-none");
 
         assertNull(lastConsent());
+        // 계정 세션은 익명이 아니다 - 동의가 없으면 라벨도 남기지 않는다 (KAN-274).
+        assertFalse(lastRequest().anonymousSession());
     }
 
     @Test
@@ -140,7 +146,11 @@ class VoiceUploadConsentTest extends IntegrationTest {
     }
 
     private VoiceConsent lastConsent() {
-        return dispatcher.requests.get(dispatcher.requests.size() - 1).voiceConsent();
+        return lastRequest().voiceConsent();
+    }
+
+    private AnalysisDispatcher.AnalysisRequest lastRequest() {
+        return dispatcher.requests.get(dispatcher.requests.size() - 1);
     }
 
     private void upload(JsonNode session, String itemId, String idempotencyKey) throws Exception {

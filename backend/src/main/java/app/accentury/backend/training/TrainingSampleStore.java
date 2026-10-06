@@ -1,7 +1,8 @@
 package app.accentury.backend.training;
 
 /**
- * 학습 샘플 1건(WAV + 메타)을 보존하는 곳 (KAN-201).
+ * 학습 샘플 1건(WAV + 메타)을 보존하는 곳 (KAN-201). 음성 저장에 동의하지 않은 익명 세션의 건은 메타만 보존한다
+ * (라벨 전용, KAN-274 - {@link TrainingSample#audioStored()}).
  * <p>
  * 호출 시점은 분석 작업의 상태 전이가 끝난 <b>뒤</b>, 오디오 버퍼를 지우기 <b>전</b>이다
  * ({@code HttpAnalysisDispatcher}). 저장 실패가 분석 결과에 영향을 주면 안 되므로 구현은 예외를
@@ -20,7 +21,7 @@ public interface TrainingSampleStore {
     /**
      * 샘플을 보존한다. 오디오 버퍼는 호출이 돌아온 뒤 호출부가 지우므로 비동기로 붙들지 않는다.
      *
-     * @param sample 저장할 샘플 - {@code audio}는 업로드 받은 WAV 바이트 그대로다.
+     * @param sample 저장할 샘플 - {@code audio}는 업로드 받은 WAV 바이트 그대로이고, 라벨 전용 건은 null이다.
      */
     void save(TrainingSample sample);
 }

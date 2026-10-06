@@ -431,8 +431,10 @@ class HttpAnalysisDispatcher implements AnalysisDispatcher {
     }
 
     /**
-     * 학습 샘플로 남길 건이면 저장소에 넘긴다 (KAN-201). 음성 저장에 동의한 세션의 요청만이다 (KAN-269) - 동의가
-     * 없으면({@code voiceConsent}가 null) 샘플을 만들지 않고 음성은 이 뒤의 파기로 사라진다. 그중 AI가 계약대로
+     * 학습 샘플로 남길 건이면 저장소에 넘긴다 (KAN-201). 음성까지 남기는 것은 음성 저장에 동의한 세션의 요청만이다
+     * (KAN-269). 동의가 없는({@code voiceConsent}가 null) <b>익명 세션</b>은 음성 없이 라벨만 남긴다 (KAN-274) -
+     * 샘플의 {@code audio}와 {@code consent}를 null로 만들어 넘기고, 저장소가 JSON 하나만 별도 접두에 쓴다. 동의가
+     * 없는 계정 세션은 샘플을 만들지 않는다. 어느 쪽이든 동의가 없으면 음성은 이 뒤의 파기로 사라진다. 그중 AI가 계약대로
      * 답한 건 전부다 - 성공
      * ({@link AiAnalysisClient.Completed})과 판정 실패({@link AiAnalysisClient.Rejected}의 JUDGED, 부정 샘플도
      * 학습에 쓴다). 계약 위반은 원점수도 판정도 없고, null(재전송 예산 소진, 타임아웃, 회로 열림, 종료 중)은
@@ -445,9 +447,11 @@ class HttpAnalysisDispatcher implements AnalysisDispatcher {
     private void keepTrainingSample(AnalysisRequest request, AiAnalysisClient.@Nullable Outcome outcome,
                                     String correlationId) {
         VoiceConsent consent = request.voiceConsent();
-        if (consent == null) {
+        if (consent == null && !request.anonymousSession()) {
             return;
         }
+        // 동의가 없으면 음성 배열을 샘플에 싣지 않는다 - 저장소가 실수로도 음성을 쓸 수 없게 여기서 끊는다.
+        byte @Nullable [] audio = consent == null ? null : request.audio();
         TrainingSample sample = switch (outcome) {
             case AiAnalysisClient.Completed completed -> new TrainingSample(
                     request.analysisJobId(), request.sessionId(), request.itemId(),
@@ -455,7 +459,7 @@ class HttpAnalysisDispatcher implements AnalysisDispatcher {
                     request.testVersion(), request.scoreVersion(), request.durationMs(),
                     TrainingSample.Outcome.COMPLETED, completed.intonationScore(), completed.qualityCode(),
                     completed.modelVersion(), completed.scoreVersion(), null, correlationId, consent,
-                    request.audio());
+                    audio);
             case AiAnalysisClient.Rejected rejected when rejected.cause() == AiAnalysisClient.Rejected.Cause.JUDGED ->
                     new TrainingSample(
                             request.analysisJobId(), request.sessionId(), request.itemId(),
@@ -464,7 +468,7 @@ class HttpAnalysisDispatcher implements AnalysisDispatcher {
                             rejected.retryable() ? TrainingSample.Outcome.RETRYABLE_FAILED
                                     : TrainingSample.Outcome.FAILED,
                             null, null, null, null, rejected.errorCode(), correlationId, consent,
-                            request.audio());
+                            audio);
             case AiAnalysisClient.Rejected ignored -> null;   // CONTRACT_VIOLATION
             case null -> null;
         };

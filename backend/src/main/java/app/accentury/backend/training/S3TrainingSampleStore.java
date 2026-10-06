@@ -20,8 +20,11 @@ import java.util.Map;
 /**
  * 학습 샘플을 S3 버킷에 WAV 1개 + 메타 JSON 1개로 보존한다 (KAN-201 객체 규약, KAN-269).
  * <p>
- * 여기까지 오는 샘플은 전부 음성 저장에 동의한 세션의 것이다 - 동의가 없는 요청은 호출부
- * ({@code HttpAnalysisDispatcher})가 샘플을 만들지 않는다.
+ * 음성까지 남기는 샘플은 전부 음성 저장에 동의한 세션의 것이다. 동의가 없는 익명 세션의 요청은 호출부
+ * ({@code HttpAnalysisDispatcher})가 음성을 뺀 <b>라벨 전용</b> 샘플로 만들어 넘기고 (KAN-274), 여기서는 메타 JSON
+ * 하나만 {@code <env>/_no-audio/<region>/...} 아래에 쓴다. 음성 트리와 접두를 갈라 「음성 트리의 칸은 언제나 WAV와
+ * JSON 한 쌍」이라는 규약을 지킨다 - 같은 트리에 JSON만 있는 칸이 섞이면 학습 쪽이 JSON을 보고 없는 WAV를 찾는다.
+ * 동의가 없는 계정 세션의 요청은 호출부가 샘플을 만들지 않는다.
  * <p>
  * 키는 {@code <env>/<region>/<testVersion>/<sessionId>/<itemId>/<analysisJobId>.wav|.json}이다. 첫 조각은
  * 환경 접두({@code staging}, {@code prod})다 - 두 환경이 음성 전용 버킷 하나를 나눠 쓰고, 태스크 역할은 자기
@@ -60,6 +63,7 @@ public class S3TrainingSampleStore implements TrainingSampleStore {
     private final ObjectMapper objectMapper;
     private final Clock clock;
     private final Counter saved;
+    private final Counter labelSaved;
     private final Counter failed;
     private final Counter skipped;
 
@@ -74,13 +78,15 @@ public class S3TrainingSampleStore implements TrainingSampleStore {
         this.objectMapper = objectMapper;
         this.clock = clock;
         this.saved = counter(meterRegistry, "saved");
+        this.labelSaved = counter(meterRegistry, "label_saved");
         this.failed = counter(meterRegistry, "failed");
         this.skipped = counter(meterRegistry, "skipped");
     }
 
     private static Counter counter(MeterRegistry registry, String result) {
         return Counter.builder(ServiceMetrics.TRAINING_SAMPLES)
-                .description("학습 샘플 저장 시도 - 태그 result는 saved | failed | skipped (KAN-201, KAN-269)")
+                .description("학습 샘플 저장 시도 - 태그 result는 saved | label_saved | failed | skipped "
+                        + "(KAN-201, KAN-269, KAN-274)")
                 .tag("result", result)
                 .register(registry);
     }
@@ -89,6 +95,11 @@ public class S3TrainingSampleStore implements TrainingSampleStore {
     public void save(TrainingSample sample) {
         String prefix = sample.keyPrefix(envPrefix);
         VoiceConsent consent = sample.consent();
+        byte[] audio = sample.audio();
+        if (consent == null || audio == null) {
+            saveLabelOnly(sample, prefix);
+            return;
+        }
         // 동의는 업로드 때 판정했지만 저장은 분석이 끝난 뒤다 - 그 사이에 계정이 철회하거나 탈퇴했으면 남기지 않는다.
         if (!consents.stillInEffect(consent)) {
             skipped.increment();
@@ -106,7 +117,6 @@ public class S3TrainingSampleStore implements TrainingSampleStore {
             }
         }
         try {
-            byte[] audio = sample.audio();
             s3.putObject(PutObjectRequest.builder()
                             .bucket(bucket)
                             .key(prefix + ".wav")
@@ -131,10 +141,34 @@ public class S3TrainingSampleStore implements TrainingSampleStore {
     }
 
     /**
+     * 라벨 전용 건 - 음성 저장에 동의하지 않은 익명 세션의 분석 결과다 (KAN-274). WAV 없이 메타 JSON 하나만
+     * {@code _no-audio} 접두 아래에 쓴다. 계정이 없는 세션이라 동의 재확인과 대응표 기록은 없다.
+     */
+    private void saveLabelOnly(TrainingSample sample, String prefix) {
+        try {
+            s3.putObject(PutObjectRequest.builder()
+                            .bucket(bucket)
+                            .key(prefix + ".json")
+                            .contentType(JSON_CONTENT_TYPE)
+                            .build(),
+                    RequestBody.fromString(objectMapper.writeValueAsString(metadata(sample))));
+            labelSaved.increment();
+            log.info("라벨 전용 샘플 저장 jobId={} key={}", sample.analysisJobId(), prefix);
+        } catch (RuntimeException e) {
+            failed.increment();
+            log.warn("라벨 전용 샘플 저장 실패 - 분석 결과에는 영향 없음 jobId={} key={} 사유={}",
+                    sample.analysisJobId(), prefix, e.toString());
+        }
+    }
+
+    /**
      * 메타 JSON 본문 - 필드 순서는 티켓 표와 같고, 없는 값(판정 실패의 점수, 성공의 오류 코드)은 키를
      * 아예 내지 않는다. 키와 같은 값(작업, 세션, 문항 ID와 지역)을 본문에도 둔다 - 객체를 옮겨 담아
      * 키를 잃어도 자립한다. 동의 버전과 동의 시각도 싣는다 (KAN-269) - 익명 세션의 동의 기록은 세션 행과 함께
      * 만료 삭제되므로 음성 옆의 이 값이 동의 증빙이다. 소유 계정 id는 싣지 않는다 (대응표에만 있다).
+     * <p>
+     * {@code audioStored}는 이 JSON 옆에 WAV가 있는가다 (KAN-274). 라벨 전용 건은 false이고 동의 버전과 동의 시각 키가
+     * 없다. 이 키가 없는 옛 JSON(KAN-274 이전)은 전부 음성이 있는 건이다.
      */
     Map<String, Object> metadata(TrainingSample sample) {
         Map<String, Object> body = new LinkedHashMap<>();
@@ -153,8 +187,12 @@ public class S3TrainingSampleStore implements TrainingSampleStore {
         putIfPresent(body, "aiScoreVersion", sample.aiScoreVersion());
         putIfPresent(body, "errorCode", sample.errorCode());
         body.put("correlationId", sample.correlationId());
-        body.put("voiceConsentVersion", sample.consent().version());
-        body.put("voiceConsentAt", sample.consent().consentedAt().toString());
+        body.put("audioStored", sample.audioStored());
+        VoiceConsent consent = sample.consent();
+        if (consent != null) {
+            body.put("voiceConsentVersion", consent.version());
+            body.put("voiceConsentAt", consent.consentedAt().toString());
+        }
         body.put("savedAt", Instant.now(clock).toString());
         return body;
     }
