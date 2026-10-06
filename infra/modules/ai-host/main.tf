@@ -518,11 +518,14 @@ resource "aws_autoscaling_policy" "scale_in" {
   }
 }
 
-# 혼잡 임계치 이상이 2분 연속이면 +1. 업로드가 몰린 순간(다섯 문항 연속 제출)은 1분이면 빠지므로 2분을 요구한다.
+# 혼잡 임계치 이상이 1분이면 +1 (KAN-272, 2026-10-06 - 그 전에는 2분 연속). 2분을 요구한 것은 한 사람이 문항을
+# 연달아 제출한 순간에 늘리지 않기 위해서였는데, 그 경우는 진행 중이 5건을 넘지 않아 임계치 6에 닿지 않는다.
+# 6건이면 이미 두 사람 이상이 겹친 것이고 대기열이 1분이다. 2026-10-06 prod에서는 부하 시작(14:52)부터 2번째
+# 인스턴스 기동(14:56)까지 4분이 걸렸고 그 사이 진행 중이 19건까지 쌓였다 - 판정에서 1분을 줄인다.
 # treat_missing_data = notBreaching: backend가 죽어 지표가 끊긴 것은 no-healthy-target(monitoring)이 잡는다.
 resource "aws_cloudwatch_metric_alarm" "scale_out" {
   alarm_name        = "${local.name}-scale-out"
-  alarm_description = "accentury ${var.env}: 진행 중 분석이 ${var.scale_out_threshold}건 이상으로 2분 연속이라 AI 호스트를 1대 늘립니다. (KAN-201)"
+  alarm_description = "accentury ${var.env}: 진행 중 분석이 ${var.scale_out_threshold}건 이상이라 AI 호스트를 1대 늘립니다. (KAN-201, KAN-272)"
 
   namespace   = var.scaling_metric_namespace
   metric_name = "accentury.analysis.processing.value"
@@ -530,7 +533,7 @@ resource "aws_cloudwatch_metric_alarm" "scale_out" {
 
   statistic           = "Maximum"
   period              = 60
-  evaluation_periods  = 2
+  evaluation_periods  = 1
   comparison_operator = "GreaterThanOrEqualToThreshold"
   threshold           = var.scale_out_threshold
   treat_missing_data  = "notBreaching"

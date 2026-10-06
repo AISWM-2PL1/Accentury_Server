@@ -29,10 +29,25 @@ public class PollIntervals {
         this.metrics = metrics;
     }
 
+    /**
+     * 간격 산출 1회의 결과 - 간격과, 그 간격이 혼잡 판정에서 나왔는지.
+     *
+     * @param congested 혼잡 판정이 켜졌는가. 상태 일괄 조회가 대기 안내({@code queue}, §3.4)를
+     *                  실을지 정할 때 쓴다 (KAN-272) - 간격 값으로 되짚지 않는다. 기준 간격과 혼잡
+     *                  간격을 같은 값으로 설정하면 구분이 사라진다.
+     */
+    public record Decision(long pollAfterMs, boolean congested) {
+    }
+
     public long pollAfterMs() {
+        return decide().pollAfterMs();
+    }
+
+    /** 한 번 부를 때마다 판정 지표가 하나 샌다 - 응답 하나에 한 번만 부른다. */
+    public Decision decide() {
         AccenturyProperties.Analysis analysis = properties.analysis();
         boolean congested = congestion.processingJobs() >= analysis.congestionThreshold();
         metrics.recordPollDecision(congested);
-        return congested ? analysis.congestedPollAfterMs() : analysis.pollAfterMs();
+        return new Decision(congested ? analysis.congestedPollAfterMs() : analysis.pollAfterMs(), congested);
     }
 }

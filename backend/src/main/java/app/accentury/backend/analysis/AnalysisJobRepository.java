@@ -33,6 +33,17 @@ public interface AnalysisJobRepository extends JpaRepository<AnalysisJob, String
     @Query(value = "select count(*) from analysis_job where status = 'PROCESSING'", nativeQuery = true)
     long countProcessing();
 
+    /**
+     * 어떤 시각보다 먼저 접수된 전 세션의 PROCESSING 작업 수 - 혼잡 안내의 "앞에 N건"이다
+     * (§3.4의 {@code queue.ahead}, KAN-272).
+     * <p>
+     * 위 {@link #countProcessing()}과 같은 이유로 상태 조건을 문장에 박는다 - 부분 인덱스로 PROCESSING
+     * 몇십 건만 집은 뒤 접수 시각으로 거른다. 혼잡 판정이 켜진 폴링에서만 나가는 조회다.
+     */
+    @Query(value = "select count(*) from analysis_job where status = 'PROCESSING' and created_at < :before",
+            nativeQuery = true)
+    long countProcessingCreatedBefore(@Param("before") Instant before);
+
     /** 멱등 재전송 판별 (§5.2) - 유니크 제약과 같은 키 조합의 단건 조회 */
     Optional<AnalysisJob> findBySessionIdAndItemIdAndIdempotencyKey(
             String sessionId, String itemId, String idempotencyKey);

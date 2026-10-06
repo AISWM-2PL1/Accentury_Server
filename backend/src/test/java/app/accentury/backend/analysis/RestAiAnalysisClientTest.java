@@ -92,6 +92,24 @@ class RestAiAnalysisClientTest {
     }
 
     @Test
+    void 채점_불가_422는_재녹음_가능한_판정으로_매핑한다() {
+        // KAN-272. 결과에 NaN이 섞인 음성이다 - 예전에는 500이라 재전송 예산을 전부 같은 실패에 썼다.
+        // 코드가 ErrorCode에 없으면 계약 위반(비재시도 FAILED)으로 접히므로, 이 매핑이 깨지면
+        // 사용자는 재녹음도 못 하고 문항을 잃는다.
+        server.expect(requestTo("http://ai.test/internal/v0/analyze"))
+                .andRespond(withStatus(HttpStatus.UNPROCESSABLE_CONTENT).body("""
+                        { "status": "FAILED", "quality": { "code": "ANALYSIS_UNSCORABLE" }, "retryable": true,
+                          "modelVersion": "track1-0.1", "scoreVersion": "sv-0.3", "processingMs": 9800 }
+                        """).contentType(MediaType.APPLICATION_JSON));
+
+        AiAnalysisClient.Rejected rejected =
+                assertInstanceOf(AiAnalysisClient.Rejected.class, client.analyze(request(), "c_test"));
+        assertEquals("ANALYSIS_UNSCORABLE", rejected.errorCode());
+        assertTrue(rejected.retryable());
+        assertEquals(AiAnalysisClient.Rejected.Cause.JUDGED, rejected.cause());
+    }
+
+    @Test
     void 계약_위반_응답은_판정과_다른_사유로_구분된다() {
         // 둘 다 재전송하지 않는 Rejected지만 "AI가 정상인가"가 다르다 - 이 구분이 없으면
         // 응답만 하고 고장 난 AI 앞에서 회로가 영영 닫혀 있는다 (KAN-28).
@@ -419,6 +437,17 @@ class RestAiAnalysisClientTest {
                 .andExpect(content().string(containsString("\"itemId\":\"v1\"")))
                 .andExpect(content().string(containsString("\"scriptKey\":\"1|5\"")))
                 .andExpect(content().string(containsString("\"durationMs\":3000")))
+                .andRespond(withSuccess(COMPLETED_BODY, MediaType.APPLICATION_JSON));
+
+        assertInstanceOf(AiAnalysisClient.Completed.class, client.analyze(request("1|5"), "c_test"));
+    }
+
+    @Test
+    void meta에_이_backend가_아는_추가_판정_코드를_싣는다() {
+        // KAN-272. 배포는 AI가 먼저라 새 AI가 옛 backend의 호출을 받는 구간이 있다. AI는 이 목록에 있는
+        // 코드만 내므로, 여기서 빠지면 채점 불가가 다시 500(재전송 3회 뒤 INTERNAL_ERROR)으로 돌아간다.
+        server.expect(requestTo("http://ai.test/internal/v0/analyze"))
+                .andExpect(content().string(containsString("\"acceptsVerdicts\":[\"ANALYSIS_UNSCORABLE\"]")))
                 .andRespond(withSuccess(COMPLETED_BODY, MediaType.APPLICATION_JSON));
 
         assertInstanceOf(AiAnalysisClient.Completed.class, client.analyze(request("1|5"), "c_test"));

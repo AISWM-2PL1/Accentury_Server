@@ -1,5 +1,6 @@
 package app.accentury.backend.analysis;
 
+import app.accentury.backend.common.ErrorCode;
 import app.accentury.backend.observability.ServiceMetrics;
 import io.micrometer.core.instrument.Counter;
 import io.micrometer.core.instrument.Gauge;
@@ -30,6 +31,9 @@ public class AnalysisMetrics {
     private final Counter lostTimeouts;
     private final Counter congestedPolls;
     private final Counter normalPolls;
+    private final Counter unscorableJudged;
+    private final Counter misreadJudged;
+    private final Counter otherJudged;
 
     AnalysisMetrics(MeterRegistry meterRegistry, AnalysisCongestion congestion, AnalysisBacklog backlog) {
         // 게이지는 발행 주기마다 한 번 읽힌다 (배포에서 1분). 전 인스턴스 값은 DB count 한 번인데
@@ -49,6 +53,16 @@ public class AnalysisMetrics {
         this.lostTimeouts = timeoutCounter(meterRegistry, "lost");
         this.congestedPolls = pollCounter(meterRegistry, "true");
         this.normalPolls = pollCounter(meterRegistry, "false");
+        this.unscorableJudged = judgedCounter(meterRegistry, "unscorable");
+        this.misreadJudged = judgedCounter(meterRegistry, "misread");
+        this.otherJudged = judgedCounter(meterRegistry, "other");
+    }
+
+    private static Counter judgedCounter(MeterRegistry registry, String reason) {
+        return Counter.builder(ServiceMetrics.ANALYSIS_JUDGED)
+                .description("AI가 판정 실패로 답한 건수 - unscorable은 채점 불가, misread는 다른 발화 (KAN-272)")
+                .tag("reason", reason)
+                .register(registry);
     }
 
     private static Counter timeoutCounter(MeterRegistry registry, String reason) {
@@ -74,6 +88,23 @@ public class AnalysisMetrics {
      */
     public void recordCompleted(long elapsedNanos) {
         duration.record(elapsedNanos, TimeUnit.NANOSECONDS);
+    }
+
+    /**
+     * AI가 계약대로 판정 실패를 돌려줬다 (KAN-272) - 사유별로 센다.
+     * <p>
+     * 채점 불가({@code ANALYSIS_UNSCORABLE})를 따로 세는 이유는 그것이 사용자의 발화가 아니라
+     * 모델 쪽 결함의 신호이기 때문이다. 2026-10-05에는 이 경우가 500으로 나가 로그를 세어 보기 전까지
+     * 건수를 알 수 없었다. 모르는 코드는 {@code other}로 접는다 - 태그 값이 열리지 않게.
+     */
+    public void recordJudged(String errorCode) {
+        if (ErrorCode.ANALYSIS_UNSCORABLE.name().equals(errorCode)) {
+            unscorableJudged.increment();
+        } else if (ErrorCode.ANALYSIS_MISREAD.name().equals(errorCode)) {
+            misreadJudged.increment();
+        } else {
+            otherJudged.increment();
+        }
     }
 
     /** 타임아웃 스위퍼 1회분 - 0건이면 아무것도 세지 않는다. */

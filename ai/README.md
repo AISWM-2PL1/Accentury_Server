@@ -77,7 +77,9 @@ AI 서버는 backend와 다른 EC2에서 돕니다 (KAN-36 A단계). 같은 comp
   - 품질 코드는 비어 있지 않고 40자 이하입니다 (BE의 `analysis_job.quality_code` 컬럼 폭).
     성공 경로의 코드는 BE가 검사 없이 저장하고 사용자에게도 내보냅니다.
   - 실패면 품질 코드가 §2.4 판정 코드여야 합니다. 허용 목록은 `AUDIO_TOO_QUIET`,
-    `AUDIO_TOO_LONG`, `AUDIO_FORMAT_UNSUPPORTED`, `ANALYSIS_MISREAD` 넷입니다
+    `AUDIO_TOO_LONG`, `AUDIO_FORMAT_UNSUPPORTED`, `ANALYSIS_MISREAD`, `ANALYSIS_UNSCORABLE` 다섯입니다
+    (마지막 것은 KAN-272에서 더했습니다. 실모델 어댑터는 요청 meta의 `acceptsVerdicts`에 이 코드가
+    있을 때만 냅니다 - 배포가 AI 먼저라 이 코드를 모르는 옛 backend가 부르는 구간이 있습니다)
     (`engine.py`의 `JUDGED_QUALITY_CODES`). 기본값 `OK`도, 오타도, 지어낸 서술적 코드도
     거절됩니다 - BE의 `ErrorCode`에 없는 이름은 계약 위반이 되고 그 문항은 재시도 없이
     죽습니다. BE가 §2.4에 판정 코드를 더하면 이 집합에도 더합니다.
@@ -308,6 +310,7 @@ CI(`test.yml`의 `ai-test`)는 `ai/`가 바뀐 PR마다 잠금 파일을 `pip-au
 | `ACCENTURY_AI_TEMP_RETENTION_SECONDS` | `1800` | 잔존 파일 삭제 기준 (30분) |
 | `ACCENTURY_AI_SWEEP_INTERVAL_SECONDS` | `300` | 청소 잡 주기 |
 | `ACCENTURY_AI_ANALYSIS_TIMEOUT_SECONDS` | `75` | 분석 1건의 상한 (lock 대기와 재적재 대기 포함) - 넘기면 503이고 워커가 죽습니다 (재적재가 뒤따릅니다). backend의 읽기 타임아웃 85초보다 짧아야 합니다 (KAN-172) |
+| `ACCENTURY_AI_INFERENCE_RESERVE_SECONDS` | `15` | 추론을 시작하려면 위 상한까지 남아 있어야 하는 시간 (KAN-272). 차례를 기다린 요청이 lock을 잡았을 때 남은 시간이 이보다 적으면 추론을 시작하지 않고 429(추론 전 거절)를 돌려줍니다 - 시작해 놓고 추론 도중 상한에 걸리면 멀쩡한 워커가 죽기 때문입니다. 상한보다 작아야 하고(아니면 기동을 거부합니다) `0`이면 검사를 끕니다 |
 | `ACCENTURY_AI_MAX_AUDIO_BYTES` | `1048576` | 오디오 파트 상한 (§3.3과 동일) |
 | `ACCENTURY_AI_MAX_REQUEST_BYTES` | `2097152` | 요청 본문 전체 상한 - multipart 파싱 전에 끊습니다 |
 | `ACCENTURY_AI_ANALYSIS_ENGINE` | `track1` | 붙일 분석 엔진 - `track1`(실모델) 또는 `fake`(개발 기계용, 해시 점수). 모르는 이름이면 기동이 실패합니다 |

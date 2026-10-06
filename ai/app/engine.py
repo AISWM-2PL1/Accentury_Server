@@ -53,6 +53,8 @@ JUDGED_QUALITY_CODES = frozenset(
         "AUDIO_TOO_LONG",
         "AUDIO_FORMAT_UNSUPPORTED",
         "ANALYSIS_MISREAD",
+        # 채점은 끝났는데 결과에 NaN이나 무한대가 섞인 경우다 (KAN-272, app.track1)
+        "ANALYSIS_UNSCORABLE",
     }
 )
 
@@ -247,6 +249,17 @@ class AnalysisOutcome:
     def failure(cls, quality_code: str, retryable: bool) -> "AnalysisOutcome":
         """판정 실패 (§4.1의 422) - 요청 자체는 정상이나 점수를 낼 수 없는 경우다."""
         return cls(status=STATUS_FAILED, quality_code=quality_code, retryable=retryable)
+
+
+class EngineBusy(Exception):
+    """엔진이 **추론을 시작하지 않고** 접은 요청 (KAN-272).
+
+    차례를 기다리다 상한까지 남은 시간이 추론 1건을 마치기에 모자랄 때 엔진이 던진다. 라우트는
+    이것을 과부하 셰딩(429)으로 옮긴다 - 추론 전 거절이라 BE는 시도 예산(§2.5)을 깎지 않고 재전송
+    예산 안에서 다시 보낸다 (§4.1). 추론을 이미 시작한 뒤에는 던지지 않는다 - 그때는 503이다.
+
+    던질지는 엔진이 정한다. 줄을 서는 구조가 없는 엔진(가짜 엔진)은 던질 일이 없다.
+    """
 
 
 class AnalysisEngine(Protocol):

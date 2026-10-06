@@ -254,6 +254,7 @@ class HttpAnalysisDispatcher implements AnalysisDispatcher {
             }
             AiAnalysisClient.Outcome outcome = analyzeWithRetry(request, correlationId);
             apply(request.analysisJobId(), outcome, acceptedNanos);
+            logUnscorable(request, outcome);
             // 상태 전이가 끝난 뒤, 아래 finally의 wipeAudio() 전이다 (KAN-201). 사용자는 이미 종결을 볼 수
             // 있고, 워커 점유 시간만 저장 왕복만큼 늘어난다 (수집을 켠 환경의 동의 세션 한정 - 그 밖은 즉시 돌아온다).
             keepTrainingSample(request, outcome, correlationId);
@@ -361,6 +362,23 @@ class HttpAnalysisDispatcher implements AnalysisDispatcher {
         }
     }
 
+    /**
+     * 채점 불가 판정을 어느 문항이었는지와 함께 남긴다 (KAN-272).
+     * <p>
+     * 채점 불가는 사용자의 발화가 아니라 모델 쪽 결함의 신호다 - 어느 문장에서 나는지를 backend 로그만으로
+     * 셀 수 있어야 한다 (AI 로그에는 어느 값이 NaN인지까지 있다. 추적 ID로 둘을 잇는다). itemId는 정의
+     * 버전이 바뀌면 다른 문장을 가리키므로 testVersion을, 모델이 문장을 찾는 키인 scriptKey를 함께 싣는다.
+     * 셋 다 콘텐츠 식별자다 - 세션이나 사용자를 가리키는 값은 싣지 않는다.
+     */
+    private static void logUnscorable(AnalysisRequest request, AiAnalysisClient.@Nullable Outcome outcome) {
+        if (outcome instanceof AiAnalysisClient.Rejected rejected
+                && rejected.cause() == AiAnalysisClient.Rejected.Cause.JUDGED
+                && ErrorCode.ANALYSIS_UNSCORABLE.name().equals(rejected.errorCode())) {
+            log.warn("채점 불가 판정 jobId={} itemId={} scriptKey={} testVersion={}",
+                    request.analysisJobId(), request.itemId(), request.scriptKey(), request.testVersion());
+        }
+    }
+
     /** AI가 답은 했지만 계약(§4.1)을 어겼는가 - 재전송 대상은 아니지만 가용성 실패다 (KAN-28). */
     private static boolean contractViolation(AiAnalysisClient.Outcome outcome) {
         return outcome instanceof AiAnalysisClient.Rejected rejected
@@ -396,9 +414,16 @@ class HttpAnalysisDispatcher implements AnalysisDispatcher {
                     metrics.recordCompleted(System.nanoTime() - acceptedNanos);
                 }
             }
-            case AiAnalysisClient.Rejected rejected -> transitions.fail(jobId,
-                    rejected.retryable() ? AnalysisJobStatus.RETRYABLE_FAILED : AnalysisJobStatus.FAILED,
-                    rejected.errorCode());
+            case AiAnalysisClient.Rejected rejected -> {
+                transitions.fail(jobId,
+                        rejected.retryable() ? AnalysisJobStatus.RETRYABLE_FAILED : AnalysisJobStatus.FAILED,
+                        rejected.errorCode());
+                // 계약대로 온 판정만 센다 (KAN-272) - 계약 위반은 판정이 아니라 AI 쪽 고장이고
+                // 회로와 ERROR 로그가 따로 말한다.
+                if (rejected.cause() == AiAnalysisClient.Rejected.Cause.JUDGED) {
+                    metrics.recordJudged(rejected.errorCode());
+                }
+            }
             case null -> {
                 // analyzeWithRetry가 이미 종결했다.
             }

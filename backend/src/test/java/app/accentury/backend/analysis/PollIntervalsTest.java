@@ -41,6 +41,16 @@ class PollIntervalsTest {
     }
 
     @Test
+    void 판정은_간격과_함께_혼잡_여부를_돌려준다() {
+        // 상태 일괄 조회가 대기 안내(queue)를 실을지 정하는 입력이다 (KAN-272) - 간격 값으로 되짚지 않는다.
+        processing.set(THRESHOLD - 1);
+        assertEquals(new PollIntervals.Decision(800, false), pollIntervals.decide());
+
+        processing.set(THRESHOLD);
+        assertEquals(new PollIntervals.Decision(3000, true), pollIntervals.decide());
+    }
+
+    @Test
     void 밀림이_풀리면_기준_간격으로_돌아온다() {
         processing.set(THRESHOLD);
         assertEquals(3000, pollIntervals.pollAfterMs());

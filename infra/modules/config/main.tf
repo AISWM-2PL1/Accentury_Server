@@ -171,15 +171,30 @@ resource "aws_ssm_parameter" "ai_token_ai" {
 #   processing-timeout > ai-timeout x (재시도 2 + 1) + 백오프 0.9초   -> 300 > 255.9
 #   shutdown-budget(90초, 코드 기본값) > ai-timeout                    -> 90 > 85
 #   ai_analysis_timeout_seconds < ai-timeout                           -> 75 < 85
-#   ai_analysis_timeout_seconds > 배포 중 태스크 6 x 1건 P95 11.1초     -> 75 > 66.6
+#   ai_analysis_timeout_seconds > 한 호스트에 겹친 6건 x 1건 P95 11.1초 -> 75 > 66.6
 #   ai_analysis_timeout_seconds > 워커 재적재 31초 + 1건 P95 11.1초     -> 75 > 42.1
 #
-# dispatch-concurrency 1이 이 조합의 핵심이다. AI는 추론을 한 번에 하나만 돌리므로(단일 lock,
-# 8GB에서 2건이면 OOM - KAN-57) 여럿을 동시에 보내면 뒤의 것은 앞의 추론이 끝나기를 AI 안에서
-# 기다린다. AI 상한은 그 대기와 워커 재적재 대기까지 포함하므로 롤링 배포 중 태스크가 2배(3 x 200%
-# = 6, KAN-168)로 겹친 경우와 워커가 죽은 뒤의 재적재를 덮어야 한다 - 짧으면 이미 추론 중인 요청을
-# 끊어 멀쩡한 워커를 죽이고, 재전송이 재적재를 기다리다 또 끊겨 새 워커를 또 죽인다 (Codex 리뷰 P1).
-# 값은 KAN-22가 staging 검증용으로 올렸던 임시값과 같다 - 근거가 붙어 정식값이 됐다.
+# AI는 호스트마다 추론을 한 번에 하나만 돌리므로(단일 lock, 8GB에서 2건이면 OOM - KAN-57) 여럿을
+# 동시에 보내면 뒤의 것은 앞의 추론이 끝나기를 AI 안에서 기다린다. AI 상한은 그 대기와 워커 재적재
+# 대기까지 포함하므로 한 호스트에 6건이 겹친 경우와 워커가 죽은 뒤의 재적재를 덮어야 한다 - 짧으면
+# 이미 추론 중인 요청을 끊어 멀쩡한 워커를 죽이고, 재전송이 재적재를 기다리다 또 끊겨 새 워커를 또
+# 죽인다 (Codex 리뷰 P1). 값은 KAN-22가 staging 검증용으로 올렸던 임시값과 같다 - 근거가 붙어 정식값이 됐다.
+#
+# dispatch-concurrency는 3이다 (KAN-272, 2026-10-06. 그 전에는 1). 1이던 때는 AI를 2대로 늘려도 태스크
+# 하나가 한 번에 1건만 보내 처리량이 늘지 않았다 (prod 실측 - AI lock 대기 0초, 분당 완료 최대 7건).
+# 3은 AI 최대 대수(ai_max_size)와 같은 값이다. 한 호스트에 겹치는 호출 수는 "태스크 수 x 3 / AI 대수"다.
+#
+#   태스크 1개(평시)        x 3 = 3건  -> AI 1대여도 33초          (상한 안)
+#   태스크 2개(롤링 배포 중) x 3 = 6건  -> AI 1대여도 67초          (상한 안, 위 불변식의 근거)
+#   태스크 3개(스케일아웃)  x 3 = 9건  -> AI 1대면 100초            (상한 밖. AI가 2대면 50초로 안이다)
+#
+# 마지막 줄은 backend가 3개로 늘었는데 AI 스케일아웃이 아직 안 끝난 구간에서만 생긴다. 그대로 두면 일곱
+# 번째 요청이 66.6초에 lock을 잡아 **추론 도중** 75초 상한에 걸리고, 그 취소가 멀쩡한 워커를 죽여 재적재
+# 31초가 뒤 요청까지 민다 (Codex astra 리뷰 P1). 그래서 AI는 lock을 잡았을 때 상한까지 남은 시간이
+# 여유분(코드 기본값 15초, ACCENTURY_AI_INFERENCE_RESERVE_SECONDS)보다 적으면 추론을 시작하지 않고
+# 429로 돌려준다 (ai/app/track1.py). 추론 전 거절이라 backend는 시도 예산을 깎지 않고 재전송 예산(2회)
+# 안에서 다시 보내고, 다 쓰면 ANALYSIS_UNAVAILABLE로 종결해 재업로드를 연다. 15초면 한 호스트에 겹친
+# 6건까지는 전부 통과한다 (여섯 번째가 55.5초에 시작한다).
 resource "aws_ssm_parameter" "analysis_ai_timeout" {
   name  = "${var.ssm_prefix}/ACCENTURY_ANALYSIS_AITIMEOUT"
   type  = "String"

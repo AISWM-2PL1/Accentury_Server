@@ -433,9 +433,10 @@ resource "aws_cloudwatch_metric_alarm" "ai_memory_high" {
 # 원본 음성이 호스트에 남는다 - 즉시 파기(NFR-PR-03, §5.5) 위반이라 사람이 봐야 한다.
 #
 # 임계치가 20인 이유: 이 지표는 <b>처리 중인 파일도 센다</b>(스윕은 보존 기간 안의 파일을 잔존으로
-# 집계한다). 동시 추론은 backend 태스크당 워커 1개(dispatch-concurrency, 실모델 기준 KAN-172) x
-# 태스크 최대 3개(KAN-168)라 구조적으로 3을 넘지 못하므로, 20이면 정상 부하가 절대 닿지 않으면서
-# "안 지워지고 쌓인다"는 신호에는 걸린다. 그 3이라는 상한이 바뀌면(워커 수, 오토스케일링 상한) 여기도 함께 본다.
+# 집계한다). AI가 동시에 받는 호출은 backend 태스크당 워커 3개(dispatch-concurrency, KAN-272) x
+# 태스크 최대 3개(KAN-168)라 구조적으로 9를 넘지 못하므로(전부 한 호스트에 몰려도 9다), 20이면 정상 부하가
+# 닿지 않으면서 "안 지워지고 쌓인다"는 신호에는 걸린다. 롤링 배포 중 태스크가 6개로 겹친 순간의 이론상 최대는
+# 18이다. 그 9라는 상한이 바뀌면(워커 수, 오토스케일링 상한) 여기도 함께 본다.
 #
 # 정확한 고장 신호는 잔존 시간(TempOldestAge)이다 - 보존 기간 30분을 넘긴 파일은 삭제가 실패한
 # 것뿐이다. 다만 티켓 AC가 "잔존 파일 수 임계치"라 경보는 건수로 걸고, 잔존 시간은 대시보드에
@@ -563,4 +564,42 @@ resource "aws_cloudwatch_metric_alarm" "analysis_timeouts_high" {
   ok_actions    = local.alarm_actions
 
   tags = { Name = "${local.name}-analysis-timeouts-high" }
+}
+
+# ---- 경보 4: 채점 불가 급증 (KAN-272) ----
+
+# AI가 음성을 끝까지 분석했는데 결과에 NaN이 섞여 점수를 못 낸 건수다 (ANALYSIS_UNSCORABLE, backend의
+# accentury.analysis.judged 중 reason=unscorable). 사용자의 발화가 아니라 모델 쪽 결함의 신호다.
+#
+# 이 경보가 필요한 이유: KAN-272 전에는 이 경우가 AI 500이라 재전송 3회 뒤 INTERNAL_ERROR로 끝났고
+# 연속되면 회로가 열려 ai-circuit-open이 울었다. 지금은 계약대로 온 판정(422)이라 회로에 성공으로 세고
+# 사용자에게는 재녹음만 열린다 - 모델이나 참조 데이터가 바뀌어 모든 발화에 NaN이 나오는 회귀가 생기면
+# 응시자 전원이 재녹음을 되풀이하는데 다른 경보는 아무것도 울지 않는다 (검증자 리뷰 P2).
+#
+# 임계치 5는 5분에 5건이다 (analysis-timeouts-high와 같은 선). 2026-10-05부터 이틀간 prod에서는 분석의
+# 약 5%가 이 경우였고, AI 1대의 처리량(분당 6~7건)에서 그것은 5분에 2건 안팎이다. 5건을 넘으면 평소
+# 비율이 아니다. 한 사람이 음성 문항 전부에서 걸리고 다시 녹음해 또 걸리면 넘을 수 있는데, 그것도 사람이
+# 볼 일이다. 원인은 AI 로그의 "채점 불가 ... fields="와 backend 로그의 "채점 불가 판정 ... scriptKey="로 찾는다.
+#
+# treat_missing_data = "notBreaching": 카운터는 0도 발행하지만, backend가 죽으면 끊긴다 -
+# 그것은 no-healthy-target이 잡는다.
+resource "aws_cloudwatch_metric_alarm" "analysis_unscorable_high" {
+  alarm_name        = "${local.name}-analysis-unscorable-high"
+  alarm_description = "accentury ${var.env}: 채점 불가(ANALYSIS_UNSCORABLE)가 5분 동안 ${var.analysis_unscorable_threshold}건을 넘었습니다. AI가 분석 결과에 NaN을 내고 있고, 그만큼의 사용자가 재녹음 안내를 받았습니다. AI 로그의 '채점 불가'(fields, scriptKey)와 최근 모델 배포를 확인하세요. (KAN-272)"
+
+  namespace   = var.backend_metric_namespace
+  metric_name = "accentury.analysis.judged.count"
+  dimensions  = { env = var.env, reason = "unscorable" }
+
+  statistic           = "Sum"
+  period              = 300
+  evaluation_periods  = 1
+  comparison_operator = "GreaterThanThreshold"
+  threshold           = var.analysis_unscorable_threshold
+  treat_missing_data  = "notBreaching"
+
+  alarm_actions = local.alarm_actions
+  ok_actions    = local.alarm_actions
+
+  tags = { Name = "${local.name}-analysis-unscorable-high" }
 }

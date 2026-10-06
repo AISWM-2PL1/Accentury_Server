@@ -839,6 +839,12 @@ backend 쪽은 무변경이다 - `ACCENTURY_ANALYSIS_AIBASEURL`(`http://ai.accen
 `dispatch-concurrency` 1도 그대로다. 동시성은 backend 태스크 수에서 온다(태스크당 1건, 최대 3, 롤링 배포 중
 6)이고 ALB가 그 호출을 빈 인스턴스로 나눈다.
 
+**2026-10-06에 이 전제가 틀린 것으로 드러났다 (KAN-272).** prod는 backend 태스크가 1개로 유지되므로
+(backend 오토스케일링은 요청 수 기준이라 분석이 밀려도 늘지 않는다) 동시 호출이 늘 1건이었고, AI가 2대로
+늘어도 2번째는 일을 받지 못했다. 응시가 몰린 14:52부터 진행 중 분석이 19건까지 쌓이는 동안 AI의 lock 대기는
+0초였고 분당 완료는 7건을 넘지 못했다. 그래서 `dispatch-concurrency`를 AI 최대 대수와 같은 3으로 올렸고
+(태스크 하나가 동시에 3건을 보낸다), 확대 판정도 2분 연속에서 1분으로 줄였다.
+
 | 항목 | 값 | 근거 |
 | --- | --- | --- |
 | ASG | min 1, max `ai_max_size`(3), 초기 desired 1 | 평시 1대. 계정 vCPU 쿼터(256)로는 64대까지 되므로 이 값은 비용 상한이다 |
@@ -847,7 +853,7 @@ backend 쪽은 무변경이다 - `ACCENTURY_ANALYSIS_AIBASEURL`(`http://ai.accen
 | ALB idle timeout | 90초 | backend 읽기 타임아웃(ai-timeout 85초)보다 길어야 한다. 기본 60초면 긴 추론이 504로 끊긴다 |
 | 등록 해제 지연 | 90초 | 빠지는 인스턴스의 진행 중 추론(AI 상한 75초)이 끝날 시간 |
 | ASG 상태 검사 | ELB, 유예 900초 | 첫 부팅(docker 설치 + 이미지 7GB pull + 모델 적재)이 실측 3분 20초 - 파이프라인의 healthy 대기(600초)에 pull을 더한 여유다 |
-| 확대 | `accentury.analysis.processing.value` Maximum >= 6, 1분 x 2회 -> +1, 워밍업 600초 | backend의 폴링 혼잡 임계치와 같은 지점. CPU는 추론 1건이 10초라 밀림보다 늦다 |
+| 확대 | `accentury.analysis.processing.value` Maximum >= 6, 1분 x 1회 -> +1, 워밍업 600초 | backend의 폴링 혼잡 임계치와 같은 지점. CPU는 추론 1건이 10초라 밀림보다 늦다. 판정은 KAN-272에서 2회 연속에서 1회로 줄였다 - 한 사람이 5문항을 연달아 올려도 5건이라 6에 닿지 않는다 |
 | 축소 | 같은 지표 <= 1, 1분 x 15회 -> -1, 그 뒤 ALARM이 유지되는 동안 약 3분마다 다시 -1 (min까지) | 늘어난 인스턴스는 늘어난 동안만 과금이라 확대보다 훨씬 느리게 접는다. 실측 3에서 2가 16분, 2에서 1이 19분 |
 | SG | backend-sg -> ai-alb-sg -> ai-sg (8000) | backend 태스크가 호스트에 직접 닿는 길은 없다 |
 
@@ -1383,8 +1389,8 @@ KAN-57의 c7i.xlarge 실측(bf16 + MFA `align_one`, 1건 P50 10.1초, P95 11.1�
 | --- | --- | --- |
 | `ACCENTURY_ANALYSIS_AITIMEOUT` | `85s` | backend가 AI 호출에 거는 연결과 읽기 타임아웃. AI 상한 75초보다 10초 길다 |
 | `ACCENTURY_ANALYSIS_PROCESSINGTIMEOUT` | `300s` | 실행 잔류 한도. `ai-timeout x 3 + 백오프`(255.9초)보다 길어야 backend가 뜬다 |
-| `ACCENTURY_ANALYSIS_DISPATCHCONCURRENCY` | `1` | 전달 워커 수. AI가 추론을 한 번에 하나만 돌리고 8GB에서 2건이면 OOM이다 |
-| `ai/ACCENTURY_AI_ANALYSIS_TIMEOUT_SECONDS` | `75` | AI 자신의 상한 (lock 대기와 워커 재적재 대기 포함). backend보다 짧아야 AI가 먼저 끊고 503을 돌려준다. 정상 추론 1건이 아니라 롤링 배포 중 태스크 최대 6개(상한 3 x 200%)가 겹친 6 x P95 11초 = 67초와 워커 재적재 31초 + 추론 11초 = 42초를 덮는 값이다 - 짧으면(25초, 40초) 추론 중인 요청을 끊어 멀쩡한 워커를 죽이고 재전송이 새 워커를 또 죽이는 연쇄가 된다 (Codex 리뷰 P1, 실제 어댑터로 재현). 두 시나리오를 각각 덮을 뿐 합(97.6초)은 덮지 않는다 - 그때는 backend 회로 차단기가 연속 5회 실패에서 열려 호출을 멈추므로 연쇄가 자기수렴한다 (KAN-28) |
+| `ACCENTURY_ANALYSIS_DISPATCHCONCURRENCY` | `3` | 전달 워커 수 (KAN-272에서 1에서 올렸다). AI 최대 대수와 같은 값이다. AI는 호스트마다 추론을 한 번에 하나만 돌리므로(8GB에서 2건이면 OOM) AI가 1대면 뒤의 2건은 AI 안에서 차례를 기다리고, 2대 이상이면 내부 ALB가 나눈다 |
+| `ai/ACCENTURY_AI_ANALYSIS_TIMEOUT_SECONDS` | `75` | AI 자신의 상한 (lock 대기와 워커 재적재 대기 포함). backend보다 짧아야 AI가 먼저 끊고 503을 돌려준다. 정상 추론 1건이 아니라 한 호스트에 겹친 호출 6건(태스크당 전달 워커 3개 x 롤링 배포 중 태스크 2개, KAN-272)의 6 x P95 11초 = 67초와 워커 재적재 31초 + 추론 11초 = 42초를 덮는 값이다 - 짧으면(25초, 40초) 추론 중인 요청을 끊어 멀쩡한 워커를 죽이고 재전송이 새 워커를 또 죽이는 연쇄가 된다 (Codex 리뷰 P1, 실제 어댑터로 재현). 두 시나리오를 각각 덮을 뿐 합(97.6초)은 덮지 않는다 - 그때는 backend 회로 차단기가 연속 5회 실패에서 열려 호출을 멈추므로 연쇄가 자기수렴한다 (KAN-28) |
 
 같은 티켓에서 backend의 읽기 타임아웃은 재전송하지 않게 바꿨다 (`ANALYSIS_TIMEOUT` 즉시 종결 -
 연결 실패와 5xx만 2회 재전송). 폴링 혼잡 임계치는 30에서 6(AI 1분 처리량)으로, 디스패처 큐 용량은
@@ -1395,8 +1401,24 @@ KAN-57의 c7i.xlarge 실측(bf16 + MFA `align_one`, 1건 P50 10.1초, P95 11.1�
 
 **`dispatch-concurrency`는 전역 상한이 아니다** (Codex sol 리뷰 P1). 태스크 하나가 보내는
 동시 호출만 묶으므로, 오토스케일링(최대 3, KAN-168)이나 롤링 배포로 태스크가 둘 이상 뜨면
-그만큼 AI에 동시에 들어간다. AI는 추론을 한 번에 하나만 돌리므로 뒤에 온 요청은 AI 안에서
-기다리다 backend의 읽기 타임아웃에 걸리고, 그 실패가 연속 5회면 회로가 열린다 (KAN-28).
+그만큼 AI에 동시에 들어간다. AI는 호스트마다 추론을 한 번에 하나만 돌리므로 AI 대수를 넘는 요청은
+AI 안에서 기다리고, 그 대기가 AI 상한(75초)을 넘으면 503으로 끊겨 backend가 재전송한다. 그 실패가
+연속 5회면 회로가 열린다 (KAN-28).
+
+한 호스트에 겹치는 호출 수는 "태스크 수 x 3 / AI 대수"다 (KAN-272, 값의 근거는 `modules/config/main.tf`).
+
+| backend 태스크 | AI 1대에 겹치는 호출 | 맨 뒤 요청의 소요 | AI 상한 75초 |
+| --- | --- | --- | --- |
+| 1 (평시) | 3 | 약 33초 | 안 |
+| 2 (롤링 배포 중) | 6 | 약 67초 | 안 |
+| 3 (backend 스케일아웃) | 9 | 약 100초 | 밖. AI가 2대면 약 50초로 안이다 |
+
+상한 밖 구간에서 일곱 번째 요청을 그대로 추론에 넣으면 66.6초에 시작해 **추론 도중** 75초 상한에 걸리고,
+그 취소가 멀쩡한 워커를 죽여 재적재 31초가 뒤 요청까지 민다. 그래서 AI는 lock을 잡은 시점에 상한까지 남은
+시간이 여유분(기본 15초, `ACCENTURY_AI_INFERENCE_RESERVE_SECONDS`)보다 적으면 추론을 시작하지 않고 429로
+돌려준다 (KAN-272, `ai/app/track1.py`의 `_require_inference_budget`). 추론 전 거절이라 backend는 시도 예산을
+깎지 않고 재전송 예산(2회) 안에서 다시 보내고, 다 쓰면 `ANALYSIS_UNAVAILABLE`로 종결해 재업로드를 연다.
+AI 로그의 `과부하로 추론 전 거절`이 이 경우다 - 보이면 한 호스트에 호출이 너무 많이 겹친 것이다.
 
 기다리는 요청이 **도는 추론을 방해하지는 않는다** - 취소는 자기 차례를 기다리는 지점에서
 끊기고 워커를 죽이지 않는다 (`ai/app/track1.py`). 그래서 증상은 "느려지고 일부가 재전송된다"
@@ -1949,13 +1971,19 @@ CloudWatch 표준 경보는 개당 월 0.10달러, 지표 math 경보(`alb-5xx`)
 | 로그 그룹 1개 | `/accentury/{env}/ai` (KAN-203, 아래 "ai 컨테이너 로그"). backend `/accentury/{env}/backend`는 KAN-165가 만든다 |
 
 경보는 앞 절과 **같은 SNS 토픽**으로 간다. 심각도별 채널을 나누지 않는다 - 3인 팀에 채널이
-여럿이면 어느 쪽도 보지 않게 된다. 모듈 출력 `alarm_names`가 12종 전부를 준다.
+여럿이면 어느 쪽도 보지 않게 된다. 모듈 출력 `alarm_names`가 경보 전부를 준다 (KAN-272 뒤 14종).
 
 | 경보 | 지표 | 조건 | 결측 처리 |
 | --- | --- | --- | --- |
 | `ai-temp-residue` | `accentury/ai` `TempFiles` (차원 env) | 5분 최대 >= 20이 2회 연속 | `notBreaching` |
 | `analysis-backlog-high` | `accentury/backend` `accentury.analysis.processing.value` | 1분 최대 >= 60이 5회 연속 | `notBreaching` |
 | `analysis-timeouts-high` | `accentury.analysis.timeouts.count`의 두 사유(stuck, lost) 합 | 5분 합계 > 5 | `notBreaching` |
+| `analysis-unscorable-high` (KAN-272) | `accentury.analysis.judged.count`의 `reason=unscorable` | 5분 합계 > 5 | `notBreaching` |
+
+`analysis-unscorable-high`는 KAN-272에서 더했다. AI가 분석 결과에 NaN을 내는 경우(`ANALYSIS_UNSCORABLE`)는
+계약대로 온 판정이라 회로에 실패로 세지 않고 사용자에게 재녹음만 열린다 - 모델이나 참조 데이터 회귀로 모든
+발화가 그렇게 되어도 다른 경보는 울지 않는다. 울면 AI 로그의 `채점 불가`(어느 값인지 `fields`, 어느 문장인지
+`scriptKey`와 `testVersion`)와 backend 로그의 `채점 불가 판정`을 본다.
 
 셋 다 결측을 장애로 세지 않는다. backend가 죽어 지표가 끊기는 것은 `no-healthy-target`이,
 AI 호스트가 죽는 것은 `ai-unhealthy`가 이미 잡는다 - 같은 사건에 메일 세 통을 보내지 않는다.
@@ -2150,6 +2178,8 @@ NFR-PF-01 판단에 안전한 쪽을 택한 것이고, 표본이 작은 새 태�
 0.40달러(`analysis-timeouts-high`는 지표 2개를 세는 math 경보라 0.20달러)다. 29개의 내역은
 `docs/wiki/observability.md`의 수집 경로 절에 표로 있다. 대시보드는 계정당
 3개까지 무료라 이 하나는 요금이 없다. 두 환경 합산 월 18달러 안팎이 늘어난다.
+KAN-272가 지표 3개(`accentury.analysis.judged`의 사유 셋)와 경보 1종(`analysis-unscorable-high`)을
+더해 환경당 월 약 1달러가 는다.
 
 ai 컨테이너 로그(KAN-203)는 요금이 수집량에 붙는다. 이 컨테이너가 남기는 것은 기동 줄 몇 개와
 요청당 종료 줄 한 줄(uvicorn 접근 로그 포함 두어 줄)이라, 하루 수백 문항 수준에서는 월 1MB대이고
@@ -2487,7 +2517,7 @@ terraform destroy
     세션, 완료)
   - AI 회로 차단기 (`AiCircuitBreaker`: 닫힘/열림/반열림 상태, 연속 실패 카운터)
   - pollAfterMs 혼잡 판정 (진행 중 AI 전달 건수 임계치)
-  - 분석 디스패처 풀 (`dispatch-concurrency` 4워커의 인메모리 큐)
+  - 분석 디스패처 풀 (`dispatch-concurrency` 3워커의 인메모리 큐)
 
   ai는 임시 디렉터리 하나를 프로세스 하나가 전용으로 쓴다 (KAN-27). 워커를
   늘리면 기동 시 잔여물 정리가 형제 워커의 처리 중 오디오를 지운다.
