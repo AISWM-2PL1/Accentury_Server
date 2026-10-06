@@ -304,7 +304,7 @@ public record AccenturyProperties(Session session,
 
     /**
      * 학습 음성 수집 (KAN-201, KAN-269, {@code training} 패키지). 두 환경이 음성 전용 버킷 하나를 접두로 나눠 쓰고,
-     * 음성 저장에 선택 동의한 세션만 남긴다.
+     * 음성은 음성 저장에 선택 동의한 세션만 남긴다. 동의하지 않은 익명 세션은 음성 없이 라벨 JSON만 남긴다 (KAN-274).
      *
      * @param bucket         음성 WAV와 라벨 JSON을 넣을 S3 버킷 이름. <b>미설정이 기본값이고, 그러면 S3 클라이언트도
      *                       저장 빈도 만들어지지 않는다</b> - 로컬과 테스트가 이 상태다. 배포에서는 SSM

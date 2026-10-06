@@ -96,7 +96,8 @@ public final class ServiceMetrics {
     // ---- 학습 데이터 (S3TrainingSampleStore, 수집을 켠 환경 한정) ----
 
     /**
-     * 학습 샘플 저장 시도 수 - 태그 {@code result}는 {@code saved} | {@code failed} | {@code skipped}다 (KAN-201).
+     * 학습 샘플 저장 시도 수 - 태그 {@code result}는 {@code saved} | {@code label_saved} | {@code failed} |
+     * {@code skipped}다 (KAN-201). {@code label_saved}는 동의하지 않은 익명 세션의 라벨 전용 저장이고 (KAN-274),
      * {@code skipped}는 업로드와 저장 사이에 동의가 철회된 건이다 (KAN-269).
      * 실패는 분석 결과에 영향을 주지 않으므로 이 지표와 WARN 로그가 유일한 신호다.
      */
