@@ -60,6 +60,8 @@ create table word_attempt_answer (
 -- 횟수와 시각을 갱신한다. 복습 API(M9, 범위 밖)가 읽을 자리라 시도가 아니라 계정에 매달고, 시도 행을
 -- 지워도 남는다 - 탈퇴 때만 계정 파기와 같은 트랜잭션에서 지운다 (§3.14). 나중에 맞혀도 지우지 않는다 -
 -- 복습 큐에서 빼는 규칙은 복습 티켓이 정한다. set_id는 복습 화면이 세트로 되돌아갈 때 쓰는 사본이다.
+-- 발행본 FK는 시도 테이블과 같은 이유다 - 복습 API가 이 행의 문항을 발행본에서 찾으므로, 발행되지 않은 버전의
+-- 오답이 들어오면 복습이 그 행에서 깨진다 (PR #30 리뷰).
 create table word_wrong_answer (
     id              varchar(40) not null,
     user_id         uuid        not null,
@@ -71,5 +73,7 @@ create table word_wrong_answer (
     last_wrong_at   timestamp(6) with time zone not null,
     constraint pk_word_wrong_answer primary key (id),
     constraint fk_word_wrong_answer_user foreign key (user_id) references app_user (id),
+    constraint fk_word_wrong_answer_definition foreign key (content_version)
+        references word_learning_definition (content_version),
     constraint ux_word_wrong_answer_user_item unique (user_id, content_version, item_id)
 );
