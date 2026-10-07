@@ -2,6 +2,7 @@ package app.accentury.backend.auth;
 
 import app.accentury.backend.common.ApiException;
 import app.accentury.backend.common.ErrorCode;
+import app.accentury.backend.learning.WordLearningRecords;
 import app.accentury.backend.session.TestSessionRepository;
 import org.jspecify.annotations.Nullable;
 import org.slf4j.Logger;
@@ -17,7 +18,7 @@ import java.time.Instant;
  * 순서: 계정 파기(한 트랜잭션) → Refresh 전부 폐기 → 애플 토큰 revoke. 앞이 필수이고 뒤 둘은 최선이다.
  * <ol>
  *   <li><b>계정 파기</b> - 계정 행을 잠그고 PII 열을 null로 덮은 뒤 {@code deleted_at}을 찍고({@link AppUser#withdraw}),
- *       그 계정 세션의 {@code user_id}를 끊는다. 커밋되는 순간 같은 Access는 {@code findActive}가 거절하고(블랙리스트
+ *       그 계정 세션의 {@code user_id}를 끊고, 단어 학습 기록(시도, 답안, 오답)을 지운다 (KAN-265, §3.16). 커밋되는 순간 같은 Access는 {@code findActive}가 거절하고(블랙리스트
  *       없이, INFO-2), 같은 Refresh도 회전 뒤 계정 확인에서 거절된다 ({@code AuthService.refresh}).</li>
  *   <li><b>Refresh 폐기</b> - 모든 기기의 패밀리를 Redis에서 지운다. 위 계정 확인이 이미 막으므로 여기가 실패해도(Redis
  *       장애) 탈퇴는 성공으로 답하고 WARN만 남긴다 - 남은 키는 30일 TTL로 사라진다. 커밋 뒤에 503을 내면 앱이 재시도하고,
@@ -33,20 +34,23 @@ public class WithdrawalService {
 
     private final AppUserRepository users;
     private final TestSessionRepository sessions;
+    private final WordLearningRecords learningRecords;
     private final RefreshTokens refreshTokens;
     private final AppleTokenRevoker appleTokenRevoker;
     private final TransactionTemplate transactionTemplate;
 
-    WithdrawalService(AppUserRepository users, TestSessionRepository sessions, RefreshTokens refreshTokens,
-                      AppleTokenRevoker appleTokenRevoker, TransactionTemplate transactionTemplate) {
+    WithdrawalService(AppUserRepository users, TestSessionRepository sessions, WordLearningRecords learningRecords,
+                      RefreshTokens refreshTokens, AppleTokenRevoker appleTokenRevoker,
+                      TransactionTemplate transactionTemplate) {
         this.users = users;
         this.sessions = sessions;
+        this.learningRecords = learningRecords;
         this.refreshTokens = refreshTokens;
         this.appleTokenRevoker = appleTokenRevoker;
         this.transactionTemplate = transactionTemplate;
     }
 
-    private record Withdrawn(Provider provider, String subject, int detachedSessions) {
+    private record Withdrawn(Provider provider, String subject, int detachedSessions, int purgedLearningRecords) {
     }
 
     /**
@@ -62,13 +66,15 @@ public class WithdrawalService {
             String subject = locked.providerUserId();
             locked.withdraw(Instant.now());
             int detached = sessions.detachUser(locked.id());
-            return new Withdrawn(locked.provider(), subject, detached);
+            // 학습 기록은 세션과 달리 귀속만 끊지 않고 지운다 - 계정 없이는 의미가 없는 개인 기록이다 (§5.5).
+            int purged = learningRecords.purge(locked.id());
+            return new Withdrawn(locked.provider(), subject, detached, purged);
         });
         if (withdrawn == null) {
             throw new IllegalStateException("탈퇴 트랜잭션이 결과 없이 끝났다");
         }
-        log.info("탈퇴 userId={} provider={} detachedSessions={}", user.id(), withdrawn.provider(),
-                withdrawn.detachedSessions());
+        log.info("탈퇴 userId={} provider={} detachedSessions={} purgedLearningRecords={}", user.id(),
+                withdrawn.provider(), withdrawn.detachedSessions(), withdrawn.purgedLearningRecords());
 
         try {
             long revoked = refreshTokens.revokeAll(user.id());
