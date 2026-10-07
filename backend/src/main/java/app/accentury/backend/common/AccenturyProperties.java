@@ -31,6 +31,7 @@ import java.util.Map;
  * @param feedback       결과 화면 이용 후기의 요청 제한과 보존 기간 (KAN-211)
  * @param training       staging 전용 학습 데이터 S3 (KAN-201) - 버킷이 없으면 저장 코드가 호출되지 않는다.
  * @param auth           앱 계정 인증 (KAN-223) - Access JWT, Refresh 회전, IdP 검증 설정
+ * @param learning       단어 학습 API의 요청 제한 (KAN-265)
  * @param trustedProxies 요청 제한의 기준 IP를 정할 때 신뢰하는 프록시 대역 (KAN-28, §2.5).
  *                       CIDR 또는 단일 IP 목록이고, 직접 접속한 상대가 이 목록에 들어야만
  *                       {@code X-Forwarded-For}를 읽는다. 비어 있으면 헤더를 무시하고 접속 IP만
@@ -48,6 +49,7 @@ public record AccenturyProperties(Session session,
                                   @DefaultValue Feedback feedback,
                                   @DefaultValue Training training,
                                   @DefaultValue Auth auth,
+                                  @DefaultValue Learning learning,
                                   @DefaultValue List<String> trustedProxies) {
 
     /**
@@ -402,6 +404,16 @@ public record AccenturyProperties(Session session,
 
         /** 게시 중인 개인정보처리방침 버전 - privacy.html의 {@code accentury-policy-version} 메타와 같은 값이다 (KAN-240). */
         public static final String PRIVACY_POLICY_VERSION = "2026-10-04";
+    }
+
+    /**
+     * 단어 학습 (KAN-265, {@code learning} 패키지, 명세서 §3.16).
+     *
+     * @param rateLimitPerMinute 계정당 분당 쓰기 요청(시도 시작, 답안, 완료 - 한 통) 허용 횟수 (§2.5). 정상은
+     *                           세트 하나에 시도 1 + 답안 10 이하 + 완료 1이라 어휘 답안(60)과 같은 여유 배수다.
+     *                           목록과 상세 조회는 제한하지 않는다.
+     */
+    public record Learning(@DefaultValue("60") int rateLimitPerMinute) {
     }
 
     /**

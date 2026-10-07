@@ -46,6 +46,6 @@ class AuthConfigTest {
                 Duration.ofSeconds(5), a.privacyPolicyVersion());
         return new AccenturyProperties(base.session(), base.analysis(), base.upload(), base.vocab(), base.completion(),
                 base.cors(), base.result(), base.analytics(), base.admin(), base.share(), base.feedback(),
-                base.training(), auth, base.trustedProxies());
+                base.training(), auth, base.learning(), base.trustedProxies());
     }
 }

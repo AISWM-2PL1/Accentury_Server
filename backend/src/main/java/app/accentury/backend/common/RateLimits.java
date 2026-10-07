@@ -56,7 +56,7 @@ public class RateLimits {
     /**
      * 제한 축 - 이름이 곧 "무엇을 무엇으로 세는가"다.
      * <p>
-     * {@link #axis()}는 그 "무엇으로"의 두 갈래(IP인가 세션인가)이고, 429 지표의 태그로 나간다
+     * {@link #axis()}는 그 "무엇으로"의 세 갈래(IP인가 세션인가 계정인가)이고, 429 지표의 태그로 나간다
      * (KAN-38 AC "429 발생률을 세션별, IP별로 구분해 볼 수 있다"). 세션 ID나 IP 자체를 태그로
      * 쓰지 않는 이유는 {@link ServiceMetrics}에 있다 - 값이 열려 있으면 요금이 트래픽에 비례한다.
      */
@@ -74,7 +74,12 @@ public class RateLimits {
         /** 이용 후기 - 세션당 (KAN-211) */
         FEEDBACK("session"),
         /** 로그인과 refresh - IP당, 두 경로가 한 통 (§2.5, KAN-223). 인증 없는 경로라 IP가 유일한 키다. */
-        AUTH("ip");
+        AUTH("ip"),
+        /**
+         * 단어 학습의 쓰기 세 경로(시도 시작, 답안, 완료) - 계정당, 한 통 (§2.5, §3.16, KAN-265). Access 토큰
+         * 뒤의 경로라 세션이 아니라 계정 id가 키다 - 학습에는 세션이 없다. 축 이름이 셋째인 {@code user}다.
+         */
+        WORD_LEARNING("user");
 
         private final String axis;
 
@@ -82,7 +87,7 @@ public class RateLimits {
             this.axis = axis;
         }
 
-        /** 이 축이 무엇을 키로 세는가 - {@code ip} 또는 {@code session}. */
+        /** 이 축이 무엇을 키로 세는가 - {@code ip}, {@code session}, {@code user}(계정, KAN-265). */
         public String axis() {
             return axis;
         }
@@ -133,7 +138,8 @@ public class RateLimits {
                 Scope.VOCAB_ANSWER, properties.vocab().rateLimitPerMinute(),
                 Scope.COMPLETE, properties.completion().rateLimitPerMinute(),
                 Scope.FEEDBACK, properties.feedback().rateLimitPerMinute(),
-                Scope.AUTH, properties.auth().rateLimitPerMinute());
+                Scope.AUTH, properties.auth().rateLimitPerMinute(),
+                Scope.WORD_LEARNING, properties.learning().rateLimitPerMinute());
     }
 
     /**

@@ -142,6 +142,8 @@ public final class PropertiesFixture {
                 new AccenturyProperties.Training(null, null, null,
                         AccenturyProperties.Training.VOICE_CONSENT_VERSION),
                 auth(),
+                // 단어 학습 요청 제한은 main 기본값 그대로다 (KAN-265).
+                new AccenturyProperties.Learning(60),
                 trustedProxies);
     }
 }
