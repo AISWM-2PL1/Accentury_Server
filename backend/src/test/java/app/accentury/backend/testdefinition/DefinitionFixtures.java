@@ -56,8 +56,9 @@ final class DefinitionFixtures {
     }
 
     static TestDefinition.Item voice(String itemId, int seq) {
-        // 허용 밴드는 required (2026-08-09 확정) - values와 같은 길이의 상한과 하한
-        return new TestDefinition.Item(itemId, seq, TestDefinition.ItemType.VOICE, "밥 뭇나?",
+        // 허용 밴드는 required (2026-08-09 확정) - values와 같은 길이의 상한과 하한.
+        // 문구에 itemId를 붙이는 것은 세트 안 중복 문구가 발행 거부라서다 (KAN-276).
+        return new TestDefinition.Item(itemId, seq, TestDefinition.ItemType.VOICE, "밥 뭇나? " + itemId,
                 guideF0("semitone", 10, 3), null, null);
     }
 
@@ -68,7 +69,7 @@ final class DefinitionFixtures {
                 new TestDefinition.Choice(itemId + "c", "쑥갓"),
                 new TestDefinition.Choice(itemId + "d", "시금치"));
         return new TestDefinition.Item(itemId, seq, TestDefinition.ItemType.VOCABULARY,
-                "'정구지'는 표준어로 무엇일까요?", null, choices, itemId + "a");
+                "'정구지'는 표준어로 무엇일까요? " + itemId, null, choices, itemId + "a");
     }
 
     static TestDefinition.GuideF0 guideF0(String unit, int frameIntervalMs, int length) {

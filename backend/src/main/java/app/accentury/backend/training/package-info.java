@@ -6,6 +6,10 @@
  * 동의는 앱이면 계정에, 웹 익명이면 세션에 기록하고({@link app.accentury.backend.training.VoiceConsents}),
  * 동의하지 않아도 테스트 이용에는 제한이 없다. staging과 prod가 음성 전용 버킷 하나를 환경 접두로 나눠 쓴다.
  * <p>
+ * 동의하지 않은 세션은 음성 없이 라벨 JSON(점수와 출신 지역)만 {@code _no-audio} 트리에 남긴다 (KAN-274, 계정 세션은
+ * KAN-276부터). 레벨테스트 단어 답안의 정오도 동의와 상관없이 같은 트리에 남긴다
+ * ({@link app.accentury.backend.training.VocabAnswerSampleStore}, KAN-276 - 단어 난이도 측정).
+ * <p>
  * 계정 세션의 음성은 대응표({@link app.accentury.backend.training.TrainingVoiceOwners})로 계정까지 이어진다 -
  * 철회나 탈퇴 때 그 계정의 음성을 찾기 위해서다. 저장된 객체를 지우는 코드는 이 패키지에 없다.
  * <p>

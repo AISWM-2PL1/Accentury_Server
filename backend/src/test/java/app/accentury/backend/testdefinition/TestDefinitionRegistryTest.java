@@ -118,6 +118,22 @@ class TestDefinitionRegistryTest {
     }
 
     @Test
+    void 한_세트_안에_같은_문구가_두_번_들어가면_발행_거부다() {
+        // KAN-276 - itemId가 달라도 문장이나 낱말이 같으면 세트 안 중복이다. 세트 1은 v1, v2, w1, v3, w2, w3, w4다.
+        assertRejected(withItem(pool(3, 4, "VVWVWWW"), "v2", item -> new TestDefinition.Item(item.itemId(),
+                item.seq(), item.type(), "밥 뭇나? v1", item.guideF0(), null, null)), "세트 1 안에 같은 문구");
+        assertRejected(withItem(pool(3, 4, "VVWVWWW"), "w4", item -> new TestDefinition.Item(item.itemId(),
+                item.seq(), item.type(), "'정구지'는 표준어로 무엇일까요? w1", null, item.choices(),
+                item.correctChoiceId())), "세트 1 안에 같은 문구");
+    }
+
+    @Test
+    void 작은_풀이_되풀이돼도_세트_안에서_겹치지_않으면_발행된다() {
+        // 음성 124 + 어휘 72(gn-2026.10.2 크기) - 어휘 풀이 세트 19부터 처음으로 돌아간다.
+        TestDefinitionRegistry.validate(pool(124, 72, "VVWVWWW"));
+    }
+
+    @Test
     void 어휘_풀이_5개를_넘는_정의는_발행된다() {
         // 2026-09-04 - 세트 29개에 어휘 5문항이 고정이면 어느 세트나 같은 어휘를 본다.
         List<TestDefinition.Item> items = new ArrayList<>(valid().items());

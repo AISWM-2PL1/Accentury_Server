@@ -20,11 +20,11 @@ import java.util.Map;
 /**
  * 학습 샘플을 S3 버킷에 WAV 1개 + 메타 JSON 1개로 보존한다 (KAN-201 객체 규약, KAN-269).
  * <p>
- * 음성까지 남기는 샘플은 전부 음성 저장에 동의한 세션의 것이다. 동의가 없는 익명 세션의 요청은 호출부
- * ({@code HttpAnalysisDispatcher})가 음성을 뺀 <b>라벨 전용</b> 샘플로 만들어 넘기고 (KAN-274), 여기서는 메타 JSON
- * 하나만 {@code <env>/_no-audio/<region>/...} 아래에 쓴다. 음성 트리와 접두를 갈라 「음성 트리의 칸은 언제나 WAV와
- * JSON 한 쌍」이라는 규약을 지킨다 - 같은 트리에 JSON만 있는 칸이 섞이면 학습 쪽이 JSON을 보고 없는 WAV를 찾는다.
- * 동의가 없는 계정 세션의 요청은 호출부가 샘플을 만들지 않는다.
+ * 음성까지 남기는 샘플은 전부 음성 저장에 동의한 세션의 것이다. 동의가 없는 세션의 요청은 호출부
+ * ({@code HttpAnalysisDispatcher})가 음성을 뺀 <b>라벨 전용</b> 샘플로 만들어 넘기고 (KAN-274, 계정 세션은 KAN-276부터),
+ * 여기서는 메타 JSON 하나만 {@code <env>/_no-audio/<region>/...} 아래에 쓴다. 음성 트리와 접두를 갈라 「음성 트리의
+ * 칸은 언제나 WAV와 JSON 한 쌍」이라는 규약을 지킨다 - 같은 트리에 JSON만 있는 칸이 섞이면 학습 쪽이 JSON을 보고
+ * 없는 WAV를 찾는다. 단어 답안의 정오도 같은 트리에 JSON 하나로 쓴다 ({@link VocabAnswerSampleStore}, KAN-276).
  * <p>
  * 키는 {@code <env>/<region>/<testVersion>/<sessionId>/<itemId>/<analysisJobId>.wav|.json}이다. 첫 조각은
  * 환경 접두({@code staging}, {@code prod})다 - 두 환경이 음성 전용 버킷 하나를 나눠 쓰고, 태스크 역할은 자기
@@ -167,6 +167,9 @@ public class S3TrainingSampleStore implements TrainingSampleStore {
      * 키를 잃어도 자립한다. 동의 버전과 동의 시각도 싣는다 (KAN-269) - 익명 세션의 동의 기록은 세션 행과 함께
      * 만료 삭제되므로 음성 옆의 이 값이 동의 증빙이다. 소유 계정 id는 싣지 않는다 (대응표에만 있다).
      * <p>
+     * {@code itemType}은 늘 VOICE다 (KAN-276) - 같은 {@code _no-audio} 트리에 단어 정오(VOCABULARY)가 함께 쌓여
+     * 한 테이블에서 가르기 위해서다. 이 키가 없는 옛 JSON은 전부 음성이다.
+     * <p>
      * {@code audioStored}는 이 JSON 옆에 WAV가 있는가다 (KAN-274). 라벨 전용 건은 false이고 동의 버전과 동의 시각 키가
      * 없다. 이 키가 없는 옛 JSON(KAN-274 이전)은 전부 음성이 있는 건이다.
      */
@@ -179,6 +182,7 @@ public class S3TrainingSampleStore implements TrainingSampleStore {
         putIfPresent(body, "scriptKey", sample.scriptKey());
         body.put("testVersion", sample.testVersion());
         body.put("scoreVersion", sample.scoreVersion());
+        body.put("itemType", "VOICE");
         body.put("durationMs", sample.durationMs());
         body.put("outcome", sample.outcome().name());
         putIfPresent(body, "intonationScore", sample.intonationScore());
