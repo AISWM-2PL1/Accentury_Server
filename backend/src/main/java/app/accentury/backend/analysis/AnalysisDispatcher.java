@@ -104,9 +104,9 @@ public interface AnalysisDispatcher {
      * @param voiceConsent 이 세션의 음성 저장 동의 (KAN-269, {@code VoiceConsents}) - AI에는 가지 않고 학습 데이터
      *                  저장만 읽는다. null이면 동의가 없는 세션이고 음성은 어디에도 남지 않는다.
      * @param labelOnlyWithoutConsent 동의가 없을 때 음성 없이 라벨 JSON(점수와 출신 지역)만 남길 세션인가 (KAN-274) -
-     *                  AI에는 가지 않고 학습 데이터 저장만 읽는다. 계정에 묶이지 않은 익명 세션이면서 실사용자
-     *                  트래픽일 때만 true다. 계정 세션과 합성 트래픽(배포 스모크) 세션은 false이고, 동의가
-     *                  없으면 아무것도 남기지 않는다.
+     *                  AI에는 가지 않고 학습 데이터 저장만 읽는다. 실사용자 트래픽이면 익명과 계정 세션 모두 true다
+     *                  (계정 세션은 KAN-276부터). 합성 트래픽(배포 스모크) 세션은 false이고, 동의가 없으면 아무것도
+     *                  남기지 않는다.
      * @param audio     WAV 원본 - 클라이언트 업로드를 그대로 패스스루한다 (§4.1).
      *                  소유권은 {@code dispatch()}로 넘어간다 (위 계약 참조).
      */

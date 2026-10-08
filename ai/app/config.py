@@ -112,6 +112,8 @@ class Settings:
     track1_load_timeout_seconds: float = DEFAULT_TRACK1_LOAD_TIMEOUT_SECONDS
     #: 가짜 엔진(:mod:`app.fake`)이 판정 실패를 내는 itemId - E2E의 실패 갈래 수단. ``None``이면 없다
     fake_fail_item: str | None = None
+    #: 위 문항을 처음 몇 번만 실패시킬지 (KAN-271, :mod:`app.fake`). ``None``이면 언제나 실패한다
+    fake_fail_times: int | None = None
     #: 가짜 엔진의 응답 지연 (ms)
     fake_delay_ms: int = DEFAULT_FAKE_DELAY_MS
     #: backend와 나눠 갖는 내부 호출 시크릿 (KAN-36, :mod:`app.auth`). 비어 있으면 검사를
@@ -162,6 +164,7 @@ class Settings:
                 )
             ),
             fake_fail_item=source.get("ACCENTURY_AI_FAKE_FAIL_ITEM") or None,
+            fake_fail_times=_optional_positive_int(source.get("ACCENTURY_AI_FAKE_FAIL_TIMES")),
             fake_delay_ms=int(source.get("ACCENTURY_AI_FAKE_DELAY_MS", DEFAULT_FAKE_DELAY_MS)),
             internal_token=source.get("ACCENTURY_AI_INTERNAL_TOKEN") or None,
             internal_token_required=_truthy(source.get("ACCENTURY_AI_INTERNAL_TOKEN_REQUIRED")),
@@ -171,6 +174,16 @@ class Settings:
 def _optional_path(value: str | None) -> Path | None:
     """비어 있으면 ``None`` - "전달본의 기본값을 쓴다"는 뜻이다."""
     return Path(value) if value else None
+
+
+def _optional_positive_int(value: str | None) -> int | None:
+    """비어 있으면 ``None``. 0이나 음수는 기동을 세운다 - "0번 실패"를 조용히 "언제나 실패"로 읽지 않는다."""
+    if not value:
+        return None
+    number = int(value)
+    if number < 1:
+        raise ValueError(f"양의 정수여야 한다: {value!r}")
+    return number
 
 
 def _truthy(value: str | None) -> bool:

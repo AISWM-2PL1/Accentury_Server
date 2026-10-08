@@ -85,6 +85,17 @@ public enum ErrorCode {
     // Refresh 저장소(Redis) 장애 - 로그인, refresh, 로그아웃만 해당하고 익명 응시는 영향이 없다 (NFR-AV-02).
     AUTH_STORE_UNAVAILABLE(HttpStatus.SERVICE_UNAVAILABLE, true, "잠시 뒤 다시 시도해 주세요."),
 
+    // === LEARNING_* : 단어 학습 (§2.4, §3.16, KAN-265)과 억양 학습 (§3.17, KAN-264) ===
+    // 세트와 시도는 계정 Access 토큰 뒤의 자원이다. 없는 세트와 없는 시도는 404이고, 남의 시도는 403이다
+    // (FR-AC-11 - 세션 불일치의 403과 같은 규칙). 완료된 시도의 제출은 409, 답안이 빠진 완료는 422다.
+    // 없는 억양 코스도 404다.
+    LEARNING_SET_NOT_FOUND(HttpStatus.NOT_FOUND, false, "없는 어휘 세트입니다."),
+    LEARNING_ATTEMPT_NOT_FOUND(HttpStatus.NOT_FOUND, false, "없는 학습 시도입니다."),
+    LEARNING_ATTEMPT_FORBIDDEN(HttpStatus.FORBIDDEN, false, "이 학습 시도에 접근할 수 없습니다."),
+    LEARNING_ATTEMPT_COMPLETED(HttpStatus.CONFLICT, false, "이미 완료한 세트입니다."),
+    LEARNING_ATTEMPT_INCOMPLETE(HttpStatus.UNPROCESSABLE_CONTENT, false, "아직 답하지 않은 문항이 있습니다."),
+    LEARNING_COURSE_NOT_FOUND(HttpStatus.NOT_FOUND, false, "없는 억양 코스입니다."),
+
     // === SHARE_* : 카카오톡 공유 웹훅 (§3.8, KAN-164) ===
     // 호출자가 앱이 아니라 카카오 서버라 ADMIN_*처럼 §2.4 밖의 별도 묶음이다. 헤더 누락, 다른 스킴,
     // 키 불일치를 구분하지 않는다 - 카카오가 아닌 호출자에게 무엇이 틀렸는지 알려 줄 이유가 없다.

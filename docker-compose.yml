@@ -51,6 +51,10 @@ services:
       # 만드는 수단이다. 평소에는 비어 있고, E2E_FAIL_ITEM=v3으로 ai만 다시 띄워 쓴다 (web/README.md).
       # 설정은 기동 시 한 번만 읽히므로(Settings.from_env) 값을 비워 다시 띄워야 복구된다.
       ACCENTURY_AI_FAKE_FAIL_ITEM: "${E2E_FAIL_ITEM:-}"
+      # 위 문항을 처음 N번만 실패시킨다 (KAN-271) - 재녹음으로 완주하는 갈래용. 비우면 언제나 실패.
+      # 요청에 세션 식별자가 없어 ai 프로세스 전역으로 세므로, N번을 쓰고 나면 ai를 다시 띄워야 또 실패한다.
+      # 예: E2E_FAIL_ITEM=v3 E2E_FAIL_TIMES=1 docker compose up -d --no-deps --wait ai
+      ACCENTURY_AI_FAKE_FAIL_TIMES: "${E2E_FAIL_TIMES:-}"
       # BE와 나눠 갖는 내부 호출 시크릿 (KAN-36). 로컬 전용 고정값 - 아래 backend의 ACCENTURY_ANALYSIS_AITOKEN과
       # 같은 값이어야 분석이 401로 끊기지 않는다. 운영 값은 Terraform이 SSM에 넣는다.
       ACCENTURY_AI_INTERNAL_TOKEN: local-internal-token-0123456789abcdef

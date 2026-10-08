@@ -69,6 +69,7 @@ class S3TrainingSampleStoreTest {
         assertEquals("1|3", meta.get("scriptKey").asString());
         assertEquals("gn-2026.09.2", meta.get("testVersion").asString());
         assertEquals("sv-0.4", meta.get("scoreVersion").asString());
+        assertEquals("VOICE", meta.get("itemType").asString(), "단어 정오 기록과 한 테이블에서 가른다 (KAN-276)");
         assertEquals(2450, meta.get("durationMs").asLong());
         assertEquals("COMPLETED", meta.get("outcome").asString());
         assertEquals(78, meta.get("intonationScore").asInt());

@@ -1,18 +1,23 @@
 package app.accentury.backend.vocab;
 
 import app.accentury.backend.analysis.AnalysisJobRepository;
+import app.accentury.backend.analytics.Traffic;
 import app.accentury.backend.common.ApiException;
 import app.accentury.backend.common.ErrorCode;
 import app.accentury.backend.common.IdempotencyKeys;
 import app.accentury.backend.common.RateLimits;
+import app.accentury.backend.session.Region;
 import app.accentury.backend.session.SessionService;
 import app.accentury.backend.session.TestSession;
 import app.accentury.backend.session.TestSessionRepository;
 import app.accentury.backend.testdefinition.TestDefinition;
 import app.accentury.backend.testdefinition.TestDefinitionRegistry;
+import app.accentury.backend.training.VocabAnswerSample;
+import app.accentury.backend.training.VocabAnswerSampleStore;
 import org.jspecify.annotations.Nullable;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.support.TransactionTemplate;
 
@@ -30,6 +35,10 @@ import java.util.UUID;
  * 잠금이 없으면 검사와 저장 사이에 완료 전이({@code /complete}, KAN-16)가 끼어들어
  * 확정된 세션에 답안이 추가된다. 같은 문항의 동시 제출도 이 잠금으로 직렬화되므로
  * (session_id, item_id) 유니크 제약은 마지막 안전망이다.
+ * <p>
+ * 새로 저장한 답안은 커밋 뒤에 정오를 S3에도 남긴다 (KAN-276, 단어 난이도 측정) - 음성 저장 동의와 상관없이 실사용자
+ * 세션이면 남기고, 배포 스모크(합성 트래픽)와 {@link VocabAnswerSampleStore#FIRST_RECORDED_VERSION} 이전 버전의
+ * 세션은 뺀다. DB의 답안은 24시간 보존 정리로 지워지므로 집계용 기록은 따로 둬야 한다.
  */
 @Service
 public class VocabAnswerService {
@@ -43,11 +52,12 @@ public class VocabAnswerService {
     private final TestSessionRepository sessionRepository;
     private final TransactionTemplate transactionTemplate;
     private final RateLimits rateLimits;
+    private final VocabAnswerSampleStore samples;
 
     public VocabAnswerService(SessionService sessionService, TestDefinitionRegistry registry,
                               VocabAnswerRepository repository, AnalysisJobRepository analysisJobRepository,
                               TestSessionRepository sessionRepository, TransactionTemplate transactionTemplate,
-                              RateLimits rateLimits) {
+                              RateLimits rateLimits, ObjectProvider<VocabAnswerSampleStore> samples) {
         this.sessionService = sessionService;
         this.registry = registry;
         this.repository = repository;
@@ -55,6 +65,7 @@ public class VocabAnswerService {
         this.sessionRepository = sessionRepository;
         this.transactionTemplate = transactionTemplate;
         this.rateLimits = rateLimits;
+        this.samples = samples.getIfAvailable(() -> VocabAnswerSampleStore.NONE);
     }
 
     VocabAnswerResponse submit(String sessionId, String itemId,
@@ -96,26 +107,48 @@ public class VocabAnswerService {
             var existing = repository.findBySessionIdAndItemId(session.id(), itemId);
             if (existing.isPresent()) {
                 requireSameReplay(existing.get(), key, choiceId);
-                return new SubmitResult(false, response(session));
+                return new SubmitResult(null, response(session));
             }
             // 정오는 저장 시점에 확정한다 - 정의가 불변이라(§5.4) 나중에 대조해도 같지만,
             // /complete(KAN-16)가 정답표를 다시 뒤지지 않고 이 행만 세면 되게 한다 (§4.3).
-            repository.save(new VocabAnswer("va_" + UUID.randomUUID(), session.id(), itemId,
+            VocabAnswer answer = repository.save(new VocabAnswer("va_" + UUID.randomUUID(), session.id(), itemId,
                     choiceId, choiceId.equals(item.correctChoiceId()), key, Instant.now()));
             // 진행도도 잠금 아래에서 읽는다 - 커밋 뒤에 읽으면 그 사이 재응시 폐기(KAN-107)가
             // 자식 행을 지워, 방금 수락한 답안의 응답이 진행도 0으로 나갈 수 있다 (2026-08-17 리뷰).
-            return new SubmitResult(true, response(session));
+            return new SubmitResult(answer, response(session));
         }));
 
-        if (result.savedNew()) {
+        VocabAnswer saved = result.saved();
+        if (saved != null) {
             // 답안 내용(choiceId/정오)은 로그에 남기지 않는다 (§2.6의 취지 - 결과 유추 차단).
             log.info("어휘 답안 저장 sessionId={} itemId={}", session.id(), itemId);
+            // 여기는 트랜잭션이 커밋된 뒤다 - 롤백된 답안이 기록으로 남지 않는다. 멱등 재전송(위의 null)은 다시 쓰지 않는다.
+            keepSample(session, item, saved);
         }
         return result.response();
     }
 
-    /** 잠금 트랜잭션의 산출물 - 저장 여부(로그용)와 잠금 아래에서 확정한 진행도 응답. */
-    private record SubmitResult(boolean savedNew, VocabAnswerResponse response) {}
+    /** 잠금 트랜잭션의 산출물 - 새로 저장한 답안(재전송이면 null)과 잠금 아래에서 확정한 진행도 응답. */
+    private record SubmitResult(@Nullable VocabAnswer saved, VocabAnswerResponse response) {}
+
+    /**
+     * 단어 정오 기록 (KAN-276). 저장소가 예외를 삼키기로 되어 있지만 한 번 더 감싼다 - 답안은 이미 커밋됐고, 기록
+     * 구현의 실수가 200 응답을 500으로 바꾸면 클라이언트가 재전송하다 409를 맞는다.
+     */
+    private void keepSample(TestSession session, TestDefinition.Item item, VocabAnswer answer) {
+        if (session.traffic() != Traffic.REAL || !VocabAnswerSampleStore.recorded(session.testVersion())) {
+            return;
+        }
+        try {
+            samples.save(new VocabAnswerSample(answer.id(), session.id(), answer.itemId(),
+                    Region.forStorage(session.region()).name(), session.testVersion(), session.scoreVersion(),
+                    answer.choiceId(), Objects.requireNonNull(item.correctChoiceId()), answer.correct(),
+                    answer.createdAt()));
+        } catch (RuntimeException e) {
+            log.warn("단어 정오 기록 저장소가 예외를 냈다 - 답안에는 영향 없음 sessionId={} itemId={}",
+                    session.id(), answer.itemId(), e);
+        }
+    }
 
     /**
      * 이미 답안이 있는 문항의 처리 - 같은 키의 동일 요청만 재전송으로 인정한다 (§5.2).

@@ -1440,11 +1440,12 @@ KAN-201에서는 staging에만 환경별 버킷(`accentury-staging-training-<계
 | 버킷 정책 | TLS가 아닌 요청 전부 거부. 객체 본문 읽기(`s3:GetObject`, `s3:GetObjectVersion`)는 `voice_reader_principal_arns`의 주체만 - 기본값은 학습 담당 IAM 사용자 `jaeyoung`, 학습용 EC2 역할 `accentury-track2-ec2-role`, 운영 담당 IAM 사용자 `accentury-cli`. 목록 밖이면 관리자 자격 증명도 본문은 못 읽는다. List, Put, Delete는 정책이 거부하지 않는다 (List를 거부하면 Terraform refresh가 잠긴다) |
 | 쓰기 권한 | backend 태스크 역할에 `arn:aws:s3:::accentury-voice-<계정 ID>/<환경>/*`로 한정한 `s3:PutObject`만 (fargate 모듈 `training_bucket_arn`, `training_key_prefix`). staging 태스크는 `prod/` 아래에 쓰지 못한다. Get, List, Delete 없음 |
 | 스위치 | SSM `ACCENTURY_TRAINING_BUCKET` -> `accentury.training.bucket`, `ACCENTURY_TRAINING_KEYPREFIX` -> `accentury.training.key-prefix`. 버킷 값이 없으면 backend는 S3 클라이언트도 저장 빈도 만들지 않는다 (`TrainingConfig`) |
-| 저장 대상 | 음성까지 남기는 것은 음성 저장에 동의한 세션만. 동의하지 않은 익명 세션(웹, 로그인을 끈 앱)은 음성 없이 메타 JSON만 남긴다 (KAN-274). 동의하지 않은 계정 세션과 합성 트래픽 세션(관리자 토큰으로 만드는 배포 스모크)은 아무것도 남기지 않는다. 판정은 backend가 한다 |
+| 저장 대상 | 음성까지 남기는 것은 음성 저장에 동의한 세션만. 동의하지 않은 세션은 음성 없이 메타 JSON만 남긴다 (KAN-274는 익명 세션만, KAN-276부터 계정 세션도. 계정 id와 대응표는 쓰지 않는다). 합성 트래픽 세션(관리자 토큰으로 만드는 배포 스모크)은 아무것도 남기지 않는다. 판정은 backend가 한다 |
 | 저장 시점 | 분석 상태 전이가 끝난 뒤, 오디오 버퍼 파기 전 (`HttpAnalysisDispatcher`). 성공과 판정 실패 모두, 계약 위반과 AI 불가는 제외 |
 | 키 | `<환경>/<region>/<testVersion>/<sessionId>/<itemId>/<analysisJobId>.wav` 와 `.json` (region은 세션 생성 요청의 출신 지역 코드 10개 중 하나 또는 `UNKNOWN`) |
 | 음성 없는 건의 키 | `<환경>/_no-audio/<region>/<testVersion>/<sessionId>/<itemId>/<analysisJobId>.json` 하나 (KAN-274). 음성 트리의 칸이 언제나 WAV와 JSON 한 쌍이도록 접두를 갈랐다. 환경 접두 아래라 태스크 역할의 쓰기 권한이 그대로다. JSON의 `audioStored`가 false이고 동의 버전과 동의 시각 키가 없다 |
-| 실패 | 삼킨다 - WARN 로그 1줄 + 지표 `accentury.training.samples`(result=failed). 분석 결과와 상태 조회에 영향 없음. 성공은 result=saved(음성과 메타), result=label_saved(메타만)로 갈린다 |
+| 단어 정오 기록 | 레벨테스트 단어 답안 1건마다 `<환경>/_no-audio/<region>/<testVersion>/<sessionId>/<itemId>/<answerId>.json` 하나 (KAN-276, 단어 난이도 측정). 동의와 상관없이 실사용자 세션이고 `gn-2026.10.2`와 그 뒤 버전만. 답안 커밋 뒤 전용 실행기로 비동기 저장(`S3VocabAnswerSampleStore`). 음성 메타 JSON과 같은 트리라 `itemType`(VOICE, VOCABULARY)으로 가른다. 쓰기 권한은 위와 같은 환경 접두라 IAM 변경이 없다 |
+| 실패 | 삼킨다 - WARN 로그 1줄 + 지표 `accentury.training.samples`(result=failed). 분석 결과, 상태 조회, 답안 응답에 영향 없음. 성공은 result=saved(음성과 메타), result=label_saved(메타만), result=vocab_saved(단어 정오)로 갈린다 |
 
 **음성은 Terraform이 지우지 않는다.** 버킷이 환경 스택 밖(bootstrap)에 있어 환경 destroy나 스위치 끄기가 버킷을
 건드리지 못하고, bootstrap에서도 `prevent_destroy`라 버킷을 지우는 plan은 실패한다. 만료 규칙이 없어 S3가 알아서

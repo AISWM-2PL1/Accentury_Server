@@ -10,6 +10,13 @@ RSS 7GB대라 개발 기계와 CI 러너에서 뜨지 않는다. 스텁을 지�
 **추론이 아니다.** 오디오는 파일이 있는지만 만지고 한 바이트도 보지 않는다. 점수는
 ``correlationId``의 해시라 같은 요청은 언제나 같은 점수이고(BE 재전송 멱등, E2E 재현성),
 0~100을 고르게 덮어 5등급이 전부 관측된다 (결과 화면을 등급마다 볼 수 있어야 한다).
+
+실패 문항(``fake_fail_item``)은 기본이 "언제나 실패"이고, ``fake_fail_times``=N이면 그 문항의
+**처음 N번만** 실패시킨다 (KAN-271) - 재녹음으로 완주하는 갈래를 E2E가 볼 수 있어야 한다.
+요청 meta(§4.1)에 세션을 가를 필드가 없어 횟수는 **프로세스 전역**으로 센다. 한 세션이 N번을
+다 쓰면 다음 세션은 실패 없이 지나가니, 다시 실패시키려면 ai를 다시 띄운다. 같은 요청의
+재전송(BE ``analyzeWithRetry``는 같은 ``correlationId``로 다시 보낸다)은 처음 판정을 그대로
+돌려줘 횟수를 두 번 깎지 않는다 - 위의 멱등이 실패 판정에도 지켜진다.
 """
 
 from __future__ import annotations
@@ -39,6 +46,10 @@ class FakeEngine:
             )
         self._delay_seconds = settings.fake_delay_ms / 1000
         self._fail_item = settings.fake_fail_item
+        self._fail_times = settings.fake_fail_times
+        self._failed_so_far = 0
+        # ponytail: 본 correlationId의 판정을 지우지 않고 쌓는다 - 개발용이라 무제한, 오래 띄우면 늘어난다
+        self._verdicts: dict[str, bool] = {}
 
     @property
     def model_version(self) -> str:
@@ -61,6 +72,21 @@ class FakeEngine:
             await asyncio.sleep(self._delay_seconds)
         # 모델이 그러듯 파일을 실제로 한 번 만진다 - 라우트가 넘긴 경로가 살아 있는지까지 본다
         request.audio_path.stat()
-        if self._fail_item and request.item_id == self._fail_item:
+        if self._fails(request):
             return AnalysisOutcome.failure(quality_code="AUDIO_TOO_QUIET", retryable=True)
         return AnalysisOutcome.ok(intonation_score=self.hashed_score(request.correlation_id))
+
+    def _fails(self, request: AnalysisRequest) -> bool:
+        """이 요청을 판정 실패로 낼지 - 횟수 제한이 있으면 재전송에도 같은 답을 준다 (KAN-271)."""
+        if not self._fail_item or request.item_id != self._fail_item:
+            return False
+        if self._fail_times is None:
+            return True
+        # 검사와 기록 사이에 await가 없어 이벤트 루프 안에서 겹치지 않는다
+        verdict = self._verdicts.get(request.correlation_id)
+        if verdict is None:
+            verdict = self._failed_so_far < self._fail_times
+            self._verdicts[request.correlation_id] = verdict
+            if verdict:
+                self._failed_so_far += 1
+        return verdict

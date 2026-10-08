@@ -315,6 +315,7 @@ CI(`test.yml`의 `ai-test`)는 `ai/`가 바뀐 PR마다 잠금 파일을 `pip-au
 | `ACCENTURY_AI_MAX_REQUEST_BYTES` | `2097152` | 요청 본문 전체 상한 - multipart 파싱 전에 끊습니다 |
 | `ACCENTURY_AI_ANALYSIS_ENGINE` | `track1` | 붙일 분석 엔진 - `track1`(실모델) 또는 `fake`(개발 기계용, 해시 점수). 모르는 이름이면 기동이 실패합니다 |
 | `ACCENTURY_AI_FAKE_FAIL_ITEM` | (없음) | `fake` 전용. 이 itemId면 재전송 가능한 판정 실패(`AUDIO_TOO_QUIET`)를 냅니다 - E2E 실패 갈래의 수단 |
+| `ACCENTURY_AI_FAKE_FAIL_TIMES` | (없음) | `fake` 전용. 위 문항을 처음 N번만 실패시키고 그 뒤는 성공시킵니다(재녹음 완주 갈래). 프로세스 전역으로 세므로 다시 실패시키려면 ai를 다시 띄웁니다. 같은 `correlationId`의 재전송은 처음 판정을 그대로 받습니다 |
 | `ACCENTURY_AI_FAKE_DELAY_MS` | `1500` | `fake` 전용. 응답 지연 - 앱의 대기 화면이 실제로 그려지는지 볼 수 있을 만큼 |
 | `ACCENTURY_AI_TRACK1_SRC_DIR` | `/app/src` | 전달본 모듈이 있는 디렉터리 (워커가 `sys.path`에 넣습니다) |
 | `ACCENTURY_AI_TRACK1_REF_DIR` | (없음) | 참조 분포 폴더. 비우면 전달본의 기본값 - 이미지 안에서는 같이 실린 참조입니다 |
