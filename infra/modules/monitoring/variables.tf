@@ -245,3 +245,14 @@ variable "analysis_unscorable_threshold" {
     error_message = "analysis_unscorable_threshold는 0 이상이어야 합니다."
   }
 }
+
+variable "translation_quota_exhausted_threshold" {
+  type        = number
+  description = "5분 동안 허용하는 Gemini 무료 한도 소진(429) 응답 수 (KAN-266). 기본 0이라 한 번이라도 오면 운다 - 무료 등급에서 429는 그 시각의 번역이 전부 503이라는 뜻이다. AI Studio에서 실제 한도(RPM, RPD)를 확인하고 분당 한도에 잠깐 닿는 정도를 허용하려면 올린다."
+  default     = 0
+
+  validation {
+    condition     = var.translation_quota_exhausted_threshold >= 0
+    error_message = "translation_quota_exhausted_threshold는 0 이상이어야 합니다."
+  }
+}

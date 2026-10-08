@@ -633,6 +633,42 @@ test('단어 답안 기록 절이 있고 대상, 항목, 장소, 기간이 코�
   assert.ok(disposal.includes('단어 답안 기록: 측정 목적 달성 시까지'), '5항에 단어 답안 기록의 보유가 없다');
 });
 
+test('사투리 번역기 절이 있고 구글 전송, 보관 항목, 장소, 기간, 탈퇴 처리가 코드와 맞는다 (KAN-266, S3TranslationRecordStore)', () => {
+  assert.ok(html.includes('<h3>사투리 번역기 (앱)</h3>'), '사투리 번역기 절이 없다');
+  const translator = section('<h3>사투리 번역기 (앱)</h3>', '<h3>테스트 세션</h3>').replace(/\s+/g, ' ');
+  assert.ok(translator.includes('로그인해 이용하는 앱에서만'), '대상(로그인한 앱)이 없다');
+  assert.ok(translator.includes('Google LLC의 Gemini API로 보냅니다'), '구글 전송이 없다');
+  assert.ok(translator.includes('제품의 개선에 쓸 수 있고 사람이 검토할 수 있습니다'), '구글의 제품 개선 이용과 사람 검토가 없다');
+  assert.ok(translator.includes('개인정보나'), '개인정보를 넣지 말라는 안내가 없다');
+  // 기록 객체의 필드 (S3TranslationRecordStore.body). 필드가 늘면 여기와 본문을 함께 늘린다.
+  for (const item of [
+    '요청 식별자', '요청 시각', '입력하신 문장', '번역 결과 문장', '처리 결과 종류', '처리 시간', '번역 모델의 이름',
+    '대체 식별자',
+  ]) {
+    assert.ok(translator.includes(item), `사투리 번역기 절의 항목에 「${item}」이 없다`);
+  }
+  assert.ok(translator.includes('번역이 되지 않은 요청'), '실패 요청도 남긴다는 말이 없다 (결과 종류와 상관없이 전부 저장)');
+  assert.ok(translator.includes('계정의 식별자를 적지 않고'), '계정 ID 대신 대체 ID라는 말이 없다');
+  assert.ok(translator.includes('탈퇴하시면 그 연결 기록을 지웁니다'), '탈퇴 때 연결을 끊는다는 말이 없다 (WithdrawalService)');
+  assert.ok(translator.includes('서버 운영 로그에 남기지 않습니다'), '로그에 텍스트를 남기지 않는다는 말이 없다');
+  assert.ok(translator.includes('Amazon S3') && translator.includes('ap-northeast-2'), '보관 장소가 없다');
+  assert.ok(translator.includes('기간 제한 없이 보관'), '보유 기간이 없다 (만료 없음)');
+
+  const provision = section('<h2>2. 개인정보의 제3자 제공', '<h2>3. 개인정보 처리의 위탁').replace(/\s+/g, ' ');
+  assert.ok(provision.includes('Google LLC (Gemini API)'), '2항에 Gemini API 제공이 없다');
+  const outsourcing = section('<h2>3. 개인정보 처리의 위탁', '<h2>4. 개인정보의 국외 이전').replace(/\s+/g, ' ');
+  assert.ok(outsourcing.includes('번역 기록 저장소'), '3항 AWS 행에 번역 기록 저장소가 없다');
+  const transfer = section('<h2>4. 개인정보의 국외 이전', '<h2>5. 개인정보의 파기').replace(/\s+/g, ' ');
+  assert.ok(transfer.includes('<dd>Google LLC (Gemini API)</dd>'), '4항에 Gemini API 이전 내역이 없다');
+  for (const term of ['이전되는 국가', '이전 일시와 방법', '번역기에 입력하신 문장']) {
+    assert.ok(transfer.includes(term), `4항 Gemini 이전 내역에 「${term}」이 없다`);
+  }
+  const disposal = section('<h2>5. 개인정보의 파기', '<h2>6. 정보주체의 권리').replace(/\s+/g, ' ');
+  assert.ok(disposal.includes('번역 기록: 기간 제한 없이 보관'), '5항에 번역 기록의 보유가 없다');
+  const rights = section('<h2>6. 정보주체의 권리', '<h2>7. 만 14세').replace(/\s+/g, ' ');
+  assert.ok(rights.includes('사투리 번역기의 번역 기록은 탈퇴 전이라면'), '6항에 번역 기록 요청 방법이 없다');
+});
+
 test('앱이 로그인으로만 이용된다는 문장이 남아 있지 않다 (KAN-274)', () => {
   // 첫 스토어 심사 빌드에는 로그인이 없다. 조건 없는 문장이 한 자리라도 남으면 그 빌드의 이용자에게 거짓 고지다.
   const flat = html.replace(/\s+/g, ' ');

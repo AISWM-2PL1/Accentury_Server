@@ -127,3 +127,15 @@ variable "auth_apple_key_id" {
   description = "Sign in with Apple 키의 Key ID (KAN-241). client_secret JWT 헤더의 kid다."
   default     = "unset-put-parameter-after-apply"
 }
+
+variable "translation_model" {
+  type        = string
+  description = "번역 LLM 모델 이름 (KAN-266, 2026-10-08 결정 gemini-3.5-flash-lite). ACCENTURY_TRANSLATION_MODEL의 값이 된다 (accentury.translation.model). 품질이 모자라면 코드 수정 없이 이 값만 바꿔 apply하고 backend 태스크를 새로 띄운다."
+  default     = "gemini-3.5-flash-lite"
+}
+
+variable "translation_record_bucket_name" {
+  type        = string
+  description = "번역 기록 버킷 이름 (KAN-266 - accentury-translator-prompt-<계정 ID>, prod만). 값이 있으면 ACCENTURY_TRANSLATION_RECORDBUCKET 파라미터를 만들어 backend가 번역 요청마다 JSON 객체 하나를 그 버킷에 남긴다 (accentury.translation.record-bucket). null이면 파라미터 자체가 없고 backend는 기록 코드와 대체 ID를 만들지 않는다."
+  default     = null
+}

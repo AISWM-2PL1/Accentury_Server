@@ -194,3 +194,21 @@ variable "auth_apple_key_id" {
   description = "Sign in with Apple 키의 Key ID - 탈퇴 때 애플 토큰 revoke용 (KAN-241)"
   default     = "unset-put-parameter-after-apply"
 }
+
+variable "translation_records_enabled" {
+  type        = bool
+  description = "이 환경에 번역 기록 버킷(accentury-translator-prompt-<계정 ID>)을 만들고 backend가 번역 요청마다 기록을 남길지 (KAN-266). true면 버킷, 버킷 정책, SSM ACCENTURY_TRANSLATION_RECORDBUCKET, 태스크 역할의 translations/ PutObject가 생긴다. prod만 true다 (2026-10-08 결정 - staging은 비용 때문에 저장하지 않는다). 버킷은 prevent_destroy라 true에서 false로 바꾸는 apply는 plan이 실패한다 - 끄려면 사람이 판단해 state에서 먼저 뺀다."
+  default     = false
+}
+
+variable "translation_record_reader_principal_arns" {
+  type        = list(string)
+  description = "번역 기록 버킷의 객체를 읽을 수 있는 IAM 주체 ARN 목록 (KAN-266, 2026-10-08 결정 - 팀 전원). null이면 IAM 사용자 accentury-cli, jaeyoung, seongju(2026-10-08 IAM의 사용자 전부)다. 이 목록 밖의 주체는 관리자 자격 증명이어도 버킷 정책이 객체 읽기를 거부한다. 팀원이 늘면 이 목록만 고친다."
+  default     = null
+}
+
+variable "translation_model" {
+  type        = string
+  description = "번역 LLM 모델 이름 (KAN-266). SSM ACCENTURY_TRANSLATION_MODEL로 backend에 들어간다. 품질이 모자라면 gemini-3.8-flash로 바꾸는 선택지가 있다 (2026-10-08 결정)."
+  default     = "gemini-3.5-flash-lite"
+}

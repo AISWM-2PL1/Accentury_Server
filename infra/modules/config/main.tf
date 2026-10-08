@@ -365,6 +365,40 @@ resource "aws_ssm_parameter" "apple_private_key" {
   value_wo_version = 1
 }
 
+# ---- 사투리 텍스트 번역 (KAN-266) ----
+
+# Gemini API 키. Google AI Studio가 발급하는 값이라 Terraform이 만들 수 없다 - 카카오 Admin 키와 같은 사정이라 자리만
+# 만들고 apply 뒤에 한 번 넣는다 (README "사투리 텍스트 번역" 절):
+#   aws ssm put-parameter --overwrite --type SecureString --name /accentury/{env}/ACCENTURY_TRANSLATION_APIKEY --value '<API 키>'
+# 그 다음 backend 태스크를 새로 띄운다. 환경마다 AI Studio 프로젝트와 키가 따로다 (2026-10-08 결정 - staging 실증이
+# prod 무료 한도를 쓰지 않게). write-only인 이유는 kakao_admin_key 주석과 같다.
+#
+# 이 파라미터는 backend의 필수 설정이 아니다(DeploymentConfigGuard 밖이다). 자리 표시 값으로 뜬 backend는 번역만 503이고
+# 기동과 다른 기능은 영향이 없으므로(TranslationConfig), apply와 이미지 배포의 순서 제약이 없다.
+resource "aws_ssm_parameter" "translation_api_key" {
+  name             = "${var.ssm_prefix}/ACCENTURY_TRANSLATION_APIKEY"
+  type             = "SecureString"
+  value_wo         = "unset-put-parameter-after-apply"
+  value_wo_version = 1
+}
+
+# 모델 이름 - 코드 수정 없이 바꾸는 자리다 (2026-10-08 결정). 없어도 backend는 application.yml의 기본값으로 뜬다.
+resource "aws_ssm_parameter" "translation_model" {
+  name  = "${var.ssm_prefix}/ACCENTURY_TRANSLATION_MODEL"
+  type  = "String"
+  value = var.translation_model
+}
+
+# 번역 기록 버킷 스위치 - 버킷 이름을 넘긴 환경(prod)에만 생긴다. 없는 환경(staging)의 태스크에는 이 환경 변수가 아예
+# 없어 backend가 S3 클라이언트도 기록 빈도 만들지 않는다 (TranslationRecordConfig의 조건이 이 프로퍼티다).
+resource "aws_ssm_parameter" "translation_record_bucket" {
+  count = var.translation_record_bucket_name == null ? 0 : 1
+
+  name  = "${var.ssm_prefix}/ACCENTURY_TRANSLATION_RECORDBUCKET"
+  type  = "String"
+  value = var.translation_record_bucket_name
+}
+
 # ---- 음성 저장 S3 (KAN-201, KAN-269) ----
 
 # 버킷 이름이 있는 환경에만 두 파라미터가 생긴다 - 없는 환경의 태스크 정의에는 이 환경 변수가 아예 없어 backend가

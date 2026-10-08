@@ -52,6 +52,9 @@ class SsmEnvironmentBindingTest {
      * <p>
      * 애플 토큰 revoke 값 셋(KAN-241)도 같은 이유로 가드 밖이다 - 없으면 탈퇴 때 revoke만 건너뛰고 탈퇴는 성공한다
      * ({@code AppleTokenRevoker}).
+     * <p>
+     * 번역 값 셋(KAN-266)도 가드 밖이다 - 키가 없으면 번역만 503이고({@code TranslationConfig}), 모델은 코드 기본값이 있고,
+     * 기록 버킷은 prod에만 있는 optional 값이다.
      */
     private static final Set<String> TERRAFORM_ONLY = Set.of(
             "SPRING_PROFILES_ACTIVE",
@@ -63,7 +66,10 @@ class SsmEnvironmentBindingTest {
             "ACCENTURY_FEEDBACK_SLACKWEBHOOKURL",
             "ACCENTURY_AUTH_APPLETEAMID",
             "ACCENTURY_AUTH_APPLEKEYID",
-            "ACCENTURY_AUTH_APPLEPRIVATEKEY");
+            "ACCENTURY_AUTH_APPLEPRIVATEKEY",
+            "ACCENTURY_TRANSLATION_APIKEY",
+            "ACCENTURY_TRANSLATION_MODEL",
+            "ACCENTURY_TRANSLATION_RECORDBUCKET");
 
     /** 가드 정본에는 있지만 Terraform이 만들지 않는 이름 - 자격 증명은 Secrets Manager에서 온다. */
     private static final Set<String> GUARD_ONLY = Set.of(
@@ -141,6 +147,17 @@ class SsmEnvironmentBindingTest {
         assertEquals("TEAM012345", tunedBinder.bind("accentury.auth.apple-team-id", String.class).get());
         assertEquals("KEY0123456", tunedBinder.bind("accentury.auth.apple-key-id", String.class).get());
         assertEquals("binding-check-apple-key", tunedBinder.bind("accentury.auth.apple-private-key", String.class).get());
+        // 번역 값 셋 (KAN-266) - 키 이름이 어긋나면 값을 넣어도 번역이 503인 채로 뜨고, 기록 버킷 이름이 어긋나면 prod 기록이
+        // 조용히 안 쌓인다.
+        Binder translationBinder = Binder.get(environmentOf(Map.of(
+                "ACCENTURY_TRANSLATION_APIKEY", "binding-check-gemini-key",
+                "ACCENTURY_TRANSLATION_MODEL", "gemini-3.8-flash",
+                "ACCENTURY_TRANSLATION_RECORDBUCKET", "accentury-translator-prompt-123456789012")));
+        assertEquals("binding-check-gemini-key",
+                translationBinder.bind("accentury.translation.api-key", String.class).get());
+        assertEquals("gemini-3.8-flash", translationBinder.bind("accentury.translation.model", String.class).get());
+        assertEquals("accentury-translator-prompt-123456789012",
+                translationBinder.bind("accentury.translation.record-bucket", String.class).get());
 
         // 목록 프로퍼티는 쉼표 한 줄이 원소로 갈라져야 한다 (ClientIps가 List<String>으로 받는다).
         assertEquals(List.of("10.1.0.0/16"),
@@ -158,9 +175,9 @@ class SsmEnvironmentBindingTest {
         assumeTrue(Files.exists(main), "infra/modules/config/main.tf 없음 - 모노레포 밖 실행");
 
         String literal = "value_wo         = \"" + SsmPlaceholder.UNSET + "\"";
-        assertEquals(4, Files.readString(main).split(Pattern.quote(literal), -1).length - 1,
-                "main.tf에서 자리 표시 값을 쓰는 자원이 넷(kakao_admin_key, feedback_slack_webhook_url,"
-                        + " naver_client_secret, apple_private_key)이 아니다 - backend의 SsmPlaceholder.UNSET와 글자가 같은지 확인한다");
+        assertEquals(5, Files.readString(main).split(Pattern.quote(literal), -1).length - 1,
+                "main.tf에서 자리 표시 값을 쓰는 자원이 다섯(kakao_admin_key, feedback_slack_webhook_url,"
+                        + " naver_client_secret, apple_private_key, translation_api_key)이 아니다 - backend의 SsmPlaceholder.UNSET와 글자가 같은지 확인한다");
         // 카카오 쪽 상수가 같은 리터럴을 가리키는지도 못박는다 - 옮기면서 갈라지면 여기서 드러난다.
         assertEquals(SsmPlaceholder.UNSET, app.accentury.backend.share.KakaoWebhookAuth.PLACEHOLDER);
     }
@@ -184,5 +201,13 @@ class SsmEnvironmentBindingTest {
         expected.addAll(TERRAFORM_ONLY);
 
         assertEquals(expected, terraform, "Terraform 파라미터 이름과 backend 정본이 어긋난다");
+    }
+
+    /** 이름 그대로의 환경 변수만 든 환경 - 배포의 진짜 소스와 같이 이름이 "-systemEnvironment"로 끝나야 한다. */
+    private static StandardEnvironment environmentOf(Map<String, Object> variables) {
+        StandardEnvironment environment = new StandardEnvironment();
+        environment.getPropertySources().addFirst(new SystemEnvironmentPropertySource("extra-systemEnvironment",
+                variables));
+        return environment;
     }
 }

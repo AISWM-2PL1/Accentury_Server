@@ -221,6 +221,14 @@ accentury:
   learning:
     rate-limit-per-minute: 60    # 계정당 분당 쓰기(시도 시작 + 답안 + 완료, 한 통) 상한 (명세서 §2.5) - 정상은
                                  # 세트 하나에 시도 1 + 답안 10 이하 + 완료 1이라 어휘 답안과 같은 여유 배수다.
+  translation:                   # 사투리 텍스트 번역 (명세서 §3.18, KAN-266) - 사용량 제한은 없다 (2026-10-04 결정).
+    model: gemini-3.5-flash-lite # Gemini 모델 (2026-10-08 결정). 배포에서는 SSM ACCENTURY_TRANSLATION_MODEL이 덮는다 -
+                                 # 품질이 모자라면 코드 수정 없이 gemini-3.8-flash로 바꾼다.
+    timeout: 10s                 # Gemini 호출 전체 상한 - 동기 응답이고 재시도 1회도 이 안이다 (2026-10-08 결정).
+    # api-key: <Gemini API 키>   # 미설정이면 번역이 전부 503이다 (로컬, 테스트). 배포에서는 SSM SecureString
+                                 # ACCENTURY_TRANSLATION_APIKEY가 넣는다 - 환경별 AI Studio 프로젝트의 키다.
+    # record-bucket: accentury-translator-prompt-<계정 ID>   # prod에만 있다 (SSM ACCENTURY_TRANSLATION_RECORDBUCKET).
+                                 # 미설정이면 번역 기록과 대체 ID를 만들지 않는다 (2026-10-08 결정 - staging은 저장 안 함).
   auth:
     access-token-ttl: 30m        # Access JWT 수명 (NFR-SC-03) - 짧아서 로그아웃에 블랙리스트를 두지 않는다.
     refresh-token-ttl: 30d       # Refresh 수명 - 회전할 때마다 새 토큰이 다시 이 수명을 받는다.

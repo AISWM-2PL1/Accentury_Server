@@ -54,6 +54,8 @@ accentury:
   # 조건이 bucket이다).
   training:
     region: ap-northeast-2
+  translation:
+    region: ap-northeast-2     # 번역 기록 버킷의 리전 (KAN-266) - 버킷이 없는 환경(staging)에서는 쓰이지 않는다.
 
 # CloudWatch 지표 내보내기 (KAN-36, CloudWatchMetricsConfig). accentury.* 지표만 1분마다 올린다 - 회로 상태
 # (accentury.ai.circuit.state)는 경보 ai-circuit-open(infra/modules/monitoring)이 본다. 네임스페이스는

@@ -171,6 +171,17 @@ class LogMaskingTest extends IntegrationTest {
     }
 
     @Test
+    void 번역_Gemini_API_키를_이름과_값_모양으로_지운다() {
+        // KAN-266 - 헤더, 설정 키, 바인딩된 필드, 환경 변수 네 갈래와 이름 없이 찍힌 값.
+        String key = "AIza" + "A".repeat(35);
+        assertEquals("x-goog-api-key: ***", LogMasking.mask("x-goog-api-key: " + key));
+        assertEquals("accentury.translation.api-key=***", LogMasking.mask("accentury.translation.api-key=" + key));
+        assertEquals("{\"apiKey\": \"***\"}", LogMasking.mask("{\"apiKey\": \"" + key + "\"}"));
+        assertEquals("ACCENTURY_TRANSLATION_APIKEY=***", LogMasking.mask("ACCENTURY_TRANSLATION_APIKEY=" + key));
+        assertEquals("GET https://example.com/v1?key=AIza***", LogMasking.mask("GET https://example.com/v1?key=" + key));
+    }
+
+    @Test
     void 이름_없이_박힌_슬랙_웹훅_URL도_호스트까지만_남긴다() {
         // 전송이 실패하면 RestClient의 예외 메시지에 요청 URI가 통째로 들어간다 - 이름이 앞에
         // 붙지 않으므로 위 규칙에 걸리지 않는다. 호스트는 남겨 "슬랙으로 나가다 실패했다"는

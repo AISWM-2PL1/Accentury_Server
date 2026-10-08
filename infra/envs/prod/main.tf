@@ -155,6 +155,9 @@ module "config" {
   # 음성 저장을 켠 환경에만 ACCENTURY_TRAINING_BUCKET, ACCENTURY_TRAINING_KEYPREFIX 파라미터가 생긴다 (KAN-269).
   training_bucket_name = var.training_bucket_enabled ? local.voice_bucket_name : null
   training_key_prefix  = var.training_bucket_enabled ? var.env : null
+  # 사투리 텍스트 번역 (KAN-266) - 모델 이름은 모든 환경에, 기록 버킷 스위치는 기록을 켠 환경(prod)에만 생긴다.
+  translation_model              = var.translation_model
+  translation_record_bucket_name = var.translation_records_enabled ? aws_s3_bucket.translation_records[0].bucket : null
 }
 
 # 커스텀 지표 네임스페이스 (KAN-36). 지표를 올리는 역할의 PutMetricData 조건과 경보가 같은 이름을 봐야 하므로
@@ -218,6 +221,8 @@ module "fargate" {
   # 음성 저장을 켠 환경에만 태스크 역할에 PutObject 문장이 생긴다 - 음성 버킷의 자기 환경 접두사 아래로만이다 (KAN-269).
   training_bucket_arn = var.training_bucket_enabled ? "arn:aws:s3:::${local.voice_bucket_name}" : null
   training_key_prefix = var.training_bucket_enabled ? var.env : null
+  # 번역 기록을 켠 환경(prod)에만 태스크 역할에 translations/ PutObject 문장이 생긴다 (KAN-266).
+  translation_record_bucket_arn = var.translation_records_enabled ? aws_s3_bucket.translation_records[0].arn : null
 }
 
 # ai 호스트 - 내부 ALB 뒤 ASG(min 1, max = tfvars ai_max_size)의 전용 추론 EC2 (KAN-36, ALB와 오토스케일링은
@@ -291,4 +296,151 @@ module "monitoring" {
   # AI 대상 그룹의 healthy 대상 경보 (KAN-201).
   ai_alb_arn_suffix          = module.ai_host.alb_arn_suffix
   ai_target_group_arn_suffix = module.ai_host.target_group_arn_suffix
+}
+
+# ---- 사투리 텍스트 번역 기록 S3 (KAN-266) ----
+
+# 사람들이 어떤 문장을 번역해 달라고 했는지 요청마다 JSON 객체 하나로 남긴다 (2026-10-08 결정). prod만이다 - staging은
+# 비용 때문에 버킷을 만들지 않는다. 두 환경의 main.tf는 같아야 하므로(KAN-140) 스위치는 tfvars의
+# translation_records_enabled다 (음성 버킷의 training_bucket_enabled와 같은 방식).
+#   - 객체 키는 translations/yyyy/MM/dd/<요청 ID>.json(KST)이고 본문에는 계정 ID 대신 대체 ID만 있다 (명세서 §3.18).
+#   - 버전 관리를 켜고 수명주기(만료) 규칙은 두지 않는다 (2026-10-08 결정 - 만료 없음). force_destroy도 없다.
+#   - 쓰기는 backend 태스크 역할의 translations/ PutObject뿐이다 (fargate 모듈). 읽기는 팀 전원이다 - 아래 정책이
+#     목록의 주체에게 읽기를 허용하고 그 밖의 주체에게는 거부한다.
+locals {
+  translation_record_bucket_name = "accentury-translator-prompt-${data.aws_caller_identity.current.account_id}"
+  translation_record_reader_principal_arns = coalesce(var.translation_record_reader_principal_arns, [
+    "arn:aws:iam::${data.aws_caller_identity.current.account_id}:user/accentury-cli",
+    "arn:aws:iam::${data.aws_caller_identity.current.account_id}:user/jaeyoung",
+    "arn:aws:iam::${data.aws_caller_identity.current.account_id}:user/seongju",
+  ])
+}
+
+resource "aws_s3_bucket" "translation_records" {
+  count = var.translation_records_enabled ? 1 : 0
+
+  bucket = local.translation_record_bucket_name
+
+  # 번역 기록은 다시 만들 수 없다. 이 블록을 지우거나 스위치를 끄거나 환경을 destroy하려 하면 plan이 실패한다.
+  lifecycle {
+    prevent_destroy = true
+  }
+}
+
+resource "aws_s3_bucket_versioning" "translation_records" {
+  count = var.translation_records_enabled ? 1 : 0
+
+  bucket = aws_s3_bucket.translation_records[0].id
+
+  versioning_configuration {
+    status = "Enabled"
+  }
+}
+
+resource "aws_s3_bucket_server_side_encryption_configuration" "translation_records" {
+  count = var.translation_records_enabled ? 1 : 0
+
+  bucket = aws_s3_bucket.translation_records[0].id
+
+  rule {
+    apply_server_side_encryption_by_default {
+      sse_algorithm = "AES256"
+    }
+  }
+}
+
+resource "aws_s3_bucket_public_access_block" "translation_records" {
+  count = var.translation_records_enabled ? 1 : 0
+
+  bucket = aws_s3_bucket.translation_records[0].id
+
+  block_public_acls       = true
+  block_public_policy     = true
+  ignore_public_acls      = true
+  restrict_public_buckets = true
+}
+
+# 버킷 정책. 음성 버킷(bootstrap/voice.tf)과 같은 두 Deny에 팀 읽기 Allow를 더한다.
+# 1) TLS가 아닌 요청은 전부 거부한다.
+# 2) 객체 읽기(GetObject, GetObjectVersion)는 목록의 주체만 한다 - 목록 밖이면 관리자 자격 증명도 거부된다.
+# 3) 목록의 주체에게 객체 읽기와 나열을 허용한다. 같은 계정 주체라 버킷 정책의 Allow만으로 읽힌다 - 팀원의 IAM
+#    정책에 S3 읽기가 따로 없어도 된다 (2026-10-08 결정 - 팀 전원).
+# List, Put, Delete는 거부하지 않는다 - HeadBucket이 ListBucket 권한으로 판정되어 List를 거부하면 Terraform refresh가
+# 막힌다 (KAN-239 리뷰). 쓰기는 backend 태스크 역할이 translations/ 아래로 좁힌다.
+data "aws_iam_policy_document" "translation_records" {
+  count = var.translation_records_enabled ? 1 : 0
+
+  statement {
+    sid     = "DenyInsecureTransport"
+    effect  = "Deny"
+    actions = ["s3:*"]
+    resources = [
+      aws_s3_bucket.translation_records[0].arn,
+      "${aws_s3_bucket.translation_records[0].arn}/*",
+    ]
+
+    principals {
+      type        = "*"
+      identifiers = ["*"]
+    }
+
+    condition {
+      test     = "Bool"
+      variable = "aws:SecureTransport"
+      values   = ["false"]
+    }
+  }
+
+  statement {
+    sid       = "ObjectReadOnlyByTeam"
+    effect    = "Deny"
+    actions   = ["s3:GetObject", "s3:GetObjectVersion"]
+    resources = ["${aws_s3_bucket.translation_records[0].arn}/*"]
+
+    principals {
+      type        = "*"
+      identifiers = ["*"]
+    }
+
+    # 값이 여러 개면 어느 것과도 같지 않을 때만 거부된다 (부정 연산자의 다중 값은 NOR).
+    condition {
+      test     = "ArnNotEquals"
+      variable = "aws:PrincipalArn"
+      values   = local.translation_record_reader_principal_arns
+    }
+  }
+
+  statement {
+    sid       = "TeamReadObjects"
+    effect    = "Allow"
+    actions   = ["s3:GetObject", "s3:GetObjectVersion"]
+    resources = ["${aws_s3_bucket.translation_records[0].arn}/*"]
+
+    principals {
+      type        = "AWS"
+      identifiers = local.translation_record_reader_principal_arns
+    }
+  }
+
+  statement {
+    sid       = "TeamListBucket"
+    effect    = "Allow"
+    actions   = ["s3:ListBucket", "s3:ListBucketVersions"]
+    resources = [aws_s3_bucket.translation_records[0].arn]
+
+    principals {
+      type        = "AWS"
+      identifiers = local.translation_record_reader_principal_arns
+    }
+  }
+}
+
+resource "aws_s3_bucket_policy" "translation_records" {
+  count = var.translation_records_enabled ? 1 : 0
+
+  bucket = aws_s3_bucket.translation_records[0].id
+  policy = data.aws_iam_policy_document.translation_records[0].json
+
+  # 퍼블릭 액세스 차단과 정책을 동시에 바꾸면 S3가 OperationAborted로 거절할 수 있다 (음성 버킷과 같은 이유).
+  depends_on = [aws_s3_bucket_public_access_block.translation_records]
 }

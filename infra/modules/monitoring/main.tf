@@ -603,3 +603,34 @@ resource "aws_cloudwatch_metric_alarm" "analysis_unscorable_high" {
 
   tags = { Name = "${local.name}-analysis-unscorable-high" }
 }
+
+# ---- 경보: 번역 무료 한도 소진 (KAN-266) ----
+
+# Gemini API 무료 등급이 429(RESOURCE_EXHAUSTED)를 돌려준 횟수다 (backend의 accentury.translation.llm.calls 중
+# outcome=rate_limited). 무료 등급이라 과금이 없으므로 비용 경보 대신 이 경보를 둔다 (2026-10-08 결정). 우리 쪽 사용량
+# 제한은 없지만 사업자 한도는 있어서, 넘으면 그 시각의 번역 요청이 전부 503 TRANSLATION_UNAVAILABLE이다.
+# 분당 한도(RPM)면 몇 분 뒤 풀리고, 일일 한도(RPD)면 태평양 시간 자정까지 풀리지 않는다 - 원인은 backend 로그의
+# "Gemini 무료 한도 소진(429)" 빈도와 accentury.translation.requests로 가른다.
+#
+# 결제 수단을 연결하지 않는다. 나중에 유료 등급으로 바꾸면 그때 비용 경보를 다시 둔다.
+# treat_missing_data = "notBreaching": 번역 요청이 없으면 카운터가 0이고, backend가 죽으면 no-healthy-target이 잡는다.
+resource "aws_cloudwatch_metric_alarm" "translation_quota_exhausted" {
+  alarm_name        = "${local.name}-translation-quota-exhausted"
+  alarm_description = "accentury ${var.env}: Gemini API 무료 한도 소진(429)이 5분 동안 ${var.translation_quota_exhausted_threshold}건을 넘었습니다. 그동안의 번역 요청은 503 TRANSLATION_UNAVAILABLE입니다. AI Studio의 rate limit 화면에서 분당, 일일 한도를 확인하세요. (KAN-266)"
+
+  namespace   = var.backend_metric_namespace
+  metric_name = "accentury.translation.llm.calls.count"
+  dimensions  = { env = var.env, outcome = "rate_limited" }
+
+  statistic           = "Sum"
+  period              = 300
+  evaluation_periods  = 1
+  comparison_operator = "GreaterThanThreshold"
+  threshold           = var.translation_quota_exhausted_threshold
+  treat_missing_data  = "notBreaching"
+
+  alarm_actions = local.alarm_actions
+  ok_actions    = local.alarm_actions
+
+  tags = { Name = "${local.name}-translation-quota-exhausted" }
+}
