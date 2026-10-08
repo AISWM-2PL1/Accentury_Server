@@ -103,6 +103,27 @@ public final class ServiceMetrics {
      */
     public static final String TRAINING_SAMPLES = "accentury.training.samples";
 
+    // ---- 사투리 텍스트 번역 (translation 패키지, KAN-266) ----
+
+    /**
+     * 번역 요청 수 - 태그 {@code result}는 {@code success} | {@code rejected} | {@code too_long} | {@code llm_failed}다
+     * (명세서 §3.18의 결과 종류와 같다). 400과 401은 세지 않는다.
+     */
+    public static final String TRANSLATION_REQUESTS = "accentury.translation.requests";
+
+    /**
+     * Gemini 호출 시도 수 (재시도 포함) - 태그 {@code outcome}은 {@code ok} | {@code rate_limited} | {@code error}다.
+     * {@code rate_limited}는 사업자 무료 한도 소진(429)이고 경보 {@code translation-quota-exhausted}가 읽는다
+     * (infra/modules/monitoring). {@code error}는 5xx, 그 밖의 4xx, 연결 실패, 시간 초과다.
+     */
+    public static final String TRANSLATION_LLM_CALLS = "accentury.translation.llm.calls";
+
+    /**
+     * 번역 기록(S3) 저장 시도 수 - 태그 {@code result}는 {@code saved} | {@code failed}다. 기록 버킷이 있는 환경(prod)에서만
+     * 생긴다. 저장 실패는 번역 응답에 영향이 없으므로 이 지표와 WARN 로그가 유일한 신호다.
+     */
+    public static final String TRANSLATION_RECORDS = "accentury.translation.records";
+
     // ---- 이용 후기 (FeedbackNotifyConfig) ----
 
     /**

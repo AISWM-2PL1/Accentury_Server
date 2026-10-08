@@ -36,6 +36,10 @@ ai_max_size = 3
 # (2026-10-04 결정). 끄면 파라미터와 권한만 사라지고 버킷과 모인 음성은 그대로다.
 training_bucket_enabled = true
 
+# 사투리 텍스트 번역 기록 (KAN-266, 2026-10-08 결정). 번역 요청마다 입력, 출력, 결과 종류, 처리 시간을 번역 기록 버킷
+# (accentury-translator-prompt-<계정 ID>)에 남긴다. staging은 비용 때문에 버킷을 만들지 않는다.
+translation_records_enabled = false
+
 ssm_prefix = "/accentury/staging"
 
 # 이미지는 staging 파이프라인만 만든다 (KAN-128 승격 모델). prod는 그 SHA를 고르기만 한다.

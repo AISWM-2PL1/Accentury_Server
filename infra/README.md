@@ -1254,6 +1254,46 @@ WAF의 AWS 관리 규칙(KAN-149)은 `/recording`만 제외하고 이 경로에�
 (별도 인증이 없다) 레포, 노션, 지라 티켓, 스크린샷 어디에도 적지 않는다. backend 로그도 이 값을
 지운다 (`LogMasking`) - 켜짐 로그는 URL이 아니라 채널 라벨만 찍는다.
 
+### 사투리 텍스트 번역 - Gemini API 키, 번역 기록 버킷, 무료 한도 경보 (KAN-266)
+
+앱의 사투리 번역기(`POST /v0/translations`, 명세서 §3.18)는 backend가 Google Gemini API 무료 등급을 직접 부른다.
+backend SG는 HTTPS 443을 이미 전체로 열어 두어(`modules/network`의 `backend_https_ipv4`) 아웃바운드 추가는 없다.
+Terraform이 만드는 것은 넷이다.
+
+| 자원 | 환경 | 내용 |
+|---|---|---|
+| SSM `ACCENTURY_TRANSLATION_APIKEY` | 둘 다 | SecureString 자리 표시 값(write-only). 값은 apply 뒤에 사람이 넣는다 |
+| SSM `ACCENTURY_TRANSLATION_MODEL` | 둘 다 | tfvars `translation_model`(기본 `gemini-3.5-flash-lite`). 품질이 모자라면 이 값만 바꾼다 |
+| 버킷 `accentury-translator-prompt-<계정 ID>`와 SSM `ACCENTURY_TRANSLATION_RECORDBUCKET`, 태스크 역할 `translations/` PutObject | prod만 | tfvars `translation_records_enabled = true`. 버전 관리 켬, 만료 없음, `prevent_destroy`, 객체 읽기는 IAM 사용자 accentury-cli, jaeyoung, seongju만 |
+| 경보 `accentury-<env>-translation-quota-exhausted` | 둘 다 | `accentury.translation.llm.calls{outcome=rate_limited}`가 5분에 0건을 넘으면 운다 (무료 한도 소진 429) |
+
+**apply와 배포의 순서 제약이 없다.** 키는 `DeploymentConfigGuard`의 필수 목록 밖이라, 키가 없거나 자리 표시 값인
+backend는 번역만 503 `TRANSLATION_UNAVAILABLE`이고 기동 로그에 `번역 API 키가 없다`가 남는다. 기록 버킷 파라미터가
+없는 환경(staging)은 기록 코드가 돌지 않는다.
+
+1. 환경마다 Google AI Studio 프로젝트를 따로 만들고(team2pl1@gmail.com, 결제 수단 연결 안 함) 각 프로젝트에서
+   API 키를 받는다 (2026-10-08 결정 - staging 실증이 prod 무료 한도를 쓰지 않게).
+2. 환경마다 값을 넣고 backend 태스크를 새로 띄운다 (secrets는 태스크 시작 시 한 번 읽힌다). 키는 채팅이나 문서에
+   붙이지 않는다.
+
+   ```
+   aws ssm put-parameter --overwrite --type SecureString \
+     --name /accentury/staging/ACCENTURY_TRANSLATION_APIKEY --value '<staging 프로젝트의 API 키>'
+   aws ssm put-parameter --overwrite --type SecureString \
+     --name /accentury/prod/ACCENTURY_TRANSLATION_APIKEY --value '<prod 프로젝트의 API 키>'
+   aws ecs update-service --cluster accentury-staging --service backend --force-new-deployment
+   aws ecs update-service --cluster accentury-prod    --service backend --force-new-deployment
+   ```
+
+3. 확인 - backend 로그에 `번역 LLM model=gemini-3.5-flash-lite`가 뜨는지 본다. AI Studio의 rate limit 화면에서 실제
+   무료 한도(RPM, RPD)를 확인해 KAN-266에 남기고, 분당 한도에 잠깐 닿는 정도를 허용하려면 monitoring 모듈의
+   `translation_quota_exhausted_threshold`를 올린다.
+4. 끄기 - 키를 자리 표시 리터럴로 되돌리면(`--value 'unset-put-parameter-after-apply'`) 번역만 503이 된다.
+
+**prod 기록 버킷은 지우지 않는다.** `translation_records_enabled`를 false로 바꾸는 apply는 `prevent_destroy` 때문에
+plan이 실패한다 - 그것이 의도다. 기록을 멈추려면 사람이 판단해 state에서 먼저 빼고(버킷과 객체는 남는다) 스위치를 끈다.
+객체 본문에는 계정 ID가 없고 대체 ID만 있다. 대체 ID와 계정의 대응표는 DB `translation_subject`이고 탈퇴가 그 행을 지운다.
+
 ### 앱 계정 인증 - Refresh 저장소 Redis, JWT 키, IdP 값 (KAN-223)
 
 앱(Android, iOS)의 소셜 로그인(명세서 §3.9~§3.13)이 쓰는 인프라다. 웹은 익명이라 아무것도 쓰지 않는다.

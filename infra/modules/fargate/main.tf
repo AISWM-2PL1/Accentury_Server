@@ -186,6 +186,19 @@ data "aws_iam_policy_document" "task" {
       resources = ["${statement.value}/${var.training_key_prefix}/*"]
     }
   }
+
+  # 번역 기록 버킷에 요청마다 JSON 객체 하나를 쓴다 (KAN-266, S3TranslationRecordStore). backend가 쓰는 키는
+  # translations/ 아래뿐이라 거기로만 연다. PutObject만이다 - 이 태스크가 뚫려도 모인 기록을 읽거나 지우지 못한다.
+  # 버킷 ARN이 null인 환경(staging)에는 이 문장 자체가 없다.
+  dynamic "statement" {
+    for_each = var.translation_record_bucket_arn == null ? [] : [var.translation_record_bucket_arn]
+
+    content {
+      sid       = "PutTranslationRecords"
+      actions   = ["s3:PutObject"]
+      resources = ["${statement.value}/translations/*"]
+    }
+  }
 }
 
 resource "aws_iam_role_policy" "task" {
