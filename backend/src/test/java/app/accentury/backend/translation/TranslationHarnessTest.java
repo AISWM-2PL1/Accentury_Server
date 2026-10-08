@@ -24,6 +24,8 @@ class TranslationHarnessTest {
         assertFalse(TranslationHarness.rejectsBeforeLlm("오늘 진짜 재밌었어 ㅋㅋ"));
         // 줄바꿈과 탭은 제어 문자로 보지 않는다 - 판정은 출력 검사가 한다.
         assertFalse(TranslationHarness.rejectsBeforeLlm("밥 먹었어?\n어디야?"));
+        // 다른 곳에서 복사한 글의 CRLF도 통과한다 (PR #34 리뷰).
+        assertFalse(TranslationHarness.rejectsBeforeLlm("밥 먹었어?\r\n어디야?"));
     }
 
     @Test
