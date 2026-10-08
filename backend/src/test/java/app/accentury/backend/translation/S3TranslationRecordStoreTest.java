@@ -50,7 +50,7 @@ class S3TranslationRecordStoreTest {
     }
 
     private static TranslationRecord record(TranslationResult result, String output, Long llmMs) {
-        return new TranslationRecord(REQUEST_ID, REQUESTED_AT, USER_ID, "밥 먹었어?", output, result, 812, llmMs,
+        return new TranslationRecord(REQUEST_ID, REQUESTED_AT, USER_ID, "밥 먹었어?", 6, output, result, 812, llmMs,
                 "gemini-3.5-flash-lite");
     }
 
@@ -75,12 +75,13 @@ class S3TranslationRecordStoreTest {
             json = new String(in.readAllBytes(), StandardCharsets.UTF_8);
         }
         JsonNode object = objectMapper.readTree(json);
-        assertEquals(List.of("requestId", "requestedAt", "subjectId", "input", "output", "result", "totalMs", "llmMs",
-                "model"), List.copyOf(object.propertyNames()));
+        assertEquals(List.of("requestId", "requestedAt", "subjectId", "input", "inputLength", "output", "result",
+                "totalMs", "llmMs", "model"), List.copyOf(object.propertyNames()));
         assertEquals(REQUEST_ID.toString(), object.get("requestId").asString());
         assertEquals("2026-10-09T08:30+09:00", object.get("requestedAt").asString());
         assertEquals(SUBJECT_ID.toString(), object.get("subjectId").asString());
         assertEquals("밥 먹었어?", object.get("input").asString());
+        assertEquals(6, object.get("inputLength").asInt());
         assertEquals("밥 뭇나?", object.get("output").asString());
         assertEquals("SUCCESS", object.get("result").asString());
         assertEquals(812, object.get("totalMs").asLong());

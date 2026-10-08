@@ -45,7 +45,8 @@ final class TranslationHarness {
      *   <li>완성형 한글 음절이 하나도 없다 - 표준어 문장이 아니다.</li>
      *   <li>낱자모(ㄱ부터 ㅣ)가 완성형 음절보다 많다 - 자판을 아무렇게나 누른 글자다
      *       (예: {@code ㅓㅗㅁ니ㅏㅓㅗㅁㅇ니랑노라ㅣㅓ}은 낱자모 10개, 음절 5개). "ㅋㅋ"가 조금 섞인 문장은 지나간다.</li>
-     *   <li>줄바꿈과 탭이 아닌 제어 문자가 있다.</li>
+     *   <li>줄바꿈({@code \n}, {@code \r})과 탭이 아닌 제어 문자가 있다. {@code \r}은 다른 곳에서 복사한 글의
+     *       {@code \r\n}이다 (PR #34 리뷰).</li>
      * </ul>
      */
     static boolean rejectsBeforeLlm(String stripped) {
@@ -58,7 +59,7 @@ final class TranslationHarness {
                 syllables++;
             } else if (isJamo(codePoint)) {
                 jamo++;
-            } else if (Character.isISOControl(codePoint) && codePoint != '\n' && codePoint != '\t') {
+            } else if (Character.isISOControl(codePoint) && codePoint != '\n' && codePoint != '\r' && codePoint != '\t') {
                 return true;
             }
         }

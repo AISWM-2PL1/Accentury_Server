@@ -98,6 +98,7 @@ class S3TranslationRecordStore implements TranslationRecordStore {
         body.put("requestedAt", record.requestedAtKst());
         body.put("subjectId", subjectId != null ? subjectId.toString() : null);
         body.put("input", record.input());
+        body.put("inputLength", record.inputLength());
         body.put("output", record.output());
         body.put("result", record.result().name());
         body.put("totalMs", record.totalMs());

@@ -146,6 +146,7 @@ class TranslationApiTest extends IntegrationTest {
         TranslationRecord record = onlyRecord();
         assertEquals(TranslationResult.SUCCESS, record.result());
         assertEquals("  밥 먹었어?  ", record.input(), "기록의 입력은 원문 그대로다");
+        assertEquals(10, record.inputLength());
         assertEquals("밥 뭇나?", record.output());
         assertEquals(userId, record.userId());
         assertEquals(MODEL, record.model());
@@ -179,8 +180,24 @@ class TranslationApiTest extends IntegrationTest {
         assertEquals(1, translator.inputs.size(), "100자는 부르고 101자는 부르지 않는다");
         TranslationRecord record = store.records.get(1);
         assertEquals(TranslationResult.TOO_LONG, record.result());
+        assertEquals("가".repeat(100), record.input(), "길이 초과 기록은 앞 100자만 남긴다");
+        assertEquals(101, record.inputLength());
         assertNull(record.output());
         assertNull(record.llmMs());
+    }
+
+    @Test
+    void 아주_긴_입력도_기록에는_앞_100자만_간다() throws Exception {
+        // JSON 본문에는 크기 상한이 없다 - 수만 자 입력이 버킷과 기록 대기열에 그대로 쌓이지 않는다 (PR #34 리뷰 P2).
+        String access = signUp();
+        String huge = "\uD83D\uDE00" + "나".repeat(50_000);
+        translate(access, huge).andExpect(status().isUnprocessableContent())
+                .andExpect(jsonPath("$.code").value("TRANSLATION_TOO_LONG"));
+
+        TranslationRecord record = onlyRecord();
+        assertEquals(100, record.input().codePointCount(0, record.input().length()));
+        assertTrue(record.input().startsWith("\uD83D\uDE00"), "서로게이트 쌍을 가르지 않는다");
+        assertEquals(50_001, record.inputLength());
     }
 
     @Test

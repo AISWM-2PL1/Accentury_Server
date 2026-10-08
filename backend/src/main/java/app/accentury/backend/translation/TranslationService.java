@@ -105,14 +105,31 @@ class TranslationService {
         return new TranslationResponse(output);
     }
 
-    /** 끝 처리 - 지표, 로그(텍스트 없이), 기록. 기록 저장소는 예외를 내지 않고 기다리게 하지 않는다. */
+    /**
+     * 끝 처리 - 지표, 로그(텍스트 없이), 기록. 기록 저장소는 예외를 내지 않고 기다리게 하지 않는다.
+     * <p>
+     * 길이 초과면 기록의 입력을 앞 100자로 자른다 (PR #34 리뷰 P2) - JSON 본문에는 크기 상한이 없어 원문째 넘기면 수 MB
+     * 입력이 만료 없는 버킷과 기록 대기열(1000칸)에 그대로 쌓인다. 원래 길이는 {@code inputLength}로 남는다.
+     */
     private void finish(Attempt attempt, TranslationResult result, @Nullable String output, @Nullable Long llmMs) {
         long totalMs = elapsedMs(attempt.started());
+        int inputLength = TranslationHarness.length(attempt.text());
+        String input = result == TranslationResult.TOO_LONG
+                ? leading(attempt.text(), AccenturyProperties.Translation.MAX_INPUT_LENGTH)
+                : attempt.text();
         requests.get(result).increment();
         log.info("번역 requestId={} result={} inputLength={} totalMs={} llmMs={}", attempt.requestId(), result,
-                attempt.text().length(), totalMs, llmMs);
+                inputLength, totalMs, llmMs);
         records.save(new TranslationRecord(attempt.requestId(), attempt.requestedAt(), attempt.userId(),
-                attempt.text(), output, result, totalMs, llmMs, translator.model()));
+                input, inputLength, output, result, totalMs, llmMs, translator.model()));
+    }
+
+    /** 앞에서 코드 포인트 {@code count}개 - 서로게이트 쌍 가운데를 자르지 않는다. */
+    private static String leading(String text, int count) {
+        if (TranslationHarness.length(text) <= count) {
+            return text;
+        }
+        return text.substring(0, text.offsetByCodePoints(0, count));
     }
 
     private static long elapsedMs(long startedNanos) {
