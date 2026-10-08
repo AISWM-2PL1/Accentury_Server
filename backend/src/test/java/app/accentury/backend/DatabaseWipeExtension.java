@@ -37,6 +37,8 @@ public final class DatabaseWipeExtension implements BeforeAllCallback {
      *       한 번만 읽으므로 다시 채워 넣을 기회도 없다.</li>
      *   <li>{@code word_learning_definition} - 단어 학습 발행본(KAN-265)도 마이그레이션이 넣는 콘텐츠다. 지우면
      *       시도 행의 FK가 끊겨 그 뒤의 모든 시도 시작이 실패한다.</li>
+     *   <li>{@code intonation_learning_definition} - 억양 학습 발행본(KAN-264)도 마이그레이션이 넣는 콘텐츠다. 레지스트리가
+     *       기동 시 한 번만 읽으므로 지워도 이미 뜬 컨텍스트는 모르지만, 다음 컨텍스트가 발행본 없이 뜨지 못한다.</li>
      * </ul>
      * 활성 포인터가 남는다는 것은 <b>활성 버전을 바꾼 테스트가 직접 되돌려야 한다</b>는 뜻이다 -
      * 안 되돌리면 다음 클래스가 바뀐 활성 버전을 물려받는다 (같은 컨텍스트를 재사용하므로
@@ -44,7 +46,8 @@ public final class DatabaseWipeExtension implements BeforeAllCallback {
      * 반면 {@code active_version_audit}는 테스트가 만든 이력이라 비운다.
      */
     private static final Set<String> KEEP =
-            Set.of("flyway_schema_history", "test_definition", "active_test_version", "word_learning_definition");
+            Set.of("flyway_schema_history", "test_definition", "active_test_version", "word_learning_definition",
+                    "intonation_learning_definition");
 
     @Override
     public void beforeAll(ExtensionContext context) {

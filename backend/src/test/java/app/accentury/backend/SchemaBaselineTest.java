@@ -84,7 +84,7 @@ class SchemaBaselineTest extends IntegrationTest {
     /**
      * 운영 마이그레이션은 재베이스라인 V1과 그 뒤의 새 번호뿐이어야 한다 - 옛 번호(V2~V12의 옛 내용)가 되살아나면
      * 재베이스라인 뒤의 기존 DB(baseline 1만 기록)에는 그것이 "적용 안 된 마이그레이션"으로 보여 기동 시 실행되고,
-     * 이미 있는 테이블을 다시 만들다 실패한다. V2는 재베이스라인 뒤 첫 새 마이그레이션(KAN-223 계정)이고 V3는 탈퇴의 FK 변경(KAN-241), V4는 활성 버전 감사의 caller_ip(KAN-244), V5는 7문항 정의 gn-2026.10.1 발행(KAN-260), V6는 음성 저장 동의와 대응표(KAN-269), V7은 단어 학습 스키마, V8은 단어 학습 발행본 wd-gn-2026.10.1(KAN-265)이다.
+     * 이미 있는 테이블을 다시 만들다 실패한다. V2는 재베이스라인 뒤 첫 새 마이그레이션(KAN-223 계정)이고 V3는 탈퇴의 FK 변경(KAN-241), V4는 활성 버전 감사의 caller_ip(KAN-244), V5는 7문항 정의 gn-2026.10.1 발행(KAN-260), V6는 음성 저장 동의와 대응표(KAN-269), V7은 단어 학습 스키마, V8은 단어 학습 발행본 wd-gn-2026.10.1(KAN-265), V9는 억양 학습 스키마, V10은 억양 학습 발행본 in-gn-2026.10.1(KAN-264)이다.
      * 테스트 픽스처(V899~)는 test 프로파일에만 있다. 새 마이그레이션을 더하면 이 목록도 함께 늘린다.
      */
     @Test
@@ -92,8 +92,8 @@ class SchemaBaselineTest extends IntegrationTest {
         List<String> versions = jdbc.queryForList(
                 "select version from flyway_schema_history where success order by installed_rank",
                 String.class);
-        assertEquals(List.of("1", "2", "3", "4", "5", "6", "7", "8", "899", "900", "901"), versions,
-                "운영 마이그레이션 V1~V8 뒤에는 테스트 픽스처(db/testdata)만 와야 한다");
+        assertEquals(List.of("1", "2", "3", "4", "5", "6", "7", "8", "9", "10", "899", "900", "901"), versions,
+                "운영 마이그레이션 V1~V10 뒤에는 테스트 픽스처(db/testdata)만 와야 한다");
     }
 
     /**
@@ -297,7 +297,9 @@ class SchemaBaselineTest extends IntegrationTest {
                 Map.entry("word_set_attempt", Set.of("pk_word_set_attempt", "ix_word_set_attempt_user")),
                 Map.entry("word_attempt_answer", Set.of("pk_word_attempt_answer",
                         "ux_word_attempt_answer_attempt_item")),
-                Map.entry("word_wrong_answer", Set.of("pk_word_wrong_answer", "ux_word_wrong_answer_user_item")));
+                Map.entry("word_wrong_answer", Set.of("pk_word_wrong_answer", "ux_word_wrong_answer_user_item")),
+                // KAN-264 억양 학습 발행본 (V9) - 발행본뿐이고 계정별 기록은 없다.
+                Map.entry("intonation_learning_definition", Set.of("pk_intonation_learning_definition")));
 
         Map<String, Set<String>> actual = new TreeMap<>();
         jdbc.query("select tablename, indexname from pg_indexes"
