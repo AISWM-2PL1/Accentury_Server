@@ -50,7 +50,7 @@ import java.util.concurrent.atomic.AtomicReference;
  * 알아볼 수 있게 {@link Task}로 감싸 추적한다.
  * <p>
  * 음성 저장에 동의한 세션이면 종결 뒤, 버퍼를 지우기 전에 학습 샘플을 남긴다 (KAN-201, KAN-269,
- * {@link TrainingSampleStore}). 동의하지 않은 익명 세션은 음성 없이 라벨만 남긴다 (KAN-274). 어느 쪽이든 AI가 계약대로 답한 건(성공과 판정 실패)만이고, 계약 위반과 AI 불가는 원점수도 판정도 없어 남기지
+ * {@link TrainingSampleStore}). 동의하지 않은 세션은 음성 없이 라벨만 남긴다 (KAN-274, 계정 세션은 KAN-276부터). 어느 쪽이든 AI가 계약대로 답한 건(성공과 판정 실패)만이고, 계약 위반과 AI 불가는 원점수도 판정도 없어 남기지
  * 않는다. 저장 실패는 분석 결과에 영향을 주지 않는다.
  */
 class HttpAnalysisDispatcher implements AnalysisDispatcher {

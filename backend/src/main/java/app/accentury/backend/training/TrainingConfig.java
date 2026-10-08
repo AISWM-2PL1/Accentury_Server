@@ -5,6 +5,7 @@ import io.micrometer.core.instrument.MeterRegistry;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.scheduling.concurrent.ThreadPoolTaskExecutor;
 import software.amazon.awssdk.core.client.config.ClientOverrideConfiguration;
 import software.amazon.awssdk.http.apache.ApacheHttpClient;
 import software.amazon.awssdk.regions.Region;
@@ -72,6 +73,38 @@ class TrainingConfig {
                                             ObjectMapper objectMapper, MeterRegistry meterRegistry) {
         return new S3TrainingSampleStore(trainingS3Client, requireBucket(properties), requireKeyPrefix(properties),
                 owners, consents, objectMapper, Clock.systemUTC(), meterRegistry);
+    }
+
+    /**
+     * 단어 정오 기록의 대기 상한 (KAN-276). 기록 1건은 작은 PutObject 하나라 스레드 하나로 충분하다. S3가 멈춰도
+     * 대기열이 이 수를 넘으면 버리므로 메모리가 자라지 않는다 - 응시 7문항 중 단어 4문항이라 1000건은 세션 250개다.
+     */
+    static final int VOCAB_ANSWER_QUEUE_CAPACITY = 1000;
+
+    /**
+     * 단어 정오 기록 전용 실행기. 큐가 넘치면 기본 거절(TaskRejectedException)이 나고 저장소가 받아 로그와
+     * 지표({@code failed})로 남긴다 - 조용히 버리는 정책은 쓰지 않는다 ({@code FeedbackNotifyConfig}와 같은 이유).
+     * 종료 때는 큐에 든 것까지 마치되 5초만 기다린다.
+     */
+    @Bean
+    ThreadPoolTaskExecutor vocabAnswerSampleExecutor() {
+        ThreadPoolTaskExecutor executor = new ThreadPoolTaskExecutor();
+        executor.setThreadNamePrefix("vocab-answer-sample-");
+        executor.setCorePoolSize(1);
+        executor.setMaxPoolSize(1);
+        executor.setQueueCapacity(VOCAB_ANSWER_QUEUE_CAPACITY);
+        executor.setWaitForTasksToCompleteOnShutdown(true);
+        executor.setAwaitTerminationSeconds(5);
+        return executor;
+    }
+
+    @Bean
+    VocabAnswerSampleStore vocabAnswerSampleStore(S3Client trainingS3Client, AccenturyProperties properties,
+                                                  ObjectMapper objectMapper,
+                                                  ThreadPoolTaskExecutor vocabAnswerSampleExecutor,
+                                                  MeterRegistry meterRegistry) {
+        return new S3VocabAnswerSampleStore(trainingS3Client, requireBucket(properties), requireKeyPrefix(properties),
+                objectMapper, Clock.systemUTC(), vocabAnswerSampleExecutor, meterRegistry);
     }
 
     /** 환경 접두는 소문자 영숫자와 하이픈만이다 - 슬래시가 섞이면 태스크 역할의 접두 조건과 어긋난다. */

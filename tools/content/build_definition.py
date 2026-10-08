@@ -55,6 +55,15 @@ V2__<version>.sql부터 다시 번호를 매긴다. V1 파일의 주석에는 �
         --set-layout VVWVWWW --estimated-duration-sec 180 --published-at 2026-10-04T00:00:00Z \\
         --out ../../backend/src/main/resources/db/migration/V5__gn_2026_10_1_seven_items.sql
 
+검수 결과로 문항을 바꾼 재발행 (KAN-276 - gn-2026.10.2 = gn-2026.10.1에 curation_gn_2026_10_2.py 적용)
+    python3 build_definition.py --reissue-from ../../backend/src/main/resources/db/migration/V5__gn_2026_10_1_seven_items.sql \\
+        --same-content-as gn-2026.10.1 --curation --test-version gn-2026.10.2 --score-version sv-0.5 \\
+        --set-layout VVWVWWW --estimated-duration-sec 180 --published-at 2026-10-08T00:00:00Z \\
+        --out ../../backend/src/main/resources/db/migration/V11__gn_2026_10_2_curated.sql
+
+--curation은 바이트 대조 대신 검수 문서의 원문이 원본 문장과 같은지, 고친 문장의 어절 수가 같은지, 한
+세트 안에 같은 문구가 두 번 오지 않는지를 본다. 어휘 선택지는 testVersion을 시드로 다시 섞는다.
+
 --reissue-from은 재료(가이드 곡선, 인계본) 대신 이미 발행된 마이그레이션에서 --same-content-as
 버전의 본문을 읽어 문항 목록을 그대로 옮긴다. 재료 파일이 손에 없어도 되고, 문항 본문이 원본과
 바이트 단위로 같은지를 실행할 때마다 대조한다. --set-layout은 세트 하나의 구성과 출제 순서다
@@ -355,6 +364,8 @@ def main() -> None:
     parser.add_argument("--reissue-from", type=Path, metavar="MIGRATION_SQL",
                         help="재료 대신 이 마이그레이션에 발행된 --same-content-as 버전의 본문에서 "
                              "문항을 그대로 옮긴다 (KAN-260)")
+    parser.add_argument("--curation", action="store_true",
+                        help="--reissue-from 재발행에 검수 결과(curation_gn_2026_10_2.py)를 적용한다 (KAN-276)")
     parser.add_argument("--set-layout", metavar="PATTERN",
                         help="세트 하나의 구성과 출제 순서 - V(음성)와 W(어휘)의 문자열 (KAN-260). "
                              "--reissue-from과 함께 쓴다")
@@ -433,8 +444,99 @@ def validate_layout(pattern: str, voices: int, vocabulary: int) -> tuple[int, in
     return v, w
 
 
+def curated_items(source: dict, choice_seed: str) -> list[dict]:
+    """검수 결과(curation_gn_2026_10_2.py)를 원본 정의에 적용한 문항 목록 (KAN-276).
+
+    음성은 원본 문항에서 삭제분을 빼고 고친 문장만 바꾼다 - itemId, scriptKey, guideF0는 원본 그대로다.
+    고친 문장은 검수 문서의 원문이 원본 문장과 같고 어절 수가 같아야 한다 (곡선이 어절당 20점 격자).
+    어휘는 검수본으로 새로 만든다 - 남은 낱말은 원본 itemId와 물음을 물려받고, 신규는 원본 풀 다음
+    번호(w146)부터 매긴다. 물려받는 itemId는 원본 문항 문구의 낱말로 찾는다. 선택지는 choice_seed로 섞는다.
+    seq는 원본처럼 음성과 어휘를 번갈아 매기고, 짧은 풀이 끝나면 남은 쪽을 잇는다.
+    """
+    from curation_gn_2026_10_2 import VOCABULARY, VOICE_DELETED, VOICE_EDITED
+
+    items = sorted(source["items"], key=lambda item: item["seq"])
+    source_voices = [item for item in items if item["type"] == "VOICE"]
+    source_words = [item for item in items if item["type"] == "VOCABULARY"]
+    voice_ids = {item["itemId"] for item in source_voices}
+    unknown = [i for i in [*VOICE_DELETED, *VOICE_EDITED] if i not in voice_ids]
+    if unknown:
+        raise SystemExit(f"검수 결과의 음성 itemId가 원본에 없다: {' '.join(unknown)}")
+    overlap = set(VOICE_DELETED) & set(VOICE_EDITED)
+    if overlap:
+        raise SystemExit(f"삭제와 수정에 함께 있는 음성 문항: {' '.join(sorted(overlap))}")
+
+    voices: list[dict] = []
+    for item in source_voices:
+        if item["itemId"] in VOICE_DELETED:
+            continue
+        item = dict(item)
+        if item["itemId"] in VOICE_EDITED:
+            before, after = VOICE_EDITED[item["itemId"]]
+            if item["prompt"] != before:
+                raise SystemExit(f"{item['itemId']} 검수 문서의 원문이 원본과 다르다:\n"
+                                 f"  원본: {item['prompt']}\n  문서: {before}")
+            if len(after.split()) != len(before.split()):
+                raise SystemExit(f"{item['itemId']} 고친 문장의 어절 수가 다르다 (곡선 격자와 어긋난다): {after}")
+            item["prompt"] = after
+        voices.append(item)
+
+    # 원본 문구는 "'낱말'는 표준어로 무엇일까요?" 꼴이다 - 첫 따옴표 쌍 안이 낱말이다.
+    by_word = {item["prompt"].split("'")[1]: item for item in source_words}
+    rng = random.Random(choice_seed)
+    next_new = len(source_words) + 1
+    words: list[dict] = []
+    seen_ids: set[str] = set()
+    for _category, dialect, answer, wrong, origin in VOCABULARY:
+        if origin is None:
+            item_id = f"w{next_new}"
+            next_new += 1
+            ask = "뜻"  # 신규가 든 네 분류는 원본에서 전부 "뜻" 물음이다
+        else:
+            if origin not in by_word:
+                raise SystemExit(f"검수본의 원래 낱말 '{origin}'이 원본 어휘 문항에 없다")
+            item_id = by_word[origin]["itemId"]
+            ask = "표준어" if by_word[origin]["prompt"].endswith("표준어로 무엇일까요?") else "뜻"
+        if item_id in seen_ids:
+            raise SystemExit(f"검수본에서 같은 원래 낱말을 두 번 썼다: {origin}")
+        seen_ids.add(item_id)
+        if len({answer, *wrong}) != 1 + len(wrong):
+            raise SystemExit(f"'{dialect}'의 선택지가 겹친다: {answer}, {wrong}")
+        words.append(vocabulary_item(item_id, 0, (dialect, answer, wrong, ask, None, None), rng))
+
+    dialects = [entry[1] for entry in VOCABULARY]
+    if len(set(dialects)) != len(dialects):
+        raise SystemExit("검수본에 같은 사투리 낱말이 두 번 있다")
+    prompts = [voice["prompt"] for voice in voices]
+    if len(set(prompts)) != len(prompts):
+        raise SystemExit("음성 문장이 겹친다")
+
+    result: list[dict] = []
+    for index in range(max(len(voices), len(words))):
+        for pool in (voices, words):
+            if index < len(pool):
+                result.append({**pool[index], "seq": len(result) + 1})
+    return result
+
+
+def require_distinct_sets(items: list[dict], v: int, w: int) -> None:
+    """VoiceSets.derive와 같은 순환 규칙으로 세트를 나눠, 한 세트 안에 같은 문구가 두 번 오지 않는지 본다 (KAN-276)."""
+    voices = [i["prompt"] for i in sorted(items, key=lambda i: i["seq"]) if i["type"] == "VOICE"]
+    words = [i["prompt"] for i in sorted(items, key=lambda i: i["seq"]) if i["type"] == "VOCABULARY"]
+    sets = max(-(-len(voices) // v), -(-len(words) // w))
+    for k in range(sets):
+        picked = ([voices[(k * v + o) % len(voices)] for o in range(v)]
+                  + [words[(k * w + o) % len(words)] for o in range(w)])
+        if len(set(picked)) != len(picked):
+            raise SystemExit(f"세트 {k + 1}에 같은 문구가 두 번 들어간다: {picked}")
+
+
 def reissue(args) -> None:
-    """이미 발행된 본문의 문항을 그대로 두고 버전 속성만 바꾼 재발행 (KAN-260)."""
+    """이미 발행된 본문의 문항을 그대로 두고 버전 속성만 바꾼 재발행 (KAN-260).
+
+    --curation이면 문항을 검수 결과로 바꾼 재발행이다 (KAN-276). 바이트 대조 대신 curated_items의
+    원문 대조와 세트 안 중복 검사를 한다.
+    """
     if not args.same_content_as:
         raise SystemExit("--reissue-from에는 원본 testVersion(--same-content-as)이 필요하다")
     if args.same_content_as == args.test_version:
@@ -442,6 +544,10 @@ def reissue(args) -> None:
     if args.sentences or args.sentences_from or args.guide_f0:
         raise SystemExit("--reissue-from은 재료(--guide-f0, --sentences)를 읽지 않는다")
     source = published_definition(args.reissue_from, args.same_content_as)
+    if args.curation:
+        if not args.set_layout:
+            raise SystemExit("--curation에는 --set-layout이 필요하다")
+        source = {**source, "items": curated_items(source, args.choice_seed or args.test_version)}
     voices = sum(1 for item in source["items"] if item["type"] == "VOICE")
     vocabulary = len(source["items"]) - voices
 
@@ -458,18 +564,25 @@ def reissue(args) -> None:
         v, w = SET_SIZE, SET_SIZE
     definition["items"] = source["items"]
 
-    # 문항 본문이 원본과 바이트 단위로 같아야 한다 - 같은 직렬화 규칙으로 다시 써서 대조한다.
-    same = (json.dumps(definition["items"], ensure_ascii=False, indent=2)
-            == json.dumps(source["items"], ensure_ascii=False, indent=2))
-    if not same:
-        raise SystemExit("문항 본문이 원본과 다르다")
+    if args.curation:
+        require_distinct_sets(definition["items"], v, w)
+        header = curation_header(definition, args.same_content_as, voices, vocabulary, v, w,
+                                 -(-voices // v), -(-vocabulary // w))
+    else:
+        # 문항 본문이 원본과 바이트 단위로 같아야 한다 - 같은 직렬화 규칙으로 다시 써서 대조한다.
+        same = (json.dumps(definition["items"], ensure_ascii=False, indent=2)
+                == json.dumps(source["items"], ensure_ascii=False, indent=2))
+        if not same:
+            raise SystemExit("문항 본문이 원본과 다르다")
 
     sets = max(-(-voices // v), -(-vocabulary // w))
+    if not args.curation:
+        header = layout_header(definition, args.same_content_as, voices, vocabulary, v, w, sets)
     body = json.dumps(definition, ensure_ascii=False, indent=2)
     if "$definition$" in body:
         raise SystemExit("본문에 달러 인용 구분자가 들어 있다 - 다른 구분자를 써야 한다")
     sql = f"""\
-{layout_header(definition, args.same_content_as, voices, vocabulary, v, w, sets)}
+{header}
 insert into test_definition (test_version, dialect, score_version, body, published_at)
 values ('{definition["testVersion"]}', '{definition["dialect"]}', '{definition["scoreVersion"]}', $definition${body}$definition$,
         timestamp with time zone '{args.published_at}');
@@ -482,9 +595,37 @@ values ('{definition["testVersion"]}', '{definition["dialect"]}', '{definition["
         args.json_out.write_text(body, encoding="utf-8")
     print(f"[발행본] {definition['testVersion']} 음성 {voices} + 어휘 {vocabulary},"
           f" 세트 구성 {args.set_layout or 'VWVWVWVWVW'} = 세트 {sets}개", file=sys.stderr)
-    print(f"[대조]   문항 {len(definition['items'])}개가 {args.same_content_as}과 바이트 단위로 같다",
-          file=sys.stderr)
+    if args.curation:
+        print(f"[대조]   검수 원문이 {args.same_content_as}과 같고, 세트 {sets}개 안에 같은 문구가 없다",
+              file=sys.stderr)
+    else:
+        print(f"[대조]   문항 {len(definition['items'])}개가 {args.same_content_as}과 바이트 단위로 같다",
+              file=sys.stderr)
     print(f"[크기]   마이그레이션 {len(sql.encode('utf-8')) / 1024:.0f}KB", file=sys.stderr)
+
+
+def curation_header(definition: dict, same_content_as: str, voices: int, vocabulary: int,
+                    v: int, w: int, voice_sets: int, vocabulary_sets: int) -> str:
+    """검수 결과로 문항을 바꾼 재발행의 머리말 (KAN-276)."""
+    layout = definition["setLayout"]
+    sets = max(voice_sets, vocabulary_sets)
+    smaller = "어휘" if vocabulary_sets < voice_sets else "음성"
+    return f"""\
+-- KAN-276: {same_content_as}의 문항을 사람 검수 결과로 바꾼 재발행 - 세트 구성 {layout}(음성 {v} + 어휘 {w}),
+-- 음성 {voices}문항 + 어휘 {vocabulary}문항 = 세트 {sets}개.
+--
+-- 이 파일은 손으로 쓰지 않는다 - tools/content/build_definition.py --reissue-from --curation 이
+-- {same_content_as}의 본문에 tools/content/curation_gn_2026_10_2.py(검수 결과)를 적용해 만든다.
+--
+-- 음성은 {same_content_as}에서 삭제분을 빼고 일부 문장만 고쳤다. 고친 문장은 어절 수가 원문과 같아 itemId,
+-- scriptKey, guideF0는 원본 그대로다. 어휘는 검수본으로 다시 만들었다 - 남은 낱말은 원본 itemId를 물려받고
+-- (사투리 표기나 정답을 고친 것 포함), 신규 낱말은 w146부터다. 오답은 검수본에서 전부 새로 썼다.
+--
+-- 두 풀의 크기가 달라 {smaller} 풀이 세트를 넘어 처음부터 되풀이된다 (VoiceSets 순환 규칙). 한 세트 안에
+-- 같은 문구가 두 번 오지 않는 것은 빌드할 때 검사했다. scoreVersion은 채점 규칙이 같아 그대로다.
+--
+-- 활성 전환은 이 파일이 하지 않는다. 2단계 롤아웃(KAN-26)이라 새 정의를 먼저 배포하고
+-- 활성 전환은 그 다음 PUT /admin/v0/active-version 호출이다."""
 
 
 def layout_header(definition: dict, same_content_as: str, voices: int, vocabulary: int,

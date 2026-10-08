@@ -2,12 +2,13 @@
 # -*- coding: utf-8 -*-
 """단어 학습 발행본 JSON과 Flyway 마이그레이션을 만든다 (KAN-265, API 명세서 §3.16).
 
-레벨테스트 어휘 풀(vocabulary_gn.py의 WORDS, 145개)을 원천으로 학습용 발행본을 따로 낸다
-(2026-10-07 결정 - 별도 풀을 새로 만들지 않고 재사용한다). 발행본은 발행 후 불변이라 기존
-행을 UPDATE하지 않고, 내용이 바뀌면 새 contentVersion으로 다시 발행한다.
+레벨테스트 어휘 풀을 원천으로 학습용 발행본을 따로 낸다 (2026-10-07 결정 - 별도 풀을 새로 만들지
+않고 재사용한다). 원천은 검수한 어휘 72개(curation_gn_2026_10_2.py, gn-2026.10.2와 같은 목록)다 - 처음
+발행은 vocabulary_gn.py의 145개였고 KAN-276(2026-10-08)이 같은 contentVersion을 덮어썼다(학습 발행본이
+초기 단계라 둔 예외). 다음부터는 발행 후 불변 규칙대로 새 contentVersion으로 다시 발행한다.
 
 세트와 레벨 (2026-10-07 결정)
-    세트     vocabulary_gn.py의 분류 주석("# ── 음식과 식재료 ──")이 세트 단위다. 한 분류가
+    세트     검수본의 분류(음식과 식재료 등)가 세트 단위다. 한 분류가
              MAX_CARDS_PER_SET(10)를 넘으면 균등하게 쪼갠다 (23개면 8 + 8 + 7).
     레벨     낱말의 근거를 점수로 본다 - 코퍼스(대화에 실제로 나온 낱말) 0, 일반 1, 사전 2.
              세트 레벨 = 1 + round(세트 평균 점수 x 2). 분류 안에서 점수 오름차순으로 정렬한
@@ -18,7 +19,7 @@
     해설     템플릿 문구("'정구지'는 경남에서 '부추'를 이르는 말입니다."). 낱말별 손 해설은 후속
              티켓이고 새 발행본으로만 바꾼다.
 
-사용 (첫 발행)
+사용 (첫 발행과 KAN-276 덮어쓰기 모두 같은 명령이다)
     python3 build_word_learning.py --content-version wd-gn-2026.10.1 \\
         --published-at 2026-10-07T00:00:00Z \\
         --out ../../backend/src/main/resources/db/migration/V8__wd_gn_2026_10_1_word_learning.sql
@@ -30,11 +31,11 @@ import argparse
 import json
 import math
 import random
-import re
 import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
+from curation_gn_2026_10_2 import NEW_WORD_SOURCE, VOCABULARY  # noqa: E402
 from vocabulary_gn import WORDS  # noqa: E402
 
 DIALECT = "GYEONGNAM"
@@ -42,36 +43,25 @@ MAX_CARDS_PER_SET = 10
 CHOICE_COUNT = 4
 CHOICE_LABELS = "abcd"
 SOURCE_SCORE = {"코퍼스": 0, "일반": 1, "사전": 2}
-CATEGORY_MARKER = re.compile(r"^\s*#\s*─+\s*(.+?)\s*─+\s*$")
-ENTRY_START = re.compile(r'^\s*\("([^"]+)",')
 
 
 def categorized_words() -> list[tuple[str, tuple]]:
-    """(분류, 낱말 튜플) 목록 - 분류는 vocabulary_gn.py의 주석 구분선에서 읽는다.
+    """(분류, 낱말 튜플) 목록 - 검수한 레벨테스트 어휘(curation_gn_2026_10_2.py)를 원천 순서대로 (KAN-276).
 
-    WORDS에는 분류 필드가 없다(레벨테스트는 분류를 쓰지 않는다). 파일의 항목 순서와 WORDS의
-    순서가 같다는 것을 사투리 낱말로 한 줄씩 대조한다 - 어긋나면 세트가 엉뚱한 분류를 받는다.
+    낱말 튜플은 vocabulary_gn.py의 꼴(사투리, 정답, 오답, 물음, 근거, 확신)이다. 이 스크립트는 사투리,
+    정답, 근거만 쓴다. 근거는 원래 낱말의 값을 vocabulary_gn.py에서 물려받고, 신규 낱말은
+    NEW_WORD_SOURCE다 (2026-10-08 결정).
     """
-    source = Path(__file__).resolve().parent / "vocabulary_gn.py"
-    category = None
+    by_dialect = {word[0]: word for word in WORDS}
     result: list[tuple[str, tuple]] = []
-    for line in source.read_text(encoding="utf-8").splitlines():
-        marker = CATEGORY_MARKER.match(line)
-        if marker:
-            category = marker.group(1)
-            continue
-        entry = ENTRY_START.match(line)
-        if not entry:
-            continue
-        if category is None:
-            raise SystemExit(f"분류 주석 앞에 항목이 있다: {line.strip()}")
-        index = len(result)
-        if index >= len(WORDS) or WORDS[index][0] != entry.group(1):
-            expected = WORDS[index][0] if index < len(WORDS) else "(없음)"
-            raise SystemExit(f"{index + 1}번째 항목이 WORDS와 어긋난다: 파일 {entry.group(1)!r}, WORDS {expected!r}")
-        result.append((category, WORDS[index]))
-    if len(result) != len(WORDS):
-        raise SystemExit(f"분류를 읽은 항목 {len(result)}개와 WORDS {len(WORDS)}개가 다르다")
+    for category, dialect, answer, wrong, origin in VOCABULARY:
+        if origin is None:
+            source = NEW_WORD_SOURCE
+        elif origin in by_dialect:
+            source = by_dialect[origin][4]
+        else:
+            raise SystemExit(f"검수본의 원래 낱말 '{origin}'이 vocabulary_gn.py에 없다")
+        result.append((category, (dialect, answer, wrong, None, source, None)))
     return result
 
 
@@ -171,13 +161,16 @@ def migration_sql(definition: dict, published_at: str) -> str:
     return (
         f"-- KAN-265: 단어 학습 발행본 {version} - 어휘 세트 {len(sets)}개, 카드 {cards}장 ({level_summary}).\n"
         "--\n"
-        "-- 이 파일은 손으로 쓰지 않는다 - tools/content/build_word_learning.py가 레벨테스트 어휘 풀\n"
-        "-- (vocabulary_gn.py)에서 만든다. 세트는 분류별(10카드 상한), 레벨은 낱말 근거의 평균, 문항은\n"
+        "-- 이 파일은 손으로 쓰지 않는다 - tools/content/build_word_learning.py가 검수한 레벨테스트 어휘\n"
+        "-- (curation_gn_2026_10_2.py)에서 만든다. 세트는 분류별(10카드 상한), 레벨은 낱말 근거의 평균, 문항은\n"
         "-- 표준어 → 사투리 한 방향이고 오답은 같은 분류에서 contentVersion을 시드로 뽑는다 (명세서 §3.16).\n"
         "--\n"
         "-- 발행 후 불변이다 (§5.4와 같은 규칙). 해설이나 세트 구성이 바뀌면 이 행을 UPDATE하지 않고\n"
         "-- 새 contentVersion으로 INSERT한다 - 진행 중인 시도가 자기 버전의 문항을 계속 봐야 한다.\n"
         "-- 활성 전환 행은 없다 - 서버가 발행 시각이 가장 늦은 발행본을 목록과 상세에 쓴다.\n"
+        "--\n"
+        "-- 예외 (KAN-276, 2026-10-08): 학습 발행본이 아직 초기 단계라 이 행은 검수한 원천으로 같은 contentVersion을\n"
+        "-- 덮어쓴 것이다. 이미 적용된 환경(staging)은 정의 행 교체와 flyway repair로 맞춘다. 다음부터는 새 contentVersion이다.\n"
         "insert into word_learning_definition (content_version, dialect, body, published_at)\n"
         f"values ('{version}', '{definition['dialect']}', $definition${body}$definition$,\n"
         f"        timestamp with time zone '{published_at}');\n"

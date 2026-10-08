@@ -370,6 +370,30 @@ public class TestDefinitionRegistry {
         for (int seq = 1; seq <= items.size(); seq++) {
             require(seqs.contains(seq), "seq는 1부터 연속이어야 한다: " + seq + " 누락");
         }
+        requireDistinctPromptsPerSet(definition);
+    }
+
+    /**
+     * 세트 하나 안에 같은 문구(prompt)가 두 번 오지 않는다 (KAN-276). 두 풀의 크기가 다르면 작은 풀이 세트를 넘어
+     * 되풀이되는데({@link VoiceSets} 순환), itemId는 달라도 문장이나 낱말이 같은 문항이 풀에 섞여 있으면 한 세트에
+     * 같은 내용이 두 번 나온다. itemId 중복은 위에서 이미 막았으므로 여기서는 문구만 본다. 발행된 운영 정의
+     * (gn-2026.09.4, gn-2026.10.1, gn-2026.10.2)는 풀 전체에서도 문구가 겹치지 않아 이 검사로 깨지지 않는다.
+     */
+    private static void requireDistinctPromptsPerSet(TestDefinition definition) {
+        List<TestDefinition.Item> ordered = definition.items().stream()
+                .sorted(Comparator.comparingInt(TestDefinition.Item::seq))
+                .toList();
+        List<TestDefinition> sets = VoiceSets.derive(new TestDefinition(definition.testVersion(),
+                definition.scoreVersion(), definition.dialect(), definition.estimatedDurationSec(),
+                definition.setLayout(), ordered));
+        for (int number = 1; number <= sets.size(); number++) {
+            Set<String> prompts = new HashSet<>();
+            for (TestDefinition.Item item : sets.get(number - 1).items()) {
+                require(prompts.add(item.prompt()),
+                        "세트 " + number + " 안에 같은 문구가 두 번 들어간다: " + item.prompt()
+                                + " (" + definition.testVersion() + ")");
+            }
+        }
     }
 
     /**

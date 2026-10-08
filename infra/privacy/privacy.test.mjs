@@ -152,10 +152,12 @@ test('1항 표의 보유 기간이 행마다 코드와 맞는다', () => {
     // 선택 동의한 응시의 음성은 음성 전용 버킷에 남고 수명주기 만료가 없다 (KAN-269). 이 칸이 기간으로
     // 바뀌면 버킷에 만료 규칙이 생겼다는 뜻이어야 한다.
     ['음성 저장과 학습 활용 (선택 동의)', ['학습 목적 달성 시까지'], 'KAN-269, 음성 전용 버킷(수명주기 만료 없음)'],
-    // 선택 동의하지 않은 익명 세션은 음성 없이 라벨 JSON만 같은 버킷의 _no-audio 접두에 남는다 (KAN-274).
-    // 버킷에 만료 규칙이 없으므로 보유 기간이 음성과 같다.
-    ['분석 정보 (선택 동의하지 않은 익명 응시)', ['학습 목적 달성 시까지'],
+    // 선택 동의하지 않은 세션은 음성 없이 라벨 JSON만 같은 버킷의 _no-audio 접두에 남는다 (KAN-274, 계정 세션은
+    // KAN-276부터). 버킷에 만료 규칙이 없으므로 보유 기간이 음성과 같다.
+    ['분석 정보 (선택 동의하지 않은 응시)', ['학습 목적 달성 시까지'],
       'KAN-274, training/S3TrainingSampleStore.java의 saveLabelOnly'],
+    // 단어 답안의 정오는 동의와 상관없이 같은 _no-audio 트리에 남는다 (KAN-276). DB의 어휘 답안(24시간)과 별개다.
+    ['단어 답안 기록', ['측정 목적 달성 시까지'], 'KAN-276, training/S3VocabAnswerSampleStore.java'],
     // 미완주 세션은 생성 30분 뒤 만료 정리(SessionService.java:133), 완주 세션은 완료 시점부터
     // 24시간(TestSession.java:140-157, CompletionService.java:169-175). 기준점이 둘이라 셋을 함께 본다.
     // 앱 세션이 계정에 붙으면서(KAN-223) 행 이름에서 「익명」을 뺐다 (KAN-240).
@@ -545,12 +547,12 @@ test('로그인 없이 이용하는 앱 판의 처리가 적혀 있다 (KAN-274,
   assert.ok(method.includes('브라우저 웹과 로그인 없이 이용하는 앱은 아래의 선택 동의를 하지 않으시면'), '12항에 익명 앱의 동의 방식이 없다');
 });
 
-test('선택 동의하지 않은 익명 응시의 분석 정보 보관이 적혀 있다 (KAN-274, S3TrainingSampleStore.saveLabelOnly)', () => {
+test('선택 동의하지 않은 응시의 분석 정보 보관이 적혀 있다 (KAN-274, KAN-276, S3TrainingSampleStore.saveLabelOnly)', () => {
   const flat = html.replace(/\s+/g, ' ');
   assert.ok(html.includes('<h3>선택 동의하지 않으신 경우에 남기는 분석 정보</h3>'), '분석 정보 보관 절이 없다');
   const labels = section('<h3>선택 동의하지 않으신 경우에 남기는 분석 정보</h3>', '<h3>테스트 세션</h3>').replace(/\s+/g, ' ');
-  // 대상은 익명 세션(웹, 로그인 없는 앱)이고 음성은 남기지 않는다.
-  assert.ok(labels.includes('브라우저 웹과 로그인 없이 이용하는 앱'), '대상(웹과 로그인 없는 앱)이 없다');
+  // 대상은 웹, 로그인 없는 앱, 로그인 앱 모두이고(계정 세션은 KAN-276부터) 음성은 남기지 않는다.
+  assert.ok(labels.includes('브라우저 웹과 로그인 없이 이용하는 앱, 로그인해 이용하는 앱 모두'), '대상(웹과 앱 전부)이 없다');
   assert.ok(labels.includes('음성 녹음은 남기지 않으며'), '음성을 남기지 않는다는 말이 없다');
   assert.ok(labels.includes('억양 분석 AI 모델을 개선하고 출신 지역별 응시자 구성을 파악'), '목적이 없다');
   // 라벨 JSON의 필드. 필드가 늘면 여기와 본문을 함께 늘린다. 동의 버전과 동의 시각은 이 건에는 없다.
@@ -571,14 +573,15 @@ test('선택 동의하지 않은 익명 응시의 분석 정보 보관이 적혀
   assert.ok(labels.includes('Amazon S3'), '보관 장소가 없다');
   assert.ok(labels.includes('음성과 구분된 위치'), '음성과 구분된 위치에 둔다는 말이 없다');
   assert.ok(labels.includes('학습 목적 달성 시까지'), '보유 기간이 없다');
-  // 계정 세션은 동의하지 않으면 아무것도 남기지 않는다 (HttpAnalysisDispatcher.keepTrainingSample).
-  assert.ok(labels.includes('로그인해 이용하는 앱에서는 선택 동의하지 않으시면 이 분석 정보를 남기지 않습니다'), '계정 세션 제외가 없다');
+  // 계정 세션도 라벨을 남기되 계정 id는 싣지 않는다 (KAN-276, VoiceUploadService - 대응표도 쓰지 않는다).
+  assert.ok(!labels.includes('선택 동의하지 않으시면 이 분석 정보를 남기지 않습니다'), '계정 세션 제외 문장이 남아 있다');
+  assert.ok(labels.includes('계정의 식별자를 넣지 않으며'), '계정 세션의 라벨에 계정 식별자가 없다는 말이 없다');
 
   // 다른 자리의 문장이 이 보관과 어긋나지 않는다: 24시간 삭제의 예외, 5항 파기, 12항.
   const session = section('<h3>테스트 세션</h3>', '<h3>계정 (앱 소셜 로그인)</h3>').replace(/\s+/g, ' ');
   assert.ok(session.includes('그 절에 적은 대로 따로 보관합니다'), '24시간 삭제 문장에 분석 정보 보관의 예외가 없다');
   const disposal = section('<h2>5. 개인정보의 파기', '<h2>6. 정보주체의 권리').replace(/\s+/g, ' ');
-  assert.ok(disposal.includes('선택 동의하지 않으신 익명 응시(브라우저 웹, 로그인 없이 이용하는 앱)의 분석 정보'), '5항에 분석 정보의 보유가 없다');
+  assert.ok(disposal.includes('선택 동의하지 않으신 응시(브라우저 웹, 앱)의 분석 정보'), '5항에 분석 정보의 보유가 없다');
   const method = section('<h2>12. 동의를 받는 방식', '<h2>13. 개인정보 보호책임자').replace(/\s+/g, ' ');
   assert.ok(method.includes('선택 동의를 하지 않으셔도 음성 없이 남기는 분석 정보'), '12항에 분석 정보 보관의 안내가 없다');
   // 동의한 익명 세션의 음성에도 같은 예외가 적혀 있다.
@@ -598,12 +601,36 @@ test('선택 동의하지 않은 익명 응시의 분석 정보 보관이 적혀
   assert.ok(rights6.includes('같은 응시에서 따로 보관한 음성이나 분석 정보가 있으면 함께 요청하실 수 있고'), '6항에 후기 이메일로 음성과 분석 정보를 요청하는 방법이 없다');
   // 재응시의 즉시 삭제가 따로 보관하는 음성과 분석 정보까지 지운다고 읽히지 않는다.
   const session2 = section('<h3>테스트 세션</h3>', '<h3>계정 (앱 소셜 로그인)</h3>').replace(/\s+/g, ' ');
-  assert.ok(session2.includes('따로 보관하는 음성과 분석 정보는 이때 삭제되지 않습니다'), '재응시의 즉시 삭제 문장에 보관 정보의 예외가 없다');
+  assert.ok(session2.includes('따로 보관하는 음성과 분석 정보, 단어 답안 기록은 이때 삭제되지 않습니다'), '재응시의 즉시 삭제 문장에 보관 정보의 예외가 없다');
   // 위탁 표의 AWS 업무에 분석 정보 저장이 들어 있다.
   const trust = section('<h2>3. 개인정보 처리의 위탁', '<h2>4. 개인정보의 국외 이전').replace(/\s+/g, ' ');
-  assert.ok(trust.includes('선택 동의하지 않으신 익명 응시의 분석 정보 저장소'), '3항 위탁 표에 분석 정보 저장이 없다');
+  assert.ok(trust.includes('선택 동의하지 않으신 응시의 분석 정보와 단어 답안 기록 저장소'), '3항 위탁 표에 분석 정보 저장이 없다');
   // 음성 미보존 문장은 그대로다 - 남기는 것은 분석 정보이지 음성이 아니다.
   assert.ok(flat.includes('동의하지 않으신 경우, 음성은 데이터베이스나 S3 같은 영속 저장소에 저장하지 않습니다'), '음성 미보존 문장이 사라졌다');
+});
+
+test('단어 답안 기록 절이 있고 대상, 항목, 장소, 기간이 코드와 맞는다 (KAN-276, S3VocabAnswerSampleStore)', () => {
+  assert.ok(html.includes('<h3>단어 답안 기록</h3>'), '단어 답안 기록 절이 없다');
+  const record = section('<h3>단어 답안 기록</h3>', '<h3>테스트 세션</h3>').replace(/\s+/g, ' ');
+  assert.ok(record.includes('단어 문항의 난이도를 측정'), '목적이 없다');
+  assert.ok(record.includes('선택 동의하셨는지와 상관없이 브라우저 웹과 앱 모두'), '대상(동의와 무관, 웹과 앱)이 없다');
+  // 메타 JSON의 필드 (S3VocabAnswerSampleStore.metadata). 필드가 늘면 여기와 본문을 함께 늘린다.
+  for (const item of [
+    '답안 식별자', '세션 식별자', '문항 식별자', '출신 지역', '테스트 버전', '채점 버전', '고르신 선택지',
+    '그 문항의 정답', '정답 여부', '답하신 시각', '저장 시각',
+  ]) {
+    assert.ok(record.includes(item), `단어 답안 기록 절의 항목에 「${item}」이 없다`);
+  }
+  assert.ok(record.includes('가명으로 바꾸지 않고 그대로 저장'), '식별자를 그대로 저장한다는 말이 없다');
+  assert.ok(record.includes('Amazon S3'), '보관 장소가 없다');
+  assert.ok(record.includes('측정 목적 달성 시까지'), '보유 기간이 없다');
+  // 음성 저장에 동의한 계정 세션은 training_voice_owner가 세션과 계정을 계속 잇는다 (TrainingVoiceOwners.record) -
+  // 같은 세션 식별자의 단어 기록도 계정으로 찾을 수 있으므로 「찾을 수 없다」만 적으면 거짓 고지다 (Codex 리뷰 P2).
+  assert.ok(record.includes('음성 저장에 동의하신 응시도 계정과 세션의 연결 기록이 남으므로'), '계정 연결 기록의 예외가 없다');
+  const labels = section('<h3>선택 동의하지 않으신 경우에 남기는 분석 정보</h3>', '<h3>단어 답안 기록</h3>').replace(/\s+/g, ' ');
+  assert.ok(labels.includes('계정과 세션의 연결 기록이 남으므로'), '분석 정보 절에 계정 연결 기록의 예외가 없다');
+  const disposal = section('<h2>5. 개인정보의 파기', '<h2>6. 정보주체의 권리').replace(/\s+/g, ' ');
+  assert.ok(disposal.includes('단어 답안 기록: 측정 목적 달성 시까지'), '5항에 단어 답안 기록의 보유가 없다');
 });
 
 test('앱이 로그인으로만 이용된다는 문장이 남아 있지 않다 (KAN-274)', () => {

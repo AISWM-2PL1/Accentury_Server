@@ -110,10 +110,11 @@ class IntonationLearningApiTest extends IntegrationTest {
     }
 
     @Test
-    void 첫_발행본은_레벨테스트_음성_풀_전부를_어절_수_레벨로_싣는다() {
+    void 발행본은_검수한_레벨테스트_음성_풀_전부를_어절_수_레벨로_싣는다() {
         IntonationLearningDefinition current = registry.current().definition();
         assertEquals("in-gn-2026.10.1", current.contentVersion());
-        assertEquals(145, current.courses().stream().mapToInt(course -> course.cards().size()).sum());
+        // KAN-276이 같은 버전을 검수한 gn-2026.10.2의 음성 124문장으로 덮어썼다 (원래 gn-2026.10.1의 145문장).
+        assertEquals(124, current.courses().stream().mapToInt(course -> course.cards().size()).sum());
         for (IntonationLearningDefinition.Course course : current.courses()) {
             assertTrue(course.cards().size() <= 10, course.courseId());
             for (IntonationLearningDefinition.Card card : course.cards()) {

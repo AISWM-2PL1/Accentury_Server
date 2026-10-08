@@ -16,10 +16,10 @@
              topic(주제), standard(표준어 원문), referenceAudioPath(기준 음원)는 전부 null이다.
              원천에 없고 기억으로 쓰지 않는다. 채워지면 새 발행본으로 낸다.
 
-사용 (첫 발행)
+사용 (KAN-276 덮어쓰기 - 원천을 검수한 gn-2026.10.2로. 첫 발행은 V5의 gn-2026.10.1이었다)
     python3 build_intonation_learning.py \\
-        --source-migration ../../backend/src/main/resources/db/migration/V5__gn_2026_10_1_seven_items.sql \\
-        --source-version gn-2026.10.1 --content-version in-gn-2026.10.1 \\
+        --source-migration ../../backend/src/main/resources/db/migration/V11__gn_2026_10_2_curated.sql \\
+        --source-version gn-2026.10.2 --content-version in-gn-2026.10.1 \\
         --published-at 2026-10-08T00:00:00Z \\
         --out ../../backend/src/main/resources/db/migration/V10__in_gn_2026_10_1_intonation_learning.sql
 """
@@ -122,6 +122,9 @@ def migration_sql(definition: dict, source_version: str, published_at: str) -> s
         "-- 발행 후 불변이다 (§5.4와 같은 규칙). 표준어 원문이나 기준 음원이 채워지면 이 행을 UPDATE하지\n"
         "-- 않고 새 contentVersion으로 INSERT한다. 활성 전환 행은 없다 - 서버가 발행 시각이 가장 늦은\n"
         "-- 발행본을 목록과 상세에 쓴다.\n"
+        "--\n"
+        "-- 예외 (KAN-276, 2026-10-08): 학습 발행본이 아직 초기 단계라 이 행은 검수한 원천으로 같은 contentVersion을\n"
+        "-- 덮어쓴 것이다. 이미 적용된 환경(staging)은 정의 행 교체와 flyway repair로 맞춘다. 다음부터는 새 contentVersion이다.\n"
         "insert into intonation_learning_definition (content_version, dialect, body, published_at)\n"
         f"values ('{version}', '{definition['dialect']}', $definition${body}$definition$,\n"
         f"        timestamp with time zone '{published_at}');\n"

@@ -135,15 +135,15 @@ class VoiceUploadConsentTest extends IntegrationTest {
     }
 
     @Test
-    void 동의하지_않은_계정_세션은_본문에_동의_버전을_실어도_동의_없이_넘어간다() throws Exception {
+    void 동의하지_않은_계정_세션은_본문에_동의_버전을_실어도_동의_없이_라벨_전용으로_넘어간다() throws Exception {
         String access = signUp();
         JsonNode session = createSession(access, "{\"voiceConsentVersion\": \"" + CONSENT_VERSION + "\"}");
 
         upload(session, "v1", "account-none");
 
         assertNull(lastConsent());
-        // 계정 세션은 라벨 전용 저장 대상이 아니다 - 동의가 없으면 라벨도 남기지 않는다 (KAN-274).
-        assertFalse(lastRequest().labelOnlyWithoutConsent());
+        // KAN-276부터 계정 세션도 익명 세션과 같이 음성 없이 라벨 JSON만 남긴다 (KAN-274는 익명만이었다).
+        assertTrue(lastRequest().labelOnlyWithoutConsent());
     }
 
     @Test
