@@ -36,6 +36,14 @@ public class StoredIntonationLearningDefinition {
         // JPA 전용
     }
 
+    /** 픽스처 전용 - 레지스트리의 기동 동작(발행본 없음, 최신본 선택)을 DB 없이 시험할 수 있게만 한다. */
+    StoredIntonationLearningDefinition(String contentVersion, String dialect, String body, Instant publishedAt) {
+        this.contentVersion = contentVersion;
+        this.dialect = dialect;
+        this.body = body;
+        this.publishedAt = publishedAt;
+    }
+
     public String contentVersion() {
         return contentVersion;
     }

@@ -2,16 +2,22 @@ package app.accentury.backend.learning;
 
 import app.accentury.backend.testdefinition.TestDefinition;
 import org.junit.jupiter.api.Test;
+import tools.jackson.databind.JsonNode;
+import tools.jackson.databind.ObjectMapper;
 
+import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-/** 억양 학습 발행 검증의 단위 명세 (KAN-264) - 틀린 발행본은 기동에서 막힌다. */
+/** 억양 학습 발행 검증과 기동 동작의 단위 명세 (KAN-264) - 틀린 발행본은 기동에서 막힌다. */
 class IntonationLearningRegistryTest {
+
+    private static final ObjectMapper MAPPER = new ObjectMapper();
 
     private static final TestDefinition.GuideF0 CURVE =
             new TestDefinition.GuideF0("semitone", 22, java.util.Arrays.asList(1.0, null, 2.0), null, null);
@@ -75,6 +81,45 @@ class IntonationLearningRegistryTest {
     @Test
     void 경남_발행본만_발행한다() {
         assertRejected(new IntonationLearningDefinition("in-x", "GYEONGBUK", List.of(course("ic01", 1, 1, 1))), "경남");
+    }
+
+    // === 기동 동작 (PR #31 리뷰) - 저장소를 가짜로 바꿔 DB 없이 생성자를 돌린다 ===
+
+    @Test
+    void 발행본이_하나도_없으면_기동이_막힌다() {
+        IllegalStateException e = assertThrows(IllegalStateException.class,
+                () -> new IntonationLearningRegistry(MAPPER, List::of));
+        assertTrue(e.getMessage().contains("하나도 없다"), e.getMessage());
+    }
+
+    @Test
+    void 목록과_상세는_발행_시각이_가장_늦은_발행본을_쓴다() {
+        // 저장소는 발행 시각 오름차순으로 돌려준다 - 마지막 행이 현재 발행본이다.
+        IntonationLearningRegistry registry = new IntonationLearningRegistry(MAPPER, () -> List.of(
+                stored(new IntonationLearningDefinition("in-old", "GYEONGNAM", List.of(course("ic01", 1, 1, 1))),
+                        "2026-10-01T00:00:00Z"),
+                stored(new IntonationLearningDefinition("in-new", "GYEONGNAM", List.of(course("ic01", 1, 2, 2))),
+                        "2026-10-08T00:00:00Z")));
+
+        assertEquals("in-new", registry.current().definition().contentVersion());
+        assertEquals("in-new", registry.current().listResponse().contentVersion());
+        assertEquals(2, registry.current().courseResponse("ic01").cards().size());
+    }
+
+    @Test
+    void 코스가_없는_발행본의_목록은_빈_배열로_나간다() {
+        IntonationLearningRegistry registry = new IntonationLearningRegistry(MAPPER, () -> List.of(
+                stored(new IntonationLearningDefinition("in-empty", "GYEONGNAM", List.of()), "2026-10-08T00:00:00Z")));
+
+        JsonNode list = MAPPER.readTree(MAPPER.writeValueAsString(registry.current().listResponse()));
+        assertTrue(list.get("courses").isArray(), list.toString());
+        assertEquals(0, list.get("courses").size());
+    }
+
+    private static StoredIntonationLearningDefinition stored(IntonationLearningDefinition definition,
+                                                             String publishedAt) {
+        return new StoredIntonationLearningDefinition(definition.contentVersion(), definition.dialect(),
+                MAPPER.writeValueAsString(definition), Instant.parse(publishedAt));
     }
 
     private static void assertRejected(IntonationLearningDefinition definition, String messagePart) {
