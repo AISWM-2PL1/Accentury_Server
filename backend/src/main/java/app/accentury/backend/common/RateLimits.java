@@ -79,7 +79,9 @@ public class RateLimits {
          * 단어 학습의 쓰기 세 경로(시도 시작, 답안, 완료) - 계정당, 한 통 (§2.5, §3.16, KAN-265). Access 토큰
          * 뒤의 경로라 세션이 아니라 계정 id가 키다 - 학습에는 세션이 없다. 축 이름이 셋째인 {@code user}다.
          */
-        WORD_LEARNING("user");
+        WORD_LEARNING("user"),
+        /** 억양 학습 녹음 업로드 - 계정당 (§2.5, §3.19, KAN-267). AI 추론을 쓰는 경로라 단어 학습과 따로 센다. */
+        INTONATION_LEARNING("user");
 
         private final String axis;
 
@@ -139,7 +141,8 @@ public class RateLimits {
                 Scope.COMPLETE, properties.completion().rateLimitPerMinute(),
                 Scope.FEEDBACK, properties.feedback().rateLimitPerMinute(),
                 Scope.AUTH, properties.auth().rateLimitPerMinute(),
-                Scope.WORD_LEARNING, properties.learning().rateLimitPerMinute());
+                Scope.WORD_LEARNING, properties.learning().rateLimitPerMinute(),
+                Scope.INTONATION_LEARNING, properties.learning().intonationRateLimitPerMinute());
     }
 
     /**

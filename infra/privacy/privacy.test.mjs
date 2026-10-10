@@ -158,6 +158,8 @@ test('1항 표의 보유 기간이 행마다 코드와 맞는다', () => {
       'KAN-274, training/S3TrainingSampleStore.java의 saveLabelOnly'],
     // 단어 답안의 정오는 동의와 상관없이 같은 _no-audio 트리에 남는다 (KAN-276). DB의 어휘 답안(24시간)과 별개다.
     ['단어 답안 기록', ['측정 목적 달성 시까지'], 'KAN-276, training/S3VocabAnswerSampleStore.java'],
+    // 억양 학습 채점 시도는 DB에 탈퇴까지 남고 탈퇴 트랜잭션이 지운다 (KAN-267, V13, learning/LearningRecords.java).
+    ['억양 학습 기록 (앱)', ['탈퇴'], 'KAN-267, V13__intonation_learning_attempt.sql, LearningRecords.purge'],
     // 미완주 세션은 생성 30분 뒤 만료 정리(SessionService.java:133), 완주 세션은 완료 시점부터
     // 24시간(TestSession.java:140-157, CompletionService.java:169-175). 기준점이 둘이라 셋을 함께 본다.
     // 앱 세션이 계정에 붙으면서(KAN-223) 행 이름에서 「익명」을 뺐다 (KAN-240).
@@ -633,6 +635,29 @@ test('단어 답안 기록 절이 있고 대상, 항목, 장소, 기간이 코�
   assert.ok(disposal.includes('단어 답안 기록: 측정 목적 달성 시까지'), '5항에 단어 답안 기록의 보유가 없다');
 });
 
+test('억양 학습 절이 있고 항목, 녹음 처리, 기간이 코드와 맞는다 (KAN-267, IntonationAttempt, S3LearningVoiceStore)', () => {
+  assert.ok(html.includes('<h3>억양 학습 (앱)</h3>'), '억양 학습 절이 없다');
+  const learning = section('<h3>억양 학습 (앱)</h3>', '<h3>테스트 세션</h3>').replace(/\s+/g, ' ');
+  assert.ok(learning.includes('로그인해 이용하는 앱에서만'), '대상(로그인한 앱)이 없다');
+  // intonation_learning_attempt의 열 (V13). 열이 늘면 여기와 본문을 함께 늘린다.
+  for (const item of [
+    '시도 식별자', '계정 식별자', '학습 콘텐츠 버전', '카드 식별자', '재전송을 가리는 키', '분석 상태와 오류 코드',
+    '억양 원점수', '보여 드린 점수', '올리고 내릴 음절', '음질 판정 코드', '모델 버전', '채점 버전',
+  ]) {
+    assert.ok(learning.includes(item), `억양 학습 절의 항목에 「${item}」이 없다`);
+  }
+  assert.ok(learning.includes('녹음은 이 기록에 들어가지 않습니다'), '녹음 미포함 문장이 없다');
+  assert.ok(learning.includes('탈퇴하실 때까지'), '보유 기간(탈퇴까지)이 없다');
+  // 동의한 계정의 학습 녹음은 음성 버킷 학습 트리에 남고 대응표가 시도 id로 잇는다 (S3LearningVoiceStore).
+  const voice = section('<h3>음성 저장과 AI 모델 학습 활용 (선택 동의)</h3>', '<h3>선택 동의하지 않으신 경우에 남기는 분석 정보</h3>')
+    .replace(/\s+/g, ' ');
+  assert.ok(voice.includes('억양 학습에서 대사 카드마다 녹음하신 음성'), '음성 저장 절에 학습 녹음이 없다');
+  assert.ok(voice.includes('동의하지 않으신 계정의 학습 녹음은 음성도 라벨 정보도 남기지 않고'), '미동의 학습 녹음의 처리가 없다');
+  assert.ok(voice.includes('학습 시도 식별자를 잇는 연결 기록'), '학습 녹음의 연결 기록이 없다');
+  const disposal = section('<h2>5. 개인정보의 파기', '<h2>6. 정보주체의 권리').replace(/\s+/g, ' ');
+  assert.ok(disposal.includes('억양 학습 기록: 탈퇴하실 때까지'), '5항에 억양 학습 기록의 파기가 없다');
+});
+
 test('사투리 번역기 절이 있고 구글 전송, 보관 항목, 장소, 기간, 탈퇴 처리가 코드와 맞는다 (KAN-266, S3TranslationRecordStore)', () => {
   assert.ok(html.includes('<h3>사투리 번역기 (앱)</h3>'), '사투리 번역기 절이 없다');
   const translator = section('<h3>사투리 번역기 (앱)</h3>', '<h3>테스트 세션</h3>').replace(/\s+/g, ' ');
@@ -712,7 +737,9 @@ test('1항에 계정 절이 있고 수집 항목과 목적과 보유 기간을 �
   assert.ok(account.includes('만 14세 미만 가입 제한'), '생년월일의 목적(만 14세 미만 가입 제한)이 없다');
   // 앱 세션은 계정에 붙지만 24시간 규칙은 같다. 로그에 세션과 계정의 대응을 남기지 않는 것은
   // SessionService의 「세션 생성」 로그가 지킨다 (AuthApiTest의 세션 생성 로그 검사).
-  assert.ok(account.includes('계정에 지난 결과가 쌓이지 않습니다'), '계정 세션의 보유 기간 서술이 없다');
+  assert.ok(account.includes('계정에 지난 테스트 결과가 쌓이지 않습니다'), '계정 세션의 보유 기간 서술이 없다');
+  // 억양 학습의 시도 기록은 계정에 쌓인다 (KAN-267) - 「쌓이지 않는다」만 있으면 거짓 고지다.
+  assert.ok(account.includes('억양 학습의 시도 기록은 이와 달리 계정에 쌓이며'), '계정 절에 억양 학습 기록의 예외가 없다');
   assert.ok(account.includes('어느 세션이 어느 계정의 것인지를 남기지 않습니다'), '로그의 세션-계정 대응 미기록 문구가 없다');
 });
 

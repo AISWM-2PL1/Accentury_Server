@@ -25,7 +25,6 @@ import org.springframework.transaction.support.TransactionTemplate;
 import org.springframework.web.multipart.MultipartFile;
 import tools.jackson.databind.ObjectMapper;
 
-import java.io.IOException;
 import java.time.Instant;
 import java.util.Objects;
 import java.util.UUID;
@@ -47,14 +46,6 @@ import java.util.concurrent.atomic.AtomicBoolean;
 public class VoiceUploadService {
 
     private static final Logger log = LoggerFactory.getLogger(VoiceUploadService.class);
-
-    /** §3.3 - 오디오 파트 상한 1MB. 컨테이너의 multipart 상한(초과 시 413)과 별개의 정본 검증이다. */
-    static final long MAX_AUDIO_BYTES = 1_048_576;
-
-    /** §3.3 - WAV 16kHz Mono 16-bit PCM만 받는다. */
-    static final int SAMPLE_RATE = 16_000;
-    static final int CHANNELS = 1;
-    static final int BITS_PER_SAMPLE = 16;
 
     /**
      * 문항당 업로드 시도 상한 (§2.5, §5.1, 2026-08-09 확정) - GPU 비용 보호.
@@ -105,8 +96,10 @@ public class VoiceUploadService {
         // 있어도 422다 (KAN-182). 문항의 scriptKey는 AI로 가는 meta에 싣는다 (§4.1).
         TestDefinition.Item item = registry.requireItem(
                 session.testVersion(), session.voiceSet(), itemId, TestDefinition.ItemType.VOICE);
-        VoiceUploadMeta meta = VoiceUploadMeta.parse(objectMapper, metaJson);
-        byte[] audioBytes = requireAudio(audio);
+        // meta(400), 크기(413), WAV 규격(415), 길이(422) 검증은 억양 학습 채점과 같은 규칙이다 (VoiceRecordings).
+        // 검증에 실패하면 읽은 사본은 거기서 지워진다.
+        VoiceRecordings.Recording recording = VoiceRecordings.read(objectMapper, audio, metaJson);
+        byte[] audioBytes = recording.audio();
 
         // 이 사본은 컨테이너의 수신 버퍼와 별개다 - 요청 종료 정리가 닿지 않으므로 파기도
         // 우리 몫이다 (KAN-27, Codex sol 리뷰 P1). 소유권은 dispatch() 호출과 함께 넘어가고,
@@ -114,17 +107,6 @@ public class VoiceUploadService {
         // 여기서 지운다. 호출 이후는 전달이 성공했든 예외로 끝났든 구현의 몫이다.
         boolean transferred = false;
         try {
-            WavAudio wav = WavAudio.parse(audioBytes);
-            if (wav.sampleRate() != SAMPLE_RATE || wav.channels() != CHANNELS
-                    || wav.bitsPerSample() != BITS_PER_SAMPLE) {
-                throw new ApiException(ErrorCode.AUDIO_FORMAT_UNSUPPORTED);
-            }
-            // 길이의 정본은 클라이언트 신고값이 아니라 서버가 WAV에서 계산한 값이다.
-            // 상한은 전 문항 공통 상수다 - 앱의 자동 종료와 같은 값이어야 하므로 문항별로 두지 않는다.
-            if (wav.durationMs() > TestDefinition.VOICE_MAX_DURATION_MS) {
-                throw new ApiException(ErrorCode.AUDIO_TOO_LONG);
-            }
-
             // 완료 가드부터 작업 저장까지 세션 행 잠금 아래 한 트랜잭션이다 (KAN-15에서 완료
             // 상태 도입, Codex sol 리뷰 P2) - 잠금이 없으면 /complete(KAN-16)가 검사와 저장
             // 사이에 끼어들어 확정된 세션이 GPU를 소모한다. 동시 업로드도 이 잠금으로
@@ -207,7 +189,7 @@ public class VoiceUploadService {
             // 쌓이면 지역별 응시자 구성이 흔들리고 나중에 가려낼 표식도 없다.
             AnalysisDispatcher.AnalysisRequest analysisRequest = new AnalysisDispatcher.AnalysisRequest(
                     job.id(), session.id(), itemId, item.scriptKey(), session.testVersion(),
-                    session.scoreVersion(), session.region(), wav.durationMs(),
+                    session.scoreVersion(), session.region(), recording.durationMs(),
                     voiceConsents.forSession(session),
                     session.traffic() == Traffic.REAL, audioBytes);
             // 소유권은 반환이 아니라 호출과 함께 넘어간다 - 계약(AnalysisDispatcher)이 그렇게
@@ -246,20 +228,6 @@ public class VoiceUploadService {
                 // 디스패처가 쓰는 것과 같은 파기다 - 한쪽만 바뀌지 않게 공용 메서드를 쓴다.
                 AnalysisDispatcher.AnalysisRequest.wipe(audioBytes);
             }
-        }
-    }
-
-    private static byte[] requireAudio(@Nullable MultipartFile audio) {
-        if (audio == null || audio.isEmpty()) {
-            throw new ApiException(ErrorCode.VALIDATION_FAILED, "audio 파트가 필요합니다.");
-        }
-        if (audio.getSize() > MAX_AUDIO_BYTES) {
-            throw new ApiException(ErrorCode.AUDIO_TOO_LARGE);
-        }
-        try {
-            return audio.getBytes();
-        } catch (IOException e) {
-            throw new ApiException(ErrorCode.VALIDATION_FAILED, "audio 파트를 읽을 수 없습니다.");
         }
     }
 }

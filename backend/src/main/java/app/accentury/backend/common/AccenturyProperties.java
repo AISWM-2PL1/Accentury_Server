@@ -409,13 +409,27 @@ public record AccenturyProperties(Session session,
     }
 
     /**
-     * 단어 학습 (KAN-265, {@code learning} 패키지, 명세서 §3.16).
+     * 단어 학습 (KAN-265, 명세서 §3.16)과 억양 학습 채점 (KAN-267, §3.19) - {@code learning} 패키지.
      *
-     * @param rateLimitPerMinute 계정당 분당 쓰기 요청(시도 시작, 답안, 완료 - 한 통) 허용 횟수 (§2.5). 정상은
-     *                           세트 하나에 시도 1 + 답안 10 이하 + 완료 1이라 어휘 답안(60)과 같은 여유 배수다.
-     *                           목록과 상세 조회는 제한하지 않는다.
+     * @param rateLimitPerMinute           단어 학습의 계정당 분당 쓰기 요청(시도 시작, 답안, 완료 - 한 통) 허용 횟수
+     *                                     (§2.5). 정상은 세트 하나에 시도 1 + 답안 10 이하 + 완료 1이라 어휘 답안(60)과
+     *                                     같은 여유 배수다. 목록과 상세 조회는 제한하지 않는다.
+     * @param intonationRateLimitPerMinute 억양 학습 녹음 업로드의 계정당 분당 허용 횟수 (§2.5, KAN-267). 한 건마다
+     *                                     AI 추론을 쓰고 레벨테스트와 같은 큐를 나눠 쓰므로 단어 학습보다 낮다 - 녹음과
+     *                                     대기만으로 한 건에 10초 이상 걸려 정상 사용은 분당 수 건이다. 결과 조회는
+     *                                     제한하지 않는다.
+     * @param intonationScoreVersion       억양 학습 점수 변환에 쓰는 점수 버전 (§3.19, 2026-10-10 결정) - 레벨테스트와
+     *                                     같은 억양 전처리(구간 계수)를 이 버전의 seed에서 읽는다. AI 요청의
+     *                                     {@code scoreVersion}과 시도 기록에도 이 값이 실린다. 발행된 버전이 아니면
+     *                                     기동하지 않는다.
+     * @param perfectScoreThreshold        100점 처리 기준 (§3.19, 2026-10-10 결정) - 변환 점수가 이 값 이상이고 올리고
+     *                                     내릴 음절이 하나도 없으면 100점이다. 학습에만 적용한다. 0~100 밖이면
+     *                                     기동하지 않는다.
      */
-    public record Learning(@DefaultValue("60") int rateLimitPerMinute) {
+    public record Learning(@DefaultValue("60") int rateLimitPerMinute,
+                           @DefaultValue("20") int intonationRateLimitPerMinute,
+                           @DefaultValue("sv-0.5") String intonationScoreVersion,
+                           @DefaultValue("90") int perfectScoreThreshold) {
     }
 
     /**

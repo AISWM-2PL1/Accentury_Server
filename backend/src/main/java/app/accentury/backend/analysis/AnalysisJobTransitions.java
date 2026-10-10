@@ -17,7 +17,7 @@ import java.util.Collection;
  * 무시된 결과는 유실이 아니다: 사용자는 이미 재녹음(새 시도)으로 안내된 상태다 (§5.1).
  */
 @Service
-public class AnalysisJobTransitions {
+public class AnalysisJobTransitions implements AnalysisLedger {
 
     private static final Logger log = LoggerFactory.getLogger(AnalysisJobTransitions.class);
 
@@ -33,6 +33,7 @@ public class AnalysisJobTransitions {
      * @return false면 이미 종결됐거나 다른 워커가 선점한 작업이다 - AI(GPU)를 호출하면
      *         안 된다 (Codex sol 리뷰 P1 - 타임아웃 종결 후의 유령 호출 차단).
      */
+    @Override
     @Transactional
     public boolean start(String jobId) {
         return repository.markStartedIfProcessing(jobId, Instant.now()) > 0;
@@ -66,6 +67,15 @@ public class AnalysisJobTransitions {
      * 분석 실패 - 재녹음이 도움이 되는 실패는 RETRYABLE_FAILED, 아닌 것은 FAILED다 (§3.4).
      * 상태 응답의 {@code error.retryable}은 이 구분에서 파생된다.
      */
+    /** {@link AnalysisLedger} 쪽 모양 - order 항목은 레벨테스트가 쓰지 않으므로 버린다 (KAN-267). */
+    @Override
+    @Transactional
+    public boolean complete(String jobId, AiAnalysisClient.Completed completed) {
+        return complete(jobId, completed.intonationScore(), completed.qualityCode(),
+                completed.modelVersion(), completed.scoreVersion());
+    }
+
+    @Override
     @Transactional
     public void fail(String jobId, AnalysisJobStatus failedStatus, String errorCode) {
         if (failedStatus != AnalysisJobStatus.RETRYABLE_FAILED && failedStatus != AnalysisJobStatus.FAILED) {
@@ -87,6 +97,7 @@ public class AnalysisJobTransitions {
      *
      * @return 실제로 전이된 건수
      */
+    @Override
     @Transactional
     public int failAll(Collection<String> jobIds, AnalysisJobStatus failedStatus, String errorCode) {
         if (failedStatus != AnalysisJobStatus.RETRYABLE_FAILED && failedStatus != AnalysisJobStatus.FAILED) {

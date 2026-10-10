@@ -142,8 +142,8 @@ public final class PropertiesFixture {
                 new AccenturyProperties.Training(null, null, null,
                         AccenturyProperties.Training.VOICE_CONSENT_VERSION),
                 auth(),
-                // 단어 학습 요청 제한은 main 기본값 그대로다 (KAN-265).
-                new AccenturyProperties.Learning(60),
+                // 학습 설정(요청 제한, 억양 점수 버전, 100점 기준)은 main 기본값 그대로다 (KAN-265, KAN-267).
+                new AccenturyProperties.Learning(60, 20, "sv-0.5", 90),
                 // 번역 키와 기록 버킷 없음 - 기본 상태다 (KAN-266). 번역은 503이고 기록 코드가 돌지 않는다.
                 new AccenturyProperties.Translation(null, AccenturyProperties.Translation.DEFAULT_MODEL,
                         "https://generativelanguage.googleapis.com", Duration.ofSeconds(10), null, null),
