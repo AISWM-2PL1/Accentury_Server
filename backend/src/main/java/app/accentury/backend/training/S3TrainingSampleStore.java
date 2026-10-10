@@ -86,7 +86,7 @@ public class S3TrainingSampleStore implements TrainingSampleStore {
     private static Counter counter(MeterRegistry registry, String result) {
         return Counter.builder(ServiceMetrics.TRAINING_SAMPLES)
                 .description("학습 샘플 저장 시도 - 태그 result는 saved | label_saved | failed | skipped "
-                        + "(KAN-201, KAN-269, KAN-274)")
+                        + "(KAN-201, KAN-269, KAN-274), 억양 학습 녹음은 learning_ 접두 (KAN-267)")
                 .tag("result", result)
                 .register(registry);
     }

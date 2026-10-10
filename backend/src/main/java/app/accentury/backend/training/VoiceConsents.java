@@ -54,6 +54,16 @@ public class VoiceConsents {
     }
 
     /**
+     * 이 계정의 지금 음성 저장 동의 - 억양 학습 채점(KAN-267)이 업로드마다 부른다. 계정은 방금 Access 토큰으로 확인한
+     * 행이라 다시 조회하지 않는다. 없으면 null이다.
+     */
+    public @Nullable VoiceConsent forAccount(AppUser user) {
+        return user.hasVoiceConsent()
+                ? new VoiceConsent(user.voiceConsentVersion(), user.voiceConsentAt(), user.id())
+                : null;
+    }
+
+    /**
      * 업로드 때 받은 동의가 저장 직전에도 유효한가 - 업로드와 저장 사이(큐 대기와 분석 시간)에 계정이 동의를
      * 철회하거나 탈퇴했으면 false다. 익명 세션의 동의는 세션 안에서 철회할 길이 없어 언제나 true다.
      * 확인할 수 없으면 false다 (안전한 기본값).

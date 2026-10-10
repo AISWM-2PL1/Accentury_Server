@@ -12,6 +12,8 @@ import java.net.SocketTimeoutException;
 import java.net.http.HttpConnectTimeoutException;
 import java.net.http.HttpTimeoutException;
 
+import java.util.List;
+
 import static org.hamcrest.Matchers.containsString;
 import static org.hamcrest.Matchers.not;
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -74,6 +76,47 @@ class RestAiAnalysisClientTest {
         assertEquals("OK", completed.qualityCode());
         assertEquals("rmvpe-0.2+dtw-0.1", completed.modelVersion());
         assertEquals("sv-0.3", completed.scoreVersion());
+    }
+
+    @Test
+    void 성공_응답의_segments에서_order_항목만_글자_그대로_옮긴다() {
+        // KAN-267. 모양은 ai-model 26ac67a serve.py의 segments 조립 그대로다 - order 말고 excursion, flat, exag도 섞여 온다.
+        // 모양이 어긋난 order 항목(word 없음, refAgree 없음)은 건너뛰고 응답 전체를 계약 위반으로 끊지 않는다 -
+        // 레벨테스트는 이 값을 쓰지 않으므로 피드백 하나 때문에 점수를 잃으면 안 된다.
+        server.expect(requestTo("http://ai.test/internal/v0/analyze"))
+                .andRespond(withSuccess("""
+                        { "status": "OK", "intonationScore": 78, "confidence": 0.86, "quality": { "code": "OK" },
+                          "segments": [
+                            { "kind": "order", "word": "끓일라고", "mine": "라>끓>일>고", "gyeongnam": "끓>일>라>고",
+                              "raise": "끓", "lower": "라", "refAgree": 0.75 },
+                            { "kind": "order", "word": "가마솥에", "mine": "가>마>솥>에", "gyeongnam": "마>가>솥>에",
+                              "raise": null, "lower": null, "refAgree": 0.42 },
+                            { "kind": "excursion", "word": "물은", "idx": 4, "type": "평평", "st": 1.2 },
+                            { "kind": "flat", "word": "부우면", "idx": 6, "pair": "부→우", "pct": 3.1 },
+                            { "kind": "order", "raise": "가", "lower": "나", "refAgree": 0.9 },
+                            { "kind": "order", "word": "됩니까", "raise": "됩", "lower": "까" }
+                          ],
+                          "modelVersion": "track1-v3.4", "scoreVersion": "sv-0.3", "processingMs": 1840 }
+                        """, MediaType.APPLICATION_JSON));
+
+        AiAnalysisClient.Completed completed =
+                assertInstanceOf(AiAnalysisClient.Completed.class, client.analyze(request(), "c_test"));
+
+        assertEquals(78, completed.intonationScore());
+        assertEquals(List.of(
+                new AiAnalysisClient.OrderSegment("끓일라고", "끓", "라", 0.75),
+                new AiAnalysisClient.OrderSegment("가마솥에", null, null, 0.42)), completed.orderSegments());
+    }
+
+    @Test
+    void segments가_없는_성공_응답은_order_항목이_비어_있다() {
+        server.expect(requestTo("http://ai.test/internal/v0/analyze"))
+                .andRespond(withSuccess(COMPLETED_BODY, MediaType.APPLICATION_JSON));
+
+        AiAnalysisClient.Completed completed =
+                assertInstanceOf(AiAnalysisClient.Completed.class, client.analyze(request(), "c_test"));
+
+        assertTrue(completed.orderSegments().isEmpty());
     }
 
     @Test

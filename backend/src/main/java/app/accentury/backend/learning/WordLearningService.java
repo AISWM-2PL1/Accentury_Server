@@ -31,7 +31,7 @@ import java.util.stream.Collectors;
  * 직렬화되므로 (attempt_id, item_id) 유니크 제약은 마지막 안전망이다.
  * <p>
  * <b>쓰기 트랜잭션은 계정 행 잠금으로 시작한다</b> (Codex 리뷰 P2). 인증 단계에서 읽은 계정은 트랜잭션 밖의 스냅샷이라,
- * 그 사이 탈퇴가 커밋되면 파기({@link WordLearningRecords#purge}) 뒤에 새 시도가 들어가 탈퇴한 계정에 학습 기록이 영구히
+ * 그 사이 탈퇴가 커밋되면 파기({@link LearningRecords#purge}) 뒤에 새 시도가 들어가 탈퇴한 계정에 학습 기록이 영구히
  * 남는다 (탈퇴는 계정 행을 지우지 않아 FK가 막지 못한다). 탈퇴({@code WithdrawalService})와 같은 순서(계정 -> 시도)로
  * 잠그므로 교착도 없다 - 시도 행을 먼저 잠그고 오답 INSERT의 FK 검사가 계정 행을 기다리면, 계정을 잠근 채 시도 행을
  * 지우려는 탈퇴와 서로 기다린다. 탈퇴가 먼저 커밋됐으면 401 {@code AUTH_TOKEN_INVALID}다 (§2.1의 계정 확인과 같다).

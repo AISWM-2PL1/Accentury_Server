@@ -2,7 +2,7 @@ package app.accentury.backend.auth;
 
 import app.accentury.backend.common.ApiException;
 import app.accentury.backend.common.ErrorCode;
-import app.accentury.backend.learning.WordLearningRecords;
+import app.accentury.backend.learning.LearningRecords;
 import app.accentury.backend.session.TestSessionRepository;
 import app.accentury.backend.translation.TranslationSubjects;
 import org.jspecify.annotations.Nullable;
@@ -36,13 +36,13 @@ public class WithdrawalService {
 
     private final AppUserRepository users;
     private final TestSessionRepository sessions;
-    private final WordLearningRecords learningRecords;
+    private final LearningRecords learningRecords;
     private final TranslationSubjects translationSubjects;
     private final RefreshTokens refreshTokens;
     private final AppleTokenRevoker appleTokenRevoker;
     private final TransactionTemplate transactionTemplate;
 
-    WithdrawalService(AppUserRepository users, TestSessionRepository sessions, WordLearningRecords learningRecords,
+    WithdrawalService(AppUserRepository users, TestSessionRepository sessions, LearningRecords learningRecords,
                       TranslationSubjects translationSubjects,
                       RefreshTokens refreshTokens, AppleTokenRevoker appleTokenRevoker,
                       TransactionTemplate transactionTemplate) {

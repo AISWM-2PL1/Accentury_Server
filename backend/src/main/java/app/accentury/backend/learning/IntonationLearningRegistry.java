@@ -52,6 +52,21 @@ public class IntonationLearningRegistry {
             }
             return response;
         }
+
+        /**
+         * 카드 하나 - 채점(KAN-267, §3.19)이 업로드 받은 {@code cardId}로 scriptKey를 찾는다. 없으면 404
+         * {@code LEARNING_CARD_NOT_FOUND}. 발행본 카드는 백여 장이라 업로드마다 훑어도 된다.
+         */
+        public IntonationLearningDefinition.Card card(String cardId) {
+            for (IntonationLearningDefinition.Course course : definition.courses()) {
+                for (IntonationLearningDefinition.Card card : course.cards()) {
+                    if (card.cardId().equals(cardId)) {
+                        return card;
+                    }
+                }
+            }
+            throw new ApiException(ErrorCode.LEARNING_CARD_NOT_FOUND);
+        }
     }
 
     private final Map<String, Published> published = new HashMap<>();
