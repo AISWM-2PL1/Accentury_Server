@@ -10,6 +10,7 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.time.Instant;
 import java.util.Collection;
+import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
 
@@ -98,6 +99,17 @@ public interface IntonationAttemptRepository extends JpaRepository<IntonationAtt
                             @Param("finishedAt") Instant finishedAt);
 
     /** 탈퇴 파기 (§3.14) - 계정의 시도를 전부 지운다. 호출부(탈퇴 트랜잭션)가 트랜잭션을 연다. */
+    /**
+     * 진도 (KAN-268, §3.17) - 이 계정이 이 발행본에서 채점을 {@code COMPLETED}로 마친 카드. 점수는 보지 않는다
+     * (2026-10-11 결정 - 채점 완료 한 번이면 카드 완료). (user_id, content_version, card_id, created_at) 인덱스를 탄다.
+     */
+    @Query("""
+            select distinct a.cardId from IntonationAttempt a
+             where a.userId = :userId and a.contentVersion = :contentVersion
+                   and a.status = app.accentury.backend.analysis.AnalysisJobStatus.COMPLETED
+            """)
+    List<String> findCompletedCardIds(@Param("userId") UUID userId, @Param("contentVersion") String contentVersion);
+
     @Modifying
     @Query("delete from IntonationAttempt a where a.userId = :userId")
     int deleteByUserId(@Param("userId") UUID userId);

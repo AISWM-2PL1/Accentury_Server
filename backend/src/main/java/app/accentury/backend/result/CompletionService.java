@@ -8,6 +8,7 @@ import app.accentury.backend.common.ErrorCode;
 import app.accentury.backend.common.IdempotencyKeys;
 import app.accentury.backend.common.ItemsApiException;
 import app.accentury.backend.common.RateLimits;
+import app.accentury.backend.learning.LevelTestRecords;
 import app.accentury.backend.scoring.AggregateScore;
 import app.accentury.backend.scoring.ScoreAggregator;
 import app.accentury.backend.session.SessionService;
@@ -40,6 +41,9 @@ import java.util.UUID;
  * 익명 집계의 완주 카운터(KAN-106)는 <b>그 트랜잭션이 커밋된 뒤</b>에 올린다 - 롤백된
  * 완료를 세지 않고, 잠금을 쥔 채 커넥션을 하나 더 잡지도 않는다. 증가 실패는 카운터
  * 쪽에서 삼키므로 결과 반환을 막지 않는다 (티켓 제약).
+ * <p>
+ * 계정 귀속 세션이면 같은 자리(커밋 뒤)에서 계정의 최근 등급(KAN-268, §3.20)도 남긴다. 트랜잭션 안에서 쓰지 않는 이유는
+ * {@link LevelTestRecords}에 있다 - 세션 행 잠금을 쥔 채 계정 행을 기다리면 탈퇴와 교착이 된다.
  */
 @Service
 public class CompletionService {
@@ -57,6 +61,7 @@ public class CompletionService {
     private final AccenturyProperties properties;
     private final TransactionTemplate transactionTemplate;
     private final AnalyticsCounters counters;
+    private final LevelTestRecords levelTestRecords;
 
     public CompletionService(SessionService sessionService, TestDefinitionRegistry registry,
                              CompletionJudge judge,
@@ -65,7 +70,7 @@ public class CompletionService {
                              ScoreAggregator aggregator, RateLimits rateLimits,
                              PollIntervals pollIntervals, AccenturyProperties properties,
                              TransactionTemplate transactionTemplate,
-                             AnalyticsCounters counters) {
+                             AnalyticsCounters counters, LevelTestRecords levelTestRecords) {
         this.sessionService = sessionService;
         this.registry = registry;
         this.judge = judge;
@@ -77,6 +82,7 @@ public class CompletionService {
         this.properties = properties;
         this.transactionTemplate = transactionTemplate;
         this.counters = counters;
+        this.levelTestRecords = levelTestRecords;
     }
 
     /**
@@ -136,8 +142,25 @@ public class CompletionService {
             counters.recordSessionCompleted(
                     Objects.requireNonNull(outcome.confirmedAt()), session.testVersion(),
                     confirmed, session.traffic());
+            UUID userId = session.userId();
+            if (userId != null) {
+                recordLevelTest(userId, session, confirmed, Objects.requireNonNull(outcome.confirmedAt()));
+            }
         }
         return outcome.response();
+    }
+
+    /**
+     * 계정의 최근 등급을 남긴다 (KAN-268) - 결과는 이미 커밋됐으므로 실패해도 완료 응답을 바꾸지 않는다. 홈 판정이 이번
+     * 완주를 놓칠 뿐이고 다음 완주가 다시 쓴다. 인증 단계의 {@code userId}가 그사이 탈퇴한 계정이면 기록이 넣지 않는다.
+     */
+    private void recordLevelTest(UUID userId, TestSession session, AggregateScore score, Instant completedAt) {
+        try {
+            levelTestRecords.record(userId, new LevelTestRecords.Entry(session.testVersion(), score.scoreVersion(),
+                    score.tier().code(), score.tier().name(), score.tier().rank(), score.tierCount(), completedAt));
+        } catch (RuntimeException e) {
+            log.warn("레벨테스트 최근 등급 기록 실패 sessionId={}", session.id(), e);
+        }
     }
 
     /**
