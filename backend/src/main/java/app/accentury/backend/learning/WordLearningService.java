@@ -67,11 +67,6 @@ public class WordLearningService {
         this.rateLimits = rateLimits;
     }
 
-    /** 세트 목록 (W-1) - 현재 발행본. 완료 표시와 추천은 KAN-268이다. */
-    WordSetListResponse listSets() {
-        return registry.current().listResponse();
-    }
-
     /** 세트 상세 (W-2, W-3) - 정답과 해설 없음. 없는 세트는 404. */
     WordSetResponse setDetail(String setId) {
         return registry.current().setResponse(setId);

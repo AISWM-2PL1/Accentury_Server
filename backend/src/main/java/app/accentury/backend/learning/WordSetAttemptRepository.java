@@ -25,6 +25,17 @@ public interface WordSetAttemptRepository extends JpaRepository<WordSetAttempt, 
     List<WordSetAttempt> findByUserId(UUID userId);
 
     /**
+     * 진도 (KAN-268, §3.16) - 이 계정이 이 발행본에서 완료한 시도, 최근 완료가 앞이다. 세트마다 첫 행이 최근 정답률이다.
+     */
+    @Query("""
+            select a from WordSetAttempt a
+             where a.userId = :userId and a.contentVersion = :contentVersion and a.completedAt is not null
+             order by a.completedAt desc
+            """)
+    List<WordSetAttempt> findCompletedNewestFirst(@Param("userId") UUID userId,
+                                                  @Param("contentVersion") String contentVersion);
+
+    /**
      * 탈퇴 때 계정의 시도를 전부 지운다 (§3.14). 답안은 FK {@code on delete cascade}로 함께 지워진다.
      * 호출부에 트랜잭션 필요.
      */
