@@ -256,6 +256,46 @@ class TestDefinitionApiTest extends IntegrationTest {
         assertEquals(5, voiceCount);
     }
 
+    // === KAN-282 - 감정 톤: 운영 발행본 gn-2026.10.2(V11 발행 + V15 제자리 반영)의 세트 응답 ===
+
+    /** V15가 음성 124문항 전부에 emotion을 더한 운영 발행본 - 어휘 72문항, 세트 42개. */
+    private static final String CURATED = "/v0/tests/gn-2026.10.2";
+
+    @Test
+    void 감정_톤이_있는_발행본은_모든_세트의_음성_문항에_emotion을_싣고_어휘_문항에는_없다() throws Exception {
+        String first = mockMvc.perform(get(CURATED))
+                .andExpect(status().isOk())
+                .andReturn().getResponse().getContentAsString();
+        int voiceSetCount = objectMapper.readTree(first).get("voiceSetCount").asInt();
+        assertEquals(42, voiceSetCount, "gn-2026.10.2는 세트 42개다 (KAN-276)");
+
+        Set<String> voicesSeen = new LinkedHashSet<>();
+        Set<String> emotions = new LinkedHashSet<>();
+        for (int set = 1; set <= voiceSetCount; set++) {
+            String body = mockMvc.perform(get(CURATED).param("voiceSet", String.valueOf(set)))
+                    .andExpect(status().isOk())
+                    .andReturn().getResponse().getContentAsString();
+            for (JsonNode item : objectMapper.readTree(body).get("items")) {
+                if ("VOICE".equals(item.get("type").asString())) {
+                    voicesSeen.add(item.get("itemId").asString());
+                    // 값은 감정 표현만이다 - "느낌으로 말해주세요!"는 클라이언트가 붙인다 (KAN-283).
+                    String emotion = item.get("emotion").asString();
+                    assertFalse(emotion.isBlank(), "emotion이 비어 있다: " + item.get("itemId"));
+                    assertFalse(emotion.contains("느낌으로"), "emotion에 화면 문구가 섞였다: " + emotion);
+                    emotions.add(emotion);
+                    assertProperties(item, "VOICE 문항",
+                            Set.of("itemId", "seq", "type", "prompt", "emotion", "maxDurationMs", "guideF0"));
+                } else {
+                    assertProperties(item, "VOCABULARY 문항",
+                            Set.of("itemId", "seq", "type", "prompt", "choices"));
+                }
+            }
+        }
+        assertEquals(124, voicesSeen.size(), "음성 124문항 전부가 세트 어딘가에 나온다");
+        assertEquals(18, emotions.size(), "2026-10-13 검수본의 감정 18종");
+        assertTrue(emotions.contains("부탁하는") && emotions.contains("차분한"), "검수본의 감정이 그대로 실린다: " + emotions);
+    }
+
     // === KAN-10 AC - 응답에 정답 정보가 포함되지 않는다 ===
 
     @Test
