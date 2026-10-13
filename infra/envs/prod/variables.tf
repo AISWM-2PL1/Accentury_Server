@@ -62,7 +62,13 @@ variable "training_bucket_enabled" {
 
 variable "ai_ami_id" {
   type        = string
-  description = "AI 호스트의 AMI ID (KAN-246). AL2023 x86_64. 월 1회 staging, prod 순으로 최신 값으로 바꾼다 (README \"AI 호스트 AMI 갱신\")."
+  description = "AI 호스트의 AMI ID (KAN-246, KAN-285). ai-ami 파이프라인이 구운 사전 적재 AMI(accentury-ai-host-<빌드 날짜>, AL2023 x86_64 + docker + compose + 활성 ai 이미지)다. 월 1회 파이프라인을 돌려 staging, prod 순으로 새 값으로 바꾼다 (README \"AI 호스트 AMI 갱신\"). 맨 AL2023 AMI를 넣어도 user_data가 같은 호스트를 만들지만 첫 부팅이 약 2분 30초 길다."
+}
+
+variable "ai_ami_pipeline_enabled" {
+  type        = bool
+  description = "AI 호스트 AMI 사전 적재 파이프라인(EC2 Image Builder, modules/ai-ami)을 이 환경이 가질지 (KAN-285). 구운 AMI는 두 환경이 함께 쓰므로 prod만 true다. 빌드는 수동이고 이 환경의 SSM IMAGE_TAG를 담는다."
+  default     = false
 }
 
 variable "ai_root_volume_size" {
