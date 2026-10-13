@@ -1,6 +1,6 @@
 # 슬랙 알림 (KAN-273): AWS Chatbot(Amazon Q Developer in chat applications)이 SNS 토픽을 슬랙 채널로 옮긴다.
 #
-#   #infra-alerts  두 환경. AI ASG의 오토스케일링 확대/축소와 시작 실패(EventBridge), ai-disk-high 경보(monitoring 모듈).
+#   #infra-alerts  두 환경. AI ASG의 오토스케일링 확대/축소와 시작 실패(EventBridge -> Lambda scale_notify), ai-disk-high 경보(monitoring 모듈).
 #   #daily-user    prod만(report_enabled). 음성 버킷을 2시간마다 세는 Lambda의 응시 현황 리포트.
 #
 # 이메일 경보 토픽(monitoring 모듈의 alerts)과 토픽을 나눈다 - alerts에 Chatbot을 붙이면 모든 경보가 슬랙으로 간다.
@@ -82,8 +82,9 @@ resource "aws_sns_topic" "infra" {
   tags = { Name = "${local.name}-slack-infra-alerts" }
 }
 
-# 기본 토픽 정책은 같은 계정(AWS:SourceOwner)의 publish만 허용해 CloudWatch 경보는 되지만 EventBridge 규칙은
-# 안 된다. 정책을 주면 기본 정책을 대체하므로 같은 계정 허용(경보용)을 함께 적는다.
+# 같은 계정(AWS:SourceOwner)의 publish만 허용한다 - CloudWatch 경보와 scale_notify Lambda(이 계정의 역할)가 여기에 든다.
+# 기본 정책과 같은 내용이지만 명시해 둔다. 스케일 이벤트를 EventBridge가 직접 넣던 시절의 events.amazonaws.com 허용은
+# Lambda로 바꾸면서 뺐다 (2026-10-13).
 data "aws_iam_policy_document" "infra_topic" {
   statement {
     sid       = "SameAccountPublish"
@@ -99,21 +100,6 @@ data "aws_iam_policy_document" "infra_topic" {
       values   = [data.aws_caller_identity.current.account_id]
     }
   }
-
-  statement {
-    sid       = "EventBridgeScalingRules"
-    actions   = ["SNS:Publish"]
-    resources = [aws_sns_topic.infra.arn]
-    principals {
-      type        = "Service"
-      identifiers = ["events.amazonaws.com"]
-    }
-    condition {
-      test     = "ArnEquals"
-      variable = "aws:SourceArn"
-      values   = [for r in aws_cloudwatch_event_rule.scaling : r.arn]
-    }
-  }
 }
 
 resource "aws_sns_topic_policy" "infra" {
@@ -121,8 +107,11 @@ resource "aws_sns_topic_policy" "infra" {
   policy = data.aws_iam_policy_document.infra_topic.json
 }
 
-# 스케일 이벤트. Chatbot은 Auto Scaling 이벤트를 기본 형식으로 그리지 않아 입력 변환기로 사용자 지정 알림 형식
-# (version 1.0, source custom)을 만든다. 이벤트 종류마다 규칙을 나눠 제목을 고정한다 - 변환기에 조건 분기가 없다.
+# 스케일 이벤트. Chatbot은 Auto Scaling 이벤트를 기본 형식으로 그리지 않아 사용자 지정 알림 형식(version 1.0, source custom)으로
+# 바꿔야 한다. 처음에는 EventBridge 입력 변환기로 했지만, 제목에 "(현재: n대)"를 넣기로 하면서(2026-10-13, 슬랙 배너에는
+# 제목만 보인다) Lambda scale_notify로 바꿨다 - 이벤트에 변경 뒤 대수가 필드로 없고(Cause 문장 안에만 있다) 변환기는
+# 문장에서 숫자를 뽑지 못한다. Lambda가 ASG 희망 용량을 조회해 제목을 만들고 토픽에 넣는다. 제목 문구는 scale_notify.py의
+# TITLES다. 규칙은 이벤트 종류마다 하나씩 두어 refresh 필터를 종류별로 다르게 건다.
 #
 # 배포의 instance refresh(이미지 배포, AMI 교체)도 시작과 종료 이벤트를 내지만 알리지 않는다 (2026-10-13 결정) -
 # 배포마다 두 줄씩 쌓인다. 걸러내는 기준은 이벤트의 Cause 문구("... in response to an instance refresh ...")다.
@@ -131,17 +120,14 @@ locals {
   scaling_events = {
     launch = {
       detail_type     = "EC2 Instance Launch Successful"
-      title           = "AI 호스트 1대 늘었습니다"
       skip_on_refresh = true
     }
     terminate = {
       detail_type     = "EC2 Instance Terminate Successful"
-      title           = "AI 호스트 1대 줄었습니다"
       skip_on_refresh = true
     }
     launch_failed = {
       detail_type     = "EC2 Instance Launch Unsuccessful"
-      title           = ":warning: AI 호스트 시작 실패"
       skip_on_refresh = false
     }
   }
@@ -169,28 +155,89 @@ resource "aws_cloudwatch_event_target" "scaling" {
   for_each = local.scaling_events
 
   rule      = aws_cloudwatch_event_rule.scaling[each.key].name
-  target_id = "slack-infra-alerts"
-  arn       = aws_sns_topic.infra.arn
+  target_id = "scale-notify"
+  arn       = aws_lambda_function.scale_notify.arn
+}
 
-  # 문자열 값은 따옴표 안의 자리 표시자로 넣는다 - EventBridge가 JSON 문자열로 이스케이프해 넣는다.
-  input_transformer {
-    input_paths = {
-      instance = "$.detail.EC2InstanceId"
-      cause    = "$.detail.Cause"
-      time     = "$.time"
-    }
-    input_template = <<-EOT
-      {
-        "version": "1.0",
-        "source": "custom",
-        "content": {
-          "textType": "client-markdown",
-          "title": "[${var.env}] ${each.value.title}",
-          "description": "*인스턴스* <instance>\n*시각(UTC)* <time>\n*원인* <cause>"
-        }
-      }
-    EOT
+resource "aws_lambda_permission" "scale_notify" {
+  for_each = local.scaling_events
+
+  statement_id  = "events-${replace(each.key, "_", "-")}"
+  action        = "lambda:InvokeFunction"
+  function_name = aws_lambda_function.scale_notify.function_name
+  principal     = "events.amazonaws.com"
+  source_arn    = aws_cloudwatch_event_rule.scaling[each.key].arn
+}
+
+data "archive_file" "scale_notify" {
+  type        = "zip"
+  source_file = "${path.module}/scale_notify/scale_notify.py"
+  output_path = "${path.module}/.build/scale_notify.zip"
+}
+
+resource "aws_cloudwatch_log_group" "scale_notify" {
+  name              = "/aws/lambda/${local.name}-scale-notify"
+  retention_in_days = var.log_retention_days
+
+  tags = { Name = "${local.name}-scale-notify" }
+}
+
+# DescribeAutoScalingGroups는 리소스 수준 권한이 없어 "*"다. 조회만이고 ASG를 바꾸는 권한은 없다.
+data "aws_iam_policy_document" "scale_notify" {
+  statement {
+    sid       = "DescribeAsg"
+    actions   = ["autoscaling:DescribeAutoScalingGroups"]
+    resources = ["*"]
   }
+
+  statement {
+    sid       = "PublishInfraAlert"
+    actions   = ["sns:Publish"]
+    resources = [aws_sns_topic.infra.arn]
+  }
+
+  statement {
+    sid       = "WriteLogs"
+    actions   = ["logs:CreateLogStream", "logs:PutLogEvents"]
+    resources = ["${aws_cloudwatch_log_group.scale_notify.arn}:*"]
+  }
+}
+
+resource "aws_iam_role" "scale_notify" {
+  name               = "${local.name}-scale-notify"
+  assume_role_policy = data.aws_iam_policy_document.lambda_assume.json
+
+  tags = { Name = "${local.name}-scale-notify" }
+}
+
+resource "aws_iam_role_policy" "scale_notify" {
+  name   = "scale-notify"
+  role   = aws_iam_role.scale_notify.id
+  policy = data.aws_iam_policy_document.scale_notify.json
+}
+
+resource "aws_lambda_function" "scale_notify" {
+  function_name    = "${local.name}-scale-notify"
+  description      = "AI ASG 스케일 이벤트에 희망 용량을 붙여 #infra-alerts로 (KAN-273)"
+  role             = aws_iam_role.scale_notify.arn
+  runtime          = "python3.13"
+  handler          = "scale_notify.handler"
+  filename         = data.archive_file.scale_notify.output_path
+  source_code_hash = data.archive_file.scale_notify.output_base64sha256
+  timeout          = 30
+  memory_size      = 128
+
+  environment {
+    variables = {
+      SLACK_ENV = var.env
+      TOPIC_ARN = aws_sns_topic.infra.arn
+      ASG_NAME  = var.ai_asg_name
+    }
+  }
+
+  depends_on = [aws_cloudwatch_log_group.scale_notify, aws_iam_role_policy.scale_notify]
+
+  tags = { Name = "${local.name}-scale-notify" }
 }
 
 resource "aws_chatbot_slack_channel_configuration" "infra" {

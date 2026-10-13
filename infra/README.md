@@ -2003,13 +2003,17 @@ CloudWatch 표준 경보는 개당 월 0.10달러, 지표 math 경보(`alb-5xx`)
 
 | 채널 | 환경 | 내용 | 경로 |
 | --- | --- | --- | --- |
-| `#infra-alerts` | 두 환경 | AI ASG 오토스케일링 확대와 축소, 시작 실패 | ASG 이벤트 -> EventBridge 규칙 3개(입력 변환) -> `accentury-{env}-slack-infra-alerts` -> Chatbot |
+| `#infra-alerts` | 두 환경 | AI ASG 오토스케일링 확대와 축소, 시작 실패 | ASG 이벤트 -> EventBridge 규칙 3개 -> Lambda `accentury-{env}-scale-notify`(희망 용량 조회) -> `accentury-{env}-slack-infra-alerts` -> Chatbot |
 | `#infra-alerts` | 두 환경 | `ai-disk-high`의 ALARM과 OK (이메일도 그대로 간다) | 경보 -> `accentury-{env}-slack-infra-alerts` -> Chatbot |
 | `#daily-user` | prod만 (`voice_report_enabled`) | 응시 현황 리포트, KST 08시부터 24시까지 짝수 정각 | Scheduler -> Lambda `accentury-prod-voice-report` -> `accentury-prod-slack-daily-user` -> Chatbot |
 
 - 배포의 instance refresh(이미지 배포, AMI 교체)가 내는 시작과 종료는 알리지 않는다. 규칙이 이벤트의 `Cause`에
   `instance refresh`가 들어 있으면 거른다. 시작 실패는 원인과 무관하게 알린다.
 - 메시지 머리의 `[staging]`/`[prod]`로 환경을 구분한다. 두 환경이 `#infra-alerts` 하나를 함께 쓴다.
+- 확대와 축소 알림의 제목은 `[prod] AI 호스트 1대 늘었습니다 (현재: 3대)`처럼 변경 뒤 희망 용량을 붙인다 - 슬랙 배너에는
+  제목만 보인다. 이벤트에는 대수 필드가 없어(Cause 문장 끝 `from 2 to 3`에만 있다) Lambda `scale_notify`가 ASG의
+  `DesiredCapacity`를 조회해 붙이고, 조회가 실패하면 Cause의 숫자로, 그것도 없으면 대수 없이 보낸다. 시작 실패 제목에는
+  붙이지 않는다 (희망 용량은 늘었지만 실제로 늘지 않았다). 문구는 `scale_notify/scale_notify.py`의 `TITLES`다.
 - Chatbot 채널 설정은 서울에 API가 없어 `aws.chatbot` provider(us-east-2)로 만든다. 토픽과 규칙과 Lambda는 서울이다.
 - 슬랙 채널 하나에는 계정당 Chatbot 채널 설정을 하나만 만들 수 있다(2026-10-13 실측, 두 번째는 `has already been configured
   for AWS account`로 거부). 그래서 prod(`slack_channel_configs_enabled = true`)가 두 채널 설정을 모두 갖고, `#infra-alerts`
@@ -2064,7 +2068,7 @@ aws autoscaling set-desired-capacity --auto-scaling-group-name accentury-staging
 ```
 
 끄려면 채널 설정을 지운다(`aws_chatbot_slack_channel_configuration`). 리포트만 끄려면 prod tfvars의
-`voice_report_enabled = false`다. 비용은 EventBridge 규칙과 Scheduler, Lambda(하루 9회 수 초), SNS 모두 무료 한도 안이다.
+`voice_report_enabled = false`다. 비용은 EventBridge 규칙과 Scheduler, Lambda(리포트 하루 9회 + 스케일 이벤트마다 1회, 수 초), SNS 모두 무료 한도 안이다.
 
 ## 관측성 지표와 대시보드 (KAN-38)
 
