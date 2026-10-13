@@ -155,8 +155,8 @@ variable "scale_in_threshold" {
 
 variable "scale_out_warmup" {
   type        = number
-  description = "확대 뒤 새 인스턴스가 지표에 기여한다고 보기까지의 시간(초, KAN-201) - 그동안 같은 경보로 또 늘리지 않는다. 첫 부팅 시간(health_check_grace_period와 같은 근거)이다."
-  default     = 600
+  description = "확대 뒤 새 인스턴스가 지표에 기여한다고 보기까지의 시간(초, KAN-201) - 그동안 같은 경보로 또 늘리지 않는다. prod 실측 부팅(시작에서 대상 그룹 healthy까지) 약 3분에 경보 해제 지연 1~2분을 더한 값이다 (KAN-281, 2026-10-13 - 그 전 600초는 2번째가 이미 일하는데도 3번째를 약 7분 더 막았다). 180초 이하면 경보가 풀리기 전에 워밍업이 끝나 쓸데없이 한 대가 더 켜진다."
+  default     = 300
 }
 
 variable "vpc_cidr" {
