@@ -256,3 +256,9 @@ variable "translation_quota_exhausted_threshold" {
     error_message = "translation_quota_exhausted_threshold는 0 이상이어야 합니다."
   }
 }
+
+variable "slack_alarm_topic_arns" {
+  type        = list(string)
+  description = "ai-disk-high의 ALARM과 OK를 이메일에 더해 보낼 SNS 토픽 (KAN-273, slack-alerts 모듈의 #infra-alerts 토픽). 다른 경보에는 걸지 않는다."
+  default     = []
+}

@@ -40,6 +40,14 @@ training_bucket_enabled = true
 # (accentury-translator-prompt-<계정 ID>)에 남긴다. prod만 true다.
 translation_records_enabled = true
 
+# 응시 현황 2시간 리포트 (KAN-273, 2026-10-13 결정). 음성 버킷을 세어 슬랙 #daily-user로 보낸다. prod만 true다.
+voice_report_enabled = true
+
+# 슬랙 Chatbot 채널 설정의 소유 (KAN-273). 채널 하나에 계정당 설정이 하나뿐이라 prod가 두 채널 설정을 모두 갖고,
+# #infra-alerts 설정에 staging 토픽(accentury-staging-slack-infra-alerts)도 붙인다. staging을 다시 지으면 prod에서 채널 설정을 -replace로 다시 만든다 (README "슬랙 알림").
+slack_channel_configs_enabled = true
+slack_infra_alerts_peer_envs  = ["staging"]
+
 ssm_prefix = "/accentury/prod"
 
 # prod 역할은 ECR push 불가 (KAN-128 승격 모델). staging이 검증한 SHA만 반영한다.

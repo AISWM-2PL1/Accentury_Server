@@ -296,6 +296,30 @@ module "monitoring" {
   # AI 대상 그룹의 healthy 대상 경보 (KAN-201).
   ai_alb_arn_suffix          = module.ai_host.alb_arn_suffix
   ai_target_group_arn_suffix = module.ai_host.target_group_arn_suffix
+  # ai-disk-high만 슬랙 #infra-alerts에도 보낸다 (KAN-273). 이메일은 그대로다.
+  slack_alarm_topic_arns = [module.slack_alerts.infra_alerts_topic_arn]
+}
+
+# 슬랙 알림 (KAN-273). #infra-alerts는 두 환경(AI 스케일 이벤트 + ai-disk-high), #daily-user는 voice_report_enabled인
+# 환경만(음성 버킷 응시 현황 2시간 리포트). Chatbot 채널 설정은 slack_channel_configs_enabled인 환경(prod)만 us-east-2
+# provider로 만든다.
+module "slack_alerts" {
+  source = "../../modules/slack-alerts"
+  providers = {
+    aws         = aws
+    aws.chatbot = aws.chatbot
+  }
+
+  env                     = var.env
+  slack_team_id           = var.slack_team_id
+  infra_alerts_channel_id = var.slack_infra_alerts_channel_id
+  daily_user_channel_id   = var.slack_daily_user_channel_id
+  ai_asg_name             = module.ai_host.asg_name
+  report_enabled          = var.voice_report_enabled
+  voice_bucket_name       = local.voice_bucket_name
+  # 채널 설정은 채널당 계정에 하나뿐이라 한 환경만 갖는다 - 그 환경이 다른 환경의 토픽까지 붙인다.
+  channel_configs_enabled = var.slack_channel_configs_enabled
+  infra_alerts_peer_envs  = var.slack_infra_alerts_peer_envs
 }
 
 # ---- 사투리 텍스트 번역 기록 S3 (KAN-266) ----
