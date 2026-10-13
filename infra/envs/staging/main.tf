@@ -250,6 +250,22 @@ module "ai_host" {
   scaling_metric_namespace = local.backend_metric_namespace
 }
 
+# AI 호스트 AMI 사전 적재 파이프라인 (KAN-285). EC2 Image Builder가 최신 AL2023에 docker, compose, 활성 accentury/ai
+# 이미지를 구워 AMI로 남긴다 - 첫 부팅 3분 22초 중 docker 설치와 pull 2분 33초를 없앤다. AMI는 두 환경이 함께 쓰므로
+# 파이프라인은 한 환경(prod, tfvars ai_ami_pipeline_enabled)만 갖는다. 구운 AMI ID는 두 환경 tfvars ai_ami_id에 손으로
+# 적는다 (README "AI 호스트 AMI 갱신"). 빌드 인스턴스는 이 환경의 퍼블릭 서브넷에 뜬다 - 기본 VPC가 없다.
+module "ai_ami" {
+  source = "../../modules/ai-ami"
+  count  = var.ai_ami_pipeline_enabled ? 1 : 0
+
+  env           = var.env
+  vpc_id        = module.network.vpc_id
+  subnet_id     = module.network.public_subnet_ids[0]
+  instance_type = var.ai_instance_type
+  # 빌드가 {ssm_prefix}/IMAGE_TAG(이 환경의 활성 태그)를 읽어 그 이미지를 담는다.
+  ssm_prefix = var.ssm_prefix
+}
+
 # KAN-36에서는 compute 모듈을 role = "ai"로 부른 module.ai_compute였다 (backend 역할 호출 module.compute는
 # KAN-165에서 Fargate 서비스로 대체돼 사라진다). 살아 있는 state에서 주소만 옮긴다.
 moved {

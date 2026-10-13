@@ -820,7 +820,8 @@ CloudFront 5xxErrorRate 0 (13:45부터 15:15). 클라이언트 쪽은 세 phase 
 
 ## ai 호스트 컨테이너 기동 (KAN-124, 전용 호스트 KAN-36, 내부 ALB KAN-201)
 
-ai 호스트는 무상태이고 내부 ALB 뒤의 ASG(min 1, max 3)다 (아래 "내부 ALB와 오토스케일링"). `modules/ai-host`의 첫 부팅 user_data가 docker와 compose 플러그인을 깔고,
+ai 호스트는 무상태이고 내부 ALB 뒤의 ASG(min 1, max 3)다 (아래 "내부 ALB와 오토스케일링"). `modules/ai-host`의 첫 부팅 user_data가 docker와 compose 플러그인을 깔고
+(AMI에 이미 있으면 건너뛴다 - KAN-285, 아래 "AI 호스트 AMI 갱신"),
 운영 compose 파일(`modules/ai-host/docker-compose.ai.yml`, 호스트에서는
 `/opt/accentury/docker-compose.yml`)과 스크립트 3개(`accentury-up.sh`, `ai-egress-guard.sh`,
 `ai-health-metric.sh`)를 **부팅 자산 버킷에서 내려받은 뒤**(KAN-38, 아래 "부팅 자산 버킷") systemd
@@ -852,8 +853,8 @@ backend 쪽은 무변경이다 - `ACCENTURY_ANALYSIS_AIBASEURL`(`http://ai.accen
 | 상태 검사 | `GET /internal/v0/health` 200, 15초 x 정상 2회 / 비정상 3회 | 워밍업 전(503 STARTING)에는 트래픽이 가지 않는다. 토큰 불필요 |
 | ALB idle timeout | 90초 | backend 읽기 타임아웃(ai-timeout 85초)보다 길어야 한다. 기본 60초면 긴 추론이 504로 끊긴다 |
 | 등록 해제 지연 | 90초 | 빠지는 인스턴스의 진행 중 추론(AI 상한 75초)이 끝날 시간 |
-| ASG 상태 검사 | ELB, 유예 900초 | 첫 부팅(docker 설치 + 이미지 7GB pull + 모델 적재)이 실측 3분 20초 - 파이프라인의 healthy 대기(600초)에 pull을 더한 여유다 |
-| 확대 | `accentury.analysis.processing.value` Maximum >= 6, 1분 x 1회 -> +1, 워밍업 300초 | backend의 폴링 혼잡 임계치와 같은 지점. CPU는 추론 1건이 10초라 밀림보다 늦다. 판정은 KAN-272에서 2회 연속에서 1회로 줄였다 - 한 사람이 5문항을 연달아 올려도 5건이라 6에 닿지 않는다. 워밍업은 prod 실측 부팅(시작에서 healthy까지) 약 3분 + 경보 해제 지연 1~2분이다 (KAN-281에서 600초를 줄였다 - 2026-10-06에 2번째가 이미 일하는데 3번째를 약 7분 막아 물결 최고치 14건을 2대로 받았다) |
+| ASG 상태 검사 | ELB, 유예 900초 | 첫 부팅(docker 설치 + 이미지 7GB pull + 모델 적재)이 실측 3분 22초 - 파이프라인의 healthy 대기(600초)에 pull을 더한 여유다. 사전 적재 AMI(KAN-285, 미채택)는 최대 5분 34초였다 |
+| 확대 | `accentury.analysis.processing.value` Maximum >= 6, 1분 x 1회 -> +1, 워밍업 300초 | backend의 폴링 혼잡 임계치와 같은 지점. CPU는 추론 1건이 10초라 밀림보다 늦다. 판정은 KAN-272에서 2회 연속에서 1회로 줄였다 - 한 사람이 5문항을 연달아 올려도 5건이라 6에 닿지 않는다. 워밍업은 prod 실측 부팅(시작에서 healthy까지) 약 3분 + 경보 해제 지연 1~2분이다 (KAN-281에서 600초를 줄였다 - 2026-10-06에 2번째가 이미 일하는데 3번째를 약 7분 막아 물결 최고치 14건을 2대로 받았다). 사전 적재 AMI(KAN-285)는 부팅이 2분 50초~5분 34초로 불규칙해 쓰지 않으므로 값은 그대로다 |
 | 축소 | 같은 지표 <= 1, 1분 x 15회 -> -1, 그 뒤 ALARM이 유지되는 동안 약 3분마다 다시 -1 (min까지) | 늘어난 인스턴스는 늘어난 동안만 과금이라 확대보다 훨씬 느리게 접는다. 실측 3에서 2가 16분, 2에서 1이 19분 |
 | SG | backend-sg -> ai-alb-sg -> ai-sg (8000) | backend 태스크가 호스트에 직접 닿는 길은 없다 |
 
@@ -944,6 +945,46 @@ aws ec2 describe-instances --filters "Name=tag:Name,Values=$(terraform output -r
 
 # 5. 스모크 한 바퀴 (아래 "원격 스모크 수동 실행")를 돌린 뒤 prod에서 1~4를 되풀이한다
 ```
+
+#### 사전 적재 AMI는 쓰지 않는다 (KAN-285, 2026-10-14 실측)
+
+첫 부팅 3분 22초 중 docker 설치 40초와 이미지 pull 1분 53초가 매번 같은 일이라, EC2 Image Builder로 그 둘을 미리
+넣은 AMI(`modules/ai-ami`, prod 스택이 소유, 수동 실행)를 만들어 두 환경에 적용해 봤다. 결과는 **더 느리고 불규칙**해서
+tfvars를 맨 AMI로 되돌렸다. AMI에서 만든 루트 볼륨은 블록을 처음 읽을 때 S3 스냅샷에서 가져오는데(EBS 지연 로딩),
+그 대역폭이 볼륨마다 초당 약 15~50MB로 달라 모델 가중치 3~4GB를 읽는 적재 구간이 15초에서 1~4분으로 늘었다. 맨
+AMI는 pull이 디스크에 새로 쓰므로 적재가 항상 15초고, 전체도 3분 20초 안팎으로 일정하다. 오토스케일링 워밍업(300초)은
+예측 가능한 쪽이 안전하다.
+
+| 표본 | OS 부팅 완료 | 컨테이너까지 | 모델 적재 | 시작 -> ALB healthy |
+| --- | --- | --- | --- | --- |
+| 맨 AMI (prod 00:17) | 9초 | 2분 52초 (docker 40초 + pull 1분 53초) | 15초 | 약 3분 22초 |
+| 맨 AMI, 새 user_data (staging 01:02) | - | pull 1분 52초 | - | 약 3분 20초 |
+| 사전 적재 (staging 01:36, 태그 다름 - pull 2초) | 36초 | 1분 11초 | 1분 7초 | 약 2분 50초 |
+| 사전 적재 + 선읽기 (staging 01:47) | 37초 | 1분 20초 | 3분 41초 (선읽기와 경쟁) | 약 5분 28초 |
+| 사전 적재 (staging 01:58) | - | 1분 28초 | 3분 7초 | 약 4분 40초 |
+| 사전 적재 (prod 02:00, 태그 같음 - pull 없음) | 33초 | 1분 6초 | 3분 58초 | 약 5분 34초 |
+
+선읽기(user_data 첫머리에서 docker 레이어의 큰 파일을 백그라운드로 `cat`)는 역효과였다 - 같은 지연 로딩 파이프를
+나눠 써 적재가 선읽기가 끝나는 순간까지 밀렸다. 이 한계를 넘는 길은 Fast Snapshot Restore(스냅샷당 AZ당 시간 요금)
+뿐이고 쓰지 않기로 했다.
+
+남긴 것: `modules/ai-ami`(파이프라인, 레시피, 빌드 역할과 SG - prod 스택, tfvars `ai_ami_pipeline_enabled`)와 user_data의
+"있으면 건너뛰기"(docker, compose 버전 검사). 파이프라인은 FSR을 켜 보거나 가중치를 이미지 밖으로 빼는 날 다시 쓸 수
+있다. 비용은 구운 AMI의 스냅샷(20GiB, 월 1달러 미만)뿐이다 - 되돌림용으로 하나 두고 그 전 것은 등록 해제한다.
+파이프라인을 치우려면 prod tfvars의 `ai_ami_pipeline_enabled`를 false로 apply한다 (AMI는 남는다).
+
+파이프라인 구성과 실행 방법:
+
+| 항목 | 값 |
+| --- | --- |
+| 실행 | `aws imagebuilder start-image-pipeline-execution --image-pipeline-arn "$(terraform -chdir=infra/envs/prod output -raw ai_ami_pipeline_arn)"` (약 20분). 결과는 `list-image-pipeline-images`, 실패 로그는 출력 `ai_ami_build_log_group` |
+| 부모 이미지 | SSM 퍼블릭 파라미터 참조 `ssm:/aws/service/ami-amazon-linux-latest/al2023-ami-kernel-default-x86_64` - 빌드 때마다 그때의 최신 AL2023. Image Builder 관리형 AL2023 이미지는 이 리전에 DOCKER 형식뿐이라 못 쓴다 |
+| 컴포넌트 | `modules/ai-ami/component.yml` - docker 설치, compose 플러그인, SSM `/accentury/prod/IMAGE_TAG`를 읽어 ECR pull, docker 정지. user_data.sh.tftpl의 같은 단계를 옮긴 것이라 두 파일이 같은 결과를 만들어야 한다. 로그인 토큰은 AMI에 남기지 않는다 |
+| 빌드 인스턴스 | c7i.xlarge, prod 퍼블릭 서브넷, 전용 SG(인바운드 없음, 아웃바운드 443만), IMDSv2, 실패 시 종료. `resource_tags`에 `Name`은 예약 키라 못 넣는다 |
+| 빌드 역할 | SSM 코어 + Image Builder 관리형 + ECR 읽기 + `IMAGE_TAG` 1개, 그 밖의 파라미터 읽기는 명시 Deny. `AmazonSSMManagedInstanceCore`가 `ssm:GetParameter`를 `*`에 허용하므로 Allow를 좁히는 것만으로는 경계가 서지 않는다 (Codex 리뷰). ai 호스트 역할도 같은 관리형 정책을 붙이고 있어 같은 틈이 있다 - 별도 티켓 |
+| 루트 볼륨 | 20GiB gp3 암호화 - 호스트 시작 템플릿(40GiB)보다 작아야 띄울 수 있다 |
+| 이미지 테스트 | 끔 (staging instance refresh가 대신한다) |
+| 버전 | `recipe_version`(1.0.0). component.yml이나 레시피 인자를 바꾸면 올린다 - 같은 이름과 버전의 레시피는 다시 못 만든다 |
 
 **교체는 무중단이다.** instance refresh가 `min_healthy_percentage = 100`, `max_healthy_percentage = 200`이라 새
 인스턴스를 먼저 띄운다. 새 인스턴스가 대상 그룹 healthy(모델 적재 완료)가 되고 워밍업 120초가 지난 뒤에야 옛
@@ -2615,6 +2656,12 @@ terraform destroy
   파라미터를 읽고 `ignore_changes = [image_id]`로 묶었는데(KAN-36), 손대지 않은 plan에 교체가 끼어드는 것은
   막았지만 최초 생성 시점의 AMI에 영구히 고정돼 OS 보안 업데이트가 들어오지 않았다. 명시하면 plan은 여전히
   조용하고, 갱신은 값 한 줄을 바꾸는 일이 된다 ("AI 호스트 AMI 갱신").
+- **AMI 사전 적재는 만들었지만 쓰지 않는다 (ai 호스트, KAN-285, 2026-10-14)**: 첫 부팅 3분 22초 중 docker 설치와
+  이미지 pull 2분 33초가 매번 같은 일이라 EC2 Image Builder 파이프라인(`modules/ai-ami`, 수동 실행)으로 AMI에 넣어
+  봤다. 두 환경 실측에서 EBS 지연 로딩이 그 이득을 넘어서는 비용(모델 적재 15초 -> 1~4분, 전체 2분 50초~5분 34초)을
+  물려 맨 AMI로 되돌렸다 ("사전 적재 AMI는 쓰지 않는다"). 파이프라인과 user_data의 건너뛰기 로직은 남겨 두었다 -
+  FSR을 켜거나 가중치를 이미지 밖으로 빼는 날 다시 쓴다. AMI ID를 Terraform이 자동으로 읽지 않는 이유는 위 "AMI는
+  tfvars에 명시"와 같다.
 - **PriceClass_200**: 한국이 포함되는 최소 티어.
 - **지표 수집은 Micrometer CloudWatch push (2026-09-05, KAN-38)**: 티켓이 남긴 선택지는
   "레지스트리 push"와 "구조화 로그 기반(Logs Insights)"이었다. push를 택한 이유는 셋이다 -
