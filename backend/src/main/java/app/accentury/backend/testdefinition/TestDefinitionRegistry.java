@@ -312,9 +312,10 @@ public class TestDefinitionRegistry {
      * 문항 구성은 "음성 N (N >= v) + 어휘 M (M >= w)"다 (KAN-182 - 풀 다중화로 완화, 어휘 풀은
      * 2026-09-04 확장). v와 w는 {@link SetLayout}이 세트 하나에 싣는 음성과 어휘 수이고, 필드가 없는
      * 정의는 둘 다 5다 (KAN-260). seq는 풀 기준 1..N+M 연속이어야 한다. {@code scriptKey}는 정의 단위
-     * all-or-nothing이고 풀 안에서 중복을 거부한다. 기존 더미 정의 {@code gn-2026.08.1}(scriptKey
-     * 없음, 음성 5 + 어휘 5)은 그대로 통과한다 - 발행 후 불변(§5.4)을 지키려면 새 검증이 기존
-     * 행을 깨뜨리면 안 된다.
+     * all-or-nothing이고 풀 안에서 중복을 거부한다. {@code emotion}(KAN-282)도 정의 단위 all-or-nothing이다 -
+     * 일부 문항만 감정 줄이 뜨는 화면은 빠뜨린 것과 구분이 안 된다. 기존 더미 정의 {@code gn-2026.08.1}(scriptKey
+     * 없음, 음성 5 + 어휘 5)과 emotion 없는 {@code gn-2026.10.1}까지의 정의는 그대로 통과한다 - 발행 후
+     * 불변(§5.4)을 지키려면 새 검증이 기존 행을 깨뜨리면 안 된다.
      */
     static void validate(TestDefinition definition) {
         require(hasText(definition.testVersion()), "testVersion이 비어 있다");
@@ -334,6 +335,7 @@ public class TestDefinitionRegistry {
         Set<String> scriptKeys = new HashSet<>();
         int voice = 0;
         int voiceWithScriptKey = 0;
+        int voiceWithEmotion = 0;
         int vocabulary = 0;
         for (TestDefinition.Item item : items) {
             require(hasText(item.itemId()), "itemId가 비어 있다");
@@ -353,6 +355,10 @@ public class TestDefinitionRegistry {
                         require(scriptKeys.add(item.scriptKey()),
                                 "scriptKey 중복 (풀 안에서 유일해야 한다): " + item.scriptKey());
                     }
+                    if (item.emotion() != null) {
+                        voiceWithEmotion++;
+                        require(hasText(item.emotion()), "emotion이 비어 있다: " + item.itemId());
+                    }
                 }
                 case VOCABULARY -> {
                     vocabulary++;
@@ -367,6 +373,10 @@ public class TestDefinitionRegistry {
         require(voiceWithScriptKey == 0 || voiceWithScriptKey == voice,
                 "scriptKey는 전 음성 문항에 있거나 전부 없어야 한다: 음성 " + voice
                         + "개 중 " + voiceWithScriptKey + "개에만 있다");
+        // all-or-nothing (KAN-282) - 일부만 있으면 화면에서 감정 줄이 문항마다 있다 없다 한다.
+        require(voiceWithEmotion == 0 || voiceWithEmotion == voice,
+                "emotion은 전 음성 문항에 있거나 전부 없어야 한다: 음성 " + voice
+                        + "개 중 " + voiceWithEmotion + "개에만 있다");
         for (int seq = 1; seq <= items.size(); seq++) {
             require(seqs.contains(seq), "seq는 1부터 연속이어야 한다: " + seq + " 누락");
         }
@@ -437,7 +447,7 @@ public class TestDefinitionRegistry {
     }
 
     private static void validateVocabulary(TestDefinition.Item item) {
-        require(item.guideF0() == null && item.scriptKey() == null,
+        require(item.guideF0() == null && item.scriptKey() == null && item.emotion() == null,
                 "VOCABULARY 문항에 음성 필드가 있다: " + item.itemId());
 
         List<TestDefinition.Choice> choices = item.choices();

@@ -64,6 +64,18 @@ V2__<version>.sql부터 다시 번호를 매긴다. V1 파일의 주석에는 �
 --curation은 바이트 대조 대신 검수 문서의 원문이 원본 문장과 같은지, 고친 문장의 어절 수가 같은지, 한
 세트 안에 같은 문구가 두 번 오지 않는지를 본다. 어휘 선택지는 testVersion을 시드로 다시 섞는다.
 
+음성 문항에 감정 톤을 더한 제자리 반영 (KAN-282 - gn-2026.10.2 본문에 emotion_gn_2026_10_2.py 적용)
+    python3 build_definition.py --reissue-from ../../backend/src/main/resources/db/migration/V11__gn_2026_10_2_curated.sql \\
+        --same-content-as gn-2026.10.2 --emotions emotion_gn_2026_10_2.py --update-in-place \\
+        --out ../../backend/src/main/resources/db/migration/V15__gn_2026_10_2_voice_emotion.sql
+
+--update-in-place는 새 testVersion을 발행하지 않고 --same-content-as 행의 body를 UPDATE하는 마이그레이션을
+낸다. 발행 후 불변(KAN-26)의 예외다 - 문항 본문(문장, itemId, seq, scriptKey, guideF0, 어휘 선택지와 정답)과
+버전 속성(scoreVersion, setLayout, estimatedDurationSec, published_at)은 그대로 두고 음성 문항에 화면용
+필드 emotion만 더하므로, 세션, 채점, 세트 구성 어느 것도 바뀌지 않는다 (2026-10-13 결정). --emotions는
+itemId -> 감정 사전(EMOTIONS)을 든 파이썬 파일이고, 그 itemId 집합이 원본 음성 문항과 정확히 같아야 한다.
+emotion을 뺀 본문이 원본과 바이트 단위로 같은지를 실행할 때마다 대조한다.
+
 --reissue-from은 재료(가이드 곡선, 인계본) 대신 이미 발행된 마이그레이션에서 --same-content-as
 버전의 본문을 읽어 문항 목록을 그대로 옮긴다. 재료 파일이 손에 없어도 되고, 문항 본문이 원본과
 바이트 단위로 같은지를 실행할 때마다 대조한다. --set-layout은 세트 하나의 구성과 출제 순서다
@@ -366,6 +378,10 @@ def main() -> None:
                              "문항을 그대로 옮긴다 (KAN-260)")
     parser.add_argument("--curation", action="store_true",
                         help="--reissue-from 재발행에 검수 결과(curation_gn_2026_10_2.py)를 적용한다 (KAN-276)")
+    parser.add_argument("--emotions", type=Path, metavar="EMOTIONS_PY",
+                        help="음성 문항의 감정 톤 사전(EMOTIONS)을 든 파이썬 파일 - --update-in-place와 함께 쓴다 (KAN-282)")
+    parser.add_argument("--update-in-place", action="store_true",
+                        help="새 버전 발행 대신 --same-content-as 행의 body를 UPDATE하는 마이그레이션을 낸다 (KAN-282)")
     parser.add_argument("--set-layout", metavar="PATTERN",
                         help="세트 하나의 구성과 출제 순서 - V(음성)와 W(어휘)의 문자열 (KAN-260). "
                              "--reissue-from과 함께 쓴다")
@@ -539,10 +555,17 @@ def reissue(args) -> None:
     """
     if not args.same_content_as:
         raise SystemExit("--reissue-from에는 원본 testVersion(--same-content-as)이 필요하다")
-    if args.same_content_as == args.test_version:
-        raise SystemExit("--same-content-as는 다른 testVersion이어야 한다 - 정의는 발행 후 불변이다 (KAN-26)")
     if args.sentences or args.sentences_from or args.guide_f0:
         raise SystemExit("--reissue-from은 재료(--guide-f0, --sentences)를 읽지 않는다")
+    if bool(args.emotions) != args.update_in_place:
+        raise SystemExit("--emotions와 --update-in-place는 같이 쓴다 - 감정 톤은 제자리 반영으로만 들어간다 (KAN-282)")
+    if args.update_in_place:
+        if args.curation or args.set_layout:
+            raise SystemExit("--update-in-place는 문항과 세트 구성을 바꾸지 않는다 - --curation, --set-layout과 같이 쓸 수 없다")
+        update_in_place(args)
+        return
+    if args.same_content_as == args.test_version:
+        raise SystemExit("--same-content-as는 다른 testVersion이어야 한다 - 정의는 발행 후 불변이다 (KAN-26)")
     source = published_definition(args.reissue_from, args.same_content_as)
     if args.curation:
         if not args.set_layout:
@@ -602,6 +625,121 @@ values ('{definition["testVersion"]}', '{definition["dialect"]}', '{definition["
         print(f"[대조]   문항 {len(definition['items'])}개가 {args.same_content_as}과 바이트 단위로 같다",
               file=sys.stderr)
     print(f"[크기]   마이그레이션 {len(sql.encode('utf-8')) / 1024:.0f}KB", file=sys.stderr)
+
+
+def load_emotions(path: Path) -> dict[str, str]:
+    """--emotions 파일의 EMOTIONS 사전을 읽는다 (KAN-282)."""
+    import importlib.util
+
+    spec = importlib.util.spec_from_file_location("emotions_source", path)
+    if spec is None or spec.loader is None:
+        raise SystemExit(f"--emotions 파일을 읽을 수 없다: {path}")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    emotions = getattr(module, "EMOTIONS", None)
+    if not isinstance(emotions, dict):
+        raise SystemExit(f"{path}에 EMOTIONS 사전이 없다")
+    return emotions
+
+
+def emotion_items(source: dict, emotions: dict[str, str]) -> list[dict]:
+    """음성 문항마다 emotion을 더한 문항 목록 (KAN-282). 그 밖의 것은 원본 그대로다.
+
+    감정 사전의 itemId 집합은 원본 음성 문항과 정확히 같아야 한다 - 빠진 문항은 화면에서 감정 줄이 사라지고,
+    남는 itemId는 검수본이 다른 버전을 보고 만들어졌다는 신호라 둘 다 멈춘다. 값은 비어 있으면 안 되고 앞뒤
+    공백도 받지 않는다(발행 검증이 공백만 거부하므로 눈에 안 띄는 차이를 여기서 막는다). 어휘 문항에는 넣지
+    않는다. 키 순서는 발행본 스키마 순서(itemId, seq, type, prompt, emotion, scriptKey, guideF0)를 따른다.
+    """
+    items = sorted(source["items"], key=lambda item: item["seq"])
+    voice_ids = [item["itemId"] for item in items if item["type"] == "VOICE"]
+    missing = [i for i in voice_ids if i not in emotions]
+    unknown = [i for i in emotions if i not in voice_ids]
+    if missing or unknown:
+        raise SystemExit("감정 사전과 원본 음성 문항이 다르다 -"
+                         f" 사전에 없는 문항 {len(missing)}개({' '.join(missing) or '없음'}),"
+                         f" 원본에 없는 itemId {len(unknown)}개({' '.join(unknown) or '없음'})")
+    result: list[dict] = []
+    for item in items:
+        if item["type"] != "VOICE":
+            result.append(item)
+            continue
+        if "emotion" in item:
+            raise SystemExit(f"{item['itemId']}에 이미 emotion이 있다 - 원본이 제자리 반영 전 본문이어야 한다")
+        emotion = emotions[item["itemId"]]
+        if not isinstance(emotion, str) or not emotion.strip() or emotion != emotion.strip():
+            raise SystemExit(f"{item['itemId']}의 감정이 비어 있거나 앞뒤 공백이 있다: {emotion!r}")
+        ordered = {"itemId": item["itemId"], "seq": item["seq"], "type": item["type"],
+                   "prompt": item["prompt"], "emotion": emotion}
+        ordered.update({k: v for k, v in item.items() if k not in ordered})
+        result.append(ordered)
+    return result
+
+
+def strip_emotion(items: list[dict]) -> list[dict]:
+    """emotion을 뺀 문항 목록 - 제자리 반영이 그 밖의 것을 바꾸지 않았는지 대조할 때 쓴다."""
+    return [{k: v for k, v in item.items() if k != "emotion"} for item in items]
+
+
+def update_in_place(args) -> None:
+    """이미 발행된 본문의 음성 문항에 감정 톤만 더해 같은 행을 UPDATE하는 마이그레이션 (KAN-282).
+
+    새 testVersion을 발행하지 않는다. 본문 가운데 바뀌는 것은 음성 문항의 emotion뿐이고 그 밖의 모든 것
+    (버전 속성, 문항 본문, published_at)은 원본과 바이트 단위로 같아야 한다 - 같은 직렬화 규칙으로 다시 써서
+    대조한다.
+    """
+    source = published_definition(args.reissue_from, args.same_content_as)
+    emotions = load_emotions(args.emotions)
+    definition = {**source, "items": emotion_items(source, emotions)}
+    same = (json.dumps(strip_emotion(definition["items"]), ensure_ascii=False, indent=2)
+            == json.dumps(source["items"], ensure_ascii=False, indent=2))
+    if not same:
+        raise SystemExit("emotion을 뺀 문항 본문이 원본과 다르다")
+    if {k: v for k, v in definition.items() if k != "items"} != {k: v for k, v in source.items() if k != "items"}:
+        raise SystemExit("버전 속성이 원본과 다르다")
+
+    voices = sum(1 for item in definition["items"] if item["type"] == "VOICE")
+    vocabulary = len(definition["items"]) - voices
+    body = json.dumps(definition, ensure_ascii=False, indent=2)
+    if "$definition$" in body:
+        raise SystemExit("본문에 달러 인용 구분자가 들어 있다 - 다른 구분자를 써야 한다")
+    sql = f"""\
+{emotion_header(definition, args.emotions.name, voices, vocabulary, emotions)}
+update test_definition
+set body = $definition${body}$definition$
+where test_version = '{definition["testVersion"]}';
+"""
+    if args.out:
+        args.out.write_text(sql, encoding="utf-8")
+    else:
+        print(sql)
+    if args.json_out:
+        args.json_out.write_text(body, encoding="utf-8")
+    kinds = sorted(set(emotions.values()))
+    print(f"[제자리] {definition['testVersion']} 음성 {voices}문항에 emotion {len(kinds)}종, 어휘 {vocabulary}문항은 그대로",
+          file=sys.stderr)
+    print(f"[대조]   emotion을 뺀 본문과 버전 속성이 {args.same_content_as}과 바이트 단위로 같다", file=sys.stderr)
+    print(f"[크기]   마이그레이션 {len(sql.encode('utf-8')) / 1024:.0f}KB", file=sys.stderr)
+
+
+def emotion_header(definition: dict, emotions_file: str, voices: int, vocabulary: int,
+                   emotions: dict[str, str]) -> str:
+    """감정 톤 제자리 반영의 머리말 (KAN-282)."""
+    kinds = sorted(set(emotions.values()))
+    return f"""\
+-- KAN-282: {definition["testVersion"]}의 음성 {voices}문항에 감정 톤(emotion)을 더한 제자리 반영 - 어휘 {vocabulary}문항과
+-- 그 밖의 모든 것(문장, itemId, seq, scriptKey, guideF0, 선택지와 정답, scoreVersion, setLayout, published_at)은
+-- 그대로다. 새 testVersion을 발행하지 않는다 - 발행 후 불변(KAN-26)의 예외로, 세션, 채점, 세트 구성 어느 것도
+-- 바뀌지 않는 화면용 필드 하나만 더하기 때문이다 (2026-10-13 결정).
+--
+-- 이 파일은 손으로 쓰지 않는다 - tools/content/build_definition.py --reissue-from --emotions --update-in-place 가
+-- 원본 본문에 tools/content/{emotions_file}(검수본)을 적용해 만든다. 감정은 {len(kinds)}종이다:
+-- {", ".join(kinds)}.
+--
+-- 값은 감정 형용 표현만이다. "느낌으로 말해주세요!" 문구는 앱이 붙인다 (KAN-283). 발행 검증은 emotion이
+-- 전 음성 문항에 있거나 전부 없기를 요구하고(all-or-nothing), 어휘 문항에 있으면 거부한다.
+--
+-- 활성 전환은 없다 - 같은 버전이라 배포만으로 반영된다. 레지스트리는 기동 때 본문을 읽으므로 이 마이그레이션이
+-- 적용된 인스턴스부터 세트 응답에 emotion이 실린다."""
 
 
 def curation_header(definition: dict, same_content_as: str, voices: int, vocabulary: int,
