@@ -81,4 +81,8 @@ dependencies {
 
 tasks.named('test') {
 	useJUnitPlatform()
+	// 테스트 JVM 힙 (KAN-282, 2026-10-13). Gradle 기본 512MB에서는 통합 테스트가 캐시에 쌓는 Spring 컨텍스트 26개가
+	// 힙을 거의 다 차지해(로컬 GC 로그 기준 Full GC 뒤에도 약 508MB) CI에서 컨텍스트 생성 중 OutOfMemoryError로 죽었다.
+	// 컨텍스트 수가 늘 때마다 다시 경계에 닿지 않도록 두 배로 둔다. GitHub 러너와 개발 장비 모두 여유가 있다.
+	maxHeapSize = '1g'
 }
