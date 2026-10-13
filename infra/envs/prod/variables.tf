@@ -212,3 +212,42 @@ variable "translation_model" {
   description = "번역 LLM 모델 이름 (KAN-266). SSM ACCENTURY_TRANSLATION_MODEL로 backend에 들어간다. 품질이 모자라면 gemini-3.8-flash로 바꾸는 선택지가 있다 (2026-10-08 결정)."
   default     = "gemini-3.5-flash-lite"
 }
+
+# ---- 슬랙 알림 (KAN-273) ----
+
+# 워크스페이스와 채널 ID는 시크릿이 아니고 두 환경이 같은 값이라 alert_email처럼 기본값으로 둔다.
+variable "slack_team_id" {
+  type        = string
+  description = "AWS Chatbot 콘솔에서 승인한 슬랙 워크스페이스 ID (2026-10-13 승인)."
+  default     = "T0BC03GKAM7"
+}
+
+variable "slack_infra_alerts_channel_id" {
+  type        = string
+  description = "#infra-alerts 채널 ID. AI 스케일 이벤트와 ai-disk-high 경보가 두 환경에서 온다."
+  default     = "C0C9KN2NA2C"
+}
+
+variable "slack_daily_user_channel_id" {
+  type        = string
+  description = "#daily-user 채널 ID. 응시 현황 2시간 리포트가 온다 (voice_report_enabled인 환경만)."
+  default     = "C0C8L27E9BP"
+}
+
+variable "voice_report_enabled" {
+  type        = bool
+  description = "음성 버킷 응시 현황 2시간 리포트를 #daily-user로 보낼지. prod만 true다 (2026-10-13 결정)."
+  default     = false
+}
+
+variable "slack_channel_configs_enabled" {
+  type        = bool
+  description = "Chatbot 채널 설정을 이 환경이 가질지. 슬랙 채널 하나에 계정당 설정이 하나만 허용되므로(2026-10-13 실측) prod만 true다."
+  default     = false
+}
+
+variable "slack_infra_alerts_peer_envs" {
+  type        = list(string)
+  description = "#infra-alerts 채널 설정에 토픽을 함께 붙일 다른 환경. slack_channel_configs_enabled인 환경(prod)에서 [\"staging\"]이다."
+  default     = []
+}

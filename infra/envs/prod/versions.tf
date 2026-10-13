@@ -11,5 +11,10 @@ terraform {
       source  = "hashicorp/aws"
       version = "~> 6.0"
     }
+    # 리포트 Lambda 코드를 zip으로 묶는다 (KAN-273 slack-alerts 모듈의 archive_file).
+    archive = {
+      source  = "hashicorp/archive"
+      version = "~> 2.0"
+    }
   }
 }

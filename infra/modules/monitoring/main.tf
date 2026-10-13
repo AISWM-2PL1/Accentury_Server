@@ -384,8 +384,9 @@ resource "aws_cloudwatch_metric_alarm" "ai_disk_high" {
   threshold           = var.ai_disk_threshold
   treat_missing_data  = "notBreaching"
 
-  alarm_actions = local.alarm_actions
-  ok_actions    = local.alarm_actions
+  # 이메일에 더해 슬랙 #infra-alerts로도 보낸다 (KAN-273) - 다른 경보는 이메일만이다.
+  alarm_actions = concat(local.alarm_actions, var.slack_alarm_topic_arns)
+  ok_actions    = concat(local.alarm_actions, var.slack_alarm_topic_arns)
 
   tags = { Name = "${local.name}-ai-disk-high" }
 }

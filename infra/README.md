@@ -1995,6 +1995,77 @@ CloudWatch 표준 경보는 개당 월 0.10달러, 지표 math 경보(`alb-5xx`)
 `MemoryUsedPercent` 3개 + backend `accentury.*` 약 5개)가 이름당 월 0.30달러로 약 2.40달러다. SNS 이메일 알림은 월 1000건까지 무료다. 두 환경
 합산 월 5달러 안팎이라 상시 켜 둔다. KAN-38이 더하는 몫은 아래 절에 따로 적는다.
 
+### 슬랙 알림 (KAN-273)
+
+이메일과 별도로 AWS Chatbot(콘솔 이름 "Amazon Q Developer in chat applications")이 SNS 토픽을 슬랙 채널로 옮긴다
+(`infra/modules/slack-alerts`). 이메일 토픽(`accentury-{env}-alerts`)에는 Chatbot을 붙이지 않는다 - 붙이면 모든
+경보가 슬랙으로 간다.
+
+| 채널 | 환경 | 내용 | 경로 |
+| --- | --- | --- | --- |
+| `#infra-alerts` | 두 환경 | AI ASG 오토스케일링 확대와 축소, 시작 실패 | ASG 이벤트 -> EventBridge 규칙 3개(입력 변환) -> `accentury-{env}-slack-infra-alerts` -> Chatbot |
+| `#infra-alerts` | 두 환경 | `ai-disk-high`의 ALARM과 OK (이메일도 그대로 간다) | 경보 -> `accentury-{env}-slack-infra-alerts` -> Chatbot |
+| `#daily-user` | prod만 (`voice_report_enabled`) | 응시 현황 리포트, KST 08시부터 24시까지 짝수 정각 | Scheduler -> Lambda `accentury-prod-voice-report` -> `accentury-prod-slack-daily-user` -> Chatbot |
+
+- 배포의 instance refresh(이미지 배포, AMI 교체)가 내는 시작과 종료는 알리지 않는다. 규칙이 이벤트의 `Cause`에
+  `instance refresh`가 들어 있으면 거른다. 시작 실패는 원인과 무관하게 알린다.
+- 메시지 머리의 `[staging]`/`[prod]`로 환경을 구분한다. 두 환경이 `#infra-alerts` 하나를 함께 쓴다.
+- Chatbot 채널 설정은 서울에 API가 없어 `aws.chatbot` provider(us-east-2)로 만든다. 토픽과 규칙과 Lambda는 서울이다.
+- 슬랙 채널 하나에는 계정당 Chatbot 채널 설정을 하나만 만들 수 있다(2026-10-13 실측, 두 번째는 `has already been configured
+  for AWS account`로 거부). 그래서 prod(`slack_channel_configs_enabled = true`)가 두 채널 설정을 모두 갖고, `#infra-alerts`
+  설정에 staging 토픽(`slack_infra_alerts_peer_envs = ["staging"]`)도 붙인다. staging은 토픽과 규칙, 경보만 만든다.
+  처음 적용도 staging(토픽 생성)이 먼저다.
+  **staging을 부수고 다시 지으면 토픽이 새로 생겨 구독이 끊긴다.** 토픽 ARN은 이름이 같아 그대로이므로 prod plan은
+  "No changes"로 나오고 그냥 apply해서는 복구되지 않는다. prod에서 채널 설정을 다시 만든다:
+
+  ```
+  terraform -chdir=infra/envs/prod apply -replace='module.slack_alerts.aws_chatbot_slack_channel_configuration.infra[0]'
+  ```
+
+  확인은 `aws sns list-subscriptions-by-topic --topic-arn <staging 토픽 ARN>`에 `global.sns-api.chatbot.amazonaws.com` 구독이 있는지다.
+- 채널 역할에는 정책이 없고 가드레일은 `CloudWatchReadOnlyAccess`다. 슬랙에서 AWS 명령을 실행하지 않는다.
+
+**처음 한 번 사람이 하는 일** (Terraform이 못 한다):
+
+1. 슬랙에 `#infra-alerts`와 `#daily-user` 채널을 만든다.
+2. https://us-east-2.console.aws.amazon.com/chatbot/home#/chat-clients 에서 **Configure new client** > Slack을
+   골라 워크스페이스를 승인한다. 콘솔 검색의 "Amazon Q Developer"는 Kiro(코딩 도구) 화면이라 다른 곳이다.
+3. 승인 화면의 워크스페이스 ID와 두 채널 ID(채널 이름 클릭 > 맨 아래)를 `envs/*/variables.tf`의
+   `slack_team_id`, `slack_infra_alerts_channel_id`, `slack_daily_user_channel_id` 기본값에 넣는다. 시크릿이 아니다.
+4. 두 채널에서 `/invite`로 승인한 앱(슬랙에 "Amazon Q" 계열 이름으로 보인다)을 초대한다. 초대 전에는 apply가 성공해도 메시지가 오지 않는다.
+
+**리포트 숫자의 정의** (`voice_report/voice_report.py`). 음성 버킷의 키와 `LastModified`만 본다 - Lambda 역할에는
+`prod/` 접두의 `s3:ListBucket`만 있고 `GetObject`가 없다. 음성 버킷 정책은 List를 거부하지 않으므로 bootstrap은 바꾸지 않는다.
+
+| 값 | 정의 |
+| --- | --- |
+| 동의 세션 | WAV가 하나라도 있다 |
+| 미동의 세션 | `_no-audio` 아래 JSON만 있다 (`_no-audio`에는 미동의 세션의 음성 라벨과 모든 세션의 단어 정오가 함께 쌓인다) |
+| 완주 | 서로 다른 문항(itemId) 수가 그 버전의 기록 문항 수 이상. 기본 7, `gn-2026.10.1`은 3(단어 정오 기록 전), `gn-2026.09.4`는 5 |
+| 진행 중 / 이탈 | 완주 전이고 마지막 객체가 30분(세션 TTL) 안이면 진행 중, 아니면 이탈 |
+| 완주율 | 완주 / (완주 + 이탈) |
+| 구간 소속 | 세션의 첫 객체 시각. 08시 리포트는 00~08시, 00시(24시) 리포트의 "오늘"은 막 끝난 날 |
+
+새 레벨테스트 버전이 7문항이 아니면 `voice_report.py`의 `DEFAULT_ITEMS_PER_VERSION`에 더한다. 세션 시작만 하고
+문항을 하나도 내지 않은 방문자는 S3에 흔적이 없어 세지 않는다.
+
+**확인과 실증**:
+
+```
+# 리포트를 지금 한 번 보내기 (prod)
+aws lambda invoke --function-name accentury-prod-voice-report /dev/stdout
+
+# 디스크 경보를 슬랙에 띄웠다 되돌리기 (이메일도 함께 간다)
+aws cloudwatch set-alarm-state --alarm-name accentury-staging-ai-disk-high --state-value ALARM --state-reason "KAN-273 실증"
+aws cloudwatch set-alarm-state --alarm-name accentury-staging-ai-disk-high --state-value OK --state-reason "KAN-273 실증"
+
+# 스케일 알림 (staging, 수 분 뒤 축소 경보가 다시 1대로 되돌린다)
+aws autoscaling set-desired-capacity --auto-scaling-group-name accentury-staging-ai --desired-capacity 2
+```
+
+끄려면 채널 설정을 지운다(`aws_chatbot_slack_channel_configuration`). 리포트만 끄려면 prod tfvars의
+`voice_report_enabled = false`다. 비용은 EventBridge 규칙과 Scheduler, Lambda(하루 9회 수 초), SNS 모두 무료 한도 안이다.
+
 ## 관측성 지표와 대시보드 (KAN-38)
 
 앞 절이 "서버가 죽었다"를 알린다면 이 절은 **"서버는 살아 있는데 파이프라인이 고장 났다"**를

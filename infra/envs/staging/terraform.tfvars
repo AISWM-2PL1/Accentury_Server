@@ -40,6 +40,14 @@ training_bucket_enabled = true
 # (accentury-translator-prompt-<계정 ID>)에 남긴다. staging은 비용 때문에 버킷을 만들지 않는다.
 translation_records_enabled = false
 
+# 응시 현황 2시간 리포트 (KAN-273, 2026-10-13 결정). 음성 버킷을 세어 슬랙 #daily-user로 보낸다. staging은 보내지 않는다.
+voice_report_enabled = false
+
+# 슬랙 Chatbot 채널 설정의 소유 (KAN-273). 채널 하나에 계정당 설정이 하나뿐이라 prod가 갖는다. staging은 토픽과 규칙,
+# 경보만 만들고, staging 토픽은 prod의 #infra-alerts 설정이 붙인다.
+slack_channel_configs_enabled = false
+slack_infra_alerts_peer_envs  = []
+
 ssm_prefix = "/accentury/staging"
 
 # 이미지는 staging 파이프라인만 만든다 (KAN-128 승격 모델). prod는 그 SHA를 고르기만 한다.
