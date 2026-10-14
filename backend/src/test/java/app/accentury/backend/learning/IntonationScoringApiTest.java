@@ -18,6 +18,7 @@ import org.springframework.context.annotation.Import;
 import org.springframework.context.annotation.Primary;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
+import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.mock.web.MockMultipartFile;
 import org.springframework.test.context.TestPropertySource;
 import org.springframework.test.web.servlet.MockMvc;
@@ -27,6 +28,8 @@ import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.ObjectMapper;
 
 import java.nio.charset.StandardCharsets;
+import java.time.Instant;
+import java.time.LocalDate;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -105,6 +108,9 @@ class IntonationScoringApiTest extends IntegrationTest {
 
     @Autowired
     private AnalysisJobRepository analysisJobs;
+
+    @Autowired
+    private JdbcTemplate jdbc;
 
     @BeforeEach
     void clear() {
@@ -315,6 +321,20 @@ class IntonationScoringApiTest extends IntegrationTest {
     }
 
     @Test
+    void 채점이_완료되면_그날_출석이_한_번_남고_실패는_출석이_아니다() throws Exception {
+        String access = signUp();
+        String failed = uploaded(access, firstCardId(), "f");
+        UUID userId = attempts.findById(failed).orElseThrow().userId();
+        ledger.fail(failed, AnalysisJobStatus.RETRYABLE_FAILED, "ANALYSIS_MISREAD");
+        assertEquals(List.of(), attendedDates(userId), "채점 실패는 출석이 아니다");
+
+        LocalDate today = LearningAttendance.attendanceDate(Instant.now());
+        assertTrue(ledger.complete(uploaded(access, firstCardId(), "a"), completed(70, List.of())));
+        assertTrue(ledger.complete(uploaded(access, secondCardId(), "b"), completed(70, List.of())));
+        assertEquals(List.of(today), attendedDates(userId), "같은 날 두 번 채점해도 1행이다");
+    }
+
+    @Test
     void 탈퇴하면_억양_학습_시도가_파기된다() throws Exception {
         String access = signUp();
         String other = signUp();
@@ -333,6 +353,11 @@ class IntonationScoringApiTest extends IntegrationTest {
     }
 
     // === 도우미 ===
+
+    private List<LocalDate> attendedDates(UUID userId) {
+        return jdbc.query("select attended_on from learning_attendance where user_id = ? order by attended_on",
+                (rs, rowNum) -> rs.getDate(1).toLocalDate(), userId);
+    }
 
     private static AiAnalysisClient.Completed completed(int rawScore, List<AiAnalysisClient.OrderSegment> segments) {
         return new AiAnalysisClient.Completed(rawScore, "OK", "track1-test", "sv-0.5", segments);

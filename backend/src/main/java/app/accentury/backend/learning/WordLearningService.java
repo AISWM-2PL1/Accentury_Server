@@ -39,6 +39,8 @@ import java.util.stream.Collectors;
  * 시각은 마이크로초로 자른다 - 열이 {@code timestamp(6)}라 나노초가 있는 플랫폼(Linux)에서는 메모리의 값과 DB에서 다시
  * 읽은 값이 달라져 "완료 재호출은 같은 본문"(§3.16)이 깨진다 (Codex 리뷰 P2).
  * <p>
+ * 세트가 처음 완료로 바뀌면 커밋 뒤에 그날 출석을 남긴다 ({@link LearningAttendance}, KAN-286).
+ * <p>
  * 로그에는 시도 id, 세트 id, 문항 id만 남긴다 - 고른 보기와 정오는 남기지 않는다 (§2.6의 취지).
  */
 @Service
@@ -53,11 +55,12 @@ public class WordLearningService {
     private final WordWrongAnswerRepository wrongAnswers;
     private final TransactionTemplate transactionTemplate;
     private final RateLimits rateLimits;
+    private final LearningAttendance attendance;
 
     public WordLearningService(WordLearningRegistry registry, AppUserRepository users,
                                WordSetAttemptRepository attempts, WordAttemptAnswerRepository answers,
                                WordWrongAnswerRepository wrongAnswers, TransactionTemplate transactionTemplate,
-                               RateLimits rateLimits) {
+                               RateLimits rateLimits, LearningAttendance attendance) {
         this.registry = registry;
         this.users = users;
         this.attempts = attempts;
@@ -65,6 +68,7 @@ public class WordLearningService {
         this.wrongAnswers = wrongAnswers;
         this.transactionTemplate = transactionTemplate;
         this.rateLimits = rateLimits;
+        this.attendance = attendance;
     }
 
     /** 세트 상세 (W-2, W-3) - 정답과 해설 없음. 없는 세트는 404. */
@@ -170,11 +174,24 @@ public class WordLearningService {
         }));
         if (completed.transitioned()) {
             log.info("단어 학습 세트 완료 attemptId={} setId={}", attemptId, completed.response().setId());
+            recordAttendance(user.id(), attemptId, completed.response().completedAt());
         }
         return completed.response();
     }
 
     private record Completed(boolean transitioned, WordAttemptResultResponse response) {
+    }
+
+    /**
+     * 완료 커밋 뒤의 출석 기록 (KAN-286) - 트랜잭션 안에서 넣지 않는 이유는 {@link LearningAttendance}에 있다. 실패해도
+     * 완료 응답은 그대로다.
+     */
+    private void recordAttendance(UUID userId, String attemptId, Instant completedAt) {
+        try {
+            attendance.record(userId, completedAt);
+        } catch (RuntimeException e) {
+            log.warn("출석 기록 실패 attemptId={}", attemptId, e);
+        }
     }
 
     /**

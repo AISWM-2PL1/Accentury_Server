@@ -164,6 +164,8 @@ test('1항 표의 보유 기간이 행마다 코드와 맞는다', () => {
     ['단어 학습 기록 (앱)', ['탈퇴'], 'KAN-265, V7__word_learning.sql, LearningRecords.purge'],
     // 계정의 레벨테스트 최근 등급은 세션과 결과의 24시간과 별개로 탈퇴까지 남는다 (KAN-268, V14).
     ['레벨테스트 최근 등급 (앱)', ['탈퇴'], 'KAN-268, V14__level_test_record.sql, LevelTestRecords.purge'],
+    // 계정의 출석일은 하루 한 행으로 탈퇴까지 남는다 (KAN-286, V16).
+    ['출석 기록 (앱)', ['탈퇴'], 'KAN-286, V16__learning_attendance.sql, LearningAttendance.purge'],
     // 미완주 세션은 생성 30분 뒤 만료 정리(SessionService.java:133), 완주 세션은 완료 시점부터
     // 24시간(TestSession.java:140-157, CompletionService.java:169-175). 기준점이 둘이라 셋을 함께 본다.
     // 앱 세션이 계정에 붙으면서(KAN-223) 행 이름에서 「익명」을 뺐다 (KAN-240).
@@ -746,6 +748,8 @@ test('1항에 계정 절이 있고 수집 항목과 목적과 보유 기간을 �
   assert.ok(account.includes('억양 학습과 단어 학습의 기록은 이와 달리 계정에 쌓이며'), '계정 절에 학습 기록의 예외가 없다');
   // 레벨테스트의 최근 등급 한 건은 결과와 달리 계정에 남는다 (KAN-268, V14 level_test_record).
   assert.ok(account.includes('가장 최근에 끝내신 테스트의 등급 한 건만 계정에 남으며'), '계정 절에 최근 등급의 예외가 없다');
+  // 출석일도 계정에 쌓인다 (KAN-286, V16 learning_attendance).
+  assert.ok(account.includes('출석하신 날짜도 계정에 쌓이며'), '계정 절에 출석 기록의 예외가 없다');
   assert.ok(account.includes('어느 세션이 어느 계정의 것인지를 남기지 않습니다'), '로그의 세션-계정 대응 미기록 문구가 없다');
 });
 
