@@ -8,6 +8,7 @@ import app.accentury.backend.common.ErrorCode;
 import app.accentury.backend.common.IdempotencyKeys;
 import app.accentury.backend.common.ItemsApiException;
 import app.accentury.backend.common.RateLimits;
+import app.accentury.backend.learning.LearningAttendance;
 import app.accentury.backend.learning.LevelTestRecords;
 import app.accentury.backend.scoring.AggregateScore;
 import app.accentury.backend.scoring.ScoreAggregator;
@@ -62,6 +63,7 @@ public class CompletionService {
     private final TransactionTemplate transactionTemplate;
     private final AnalyticsCounters counters;
     private final LevelTestRecords levelTestRecords;
+    private final LearningAttendance attendance;
 
     public CompletionService(SessionService sessionService, TestDefinitionRegistry registry,
                              CompletionJudge judge,
@@ -70,7 +72,8 @@ public class CompletionService {
                              ScoreAggregator aggregator, RateLimits rateLimits,
                              PollIntervals pollIntervals, AccenturyProperties properties,
                              TransactionTemplate transactionTemplate,
-                             AnalyticsCounters counters, LevelTestRecords levelTestRecords) {
+                             AnalyticsCounters counters, LevelTestRecords levelTestRecords,
+                             LearningAttendance attendance) {
         this.sessionService = sessionService;
         this.registry = registry;
         this.judge = judge;
@@ -83,6 +86,7 @@ public class CompletionService {
         this.transactionTemplate = transactionTemplate;
         this.counters = counters;
         this.levelTestRecords = levelTestRecords;
+        this.attendance = attendance;
     }
 
     /**
@@ -144,7 +148,9 @@ public class CompletionService {
                     confirmed, session.traffic());
             UUID userId = session.userId();
             if (userId != null) {
-                recordLevelTest(userId, session, confirmed, Objects.requireNonNull(outcome.confirmedAt()));
+                Instant confirmedAt = Objects.requireNonNull(outcome.confirmedAt());
+                recordLevelTest(userId, session, confirmed, confirmedAt);
+                recordAttendance(userId, session, confirmedAt);
             }
         }
         return outcome.response();
@@ -160,6 +166,18 @@ public class CompletionService {
                     score.tier().code(), score.tier().name(), score.tier().rank(), score.tierCount(), completedAt));
         } catch (RuntimeException e) {
             log.warn("레벨테스트 최근 등급 기록 실패 sessionId={}", session.id(), e);
+        }
+    }
+
+    /**
+     * 그날 출석을 남긴다 (KAN-286) - 최근 등급과 같은 규율이다. 결과는 이미 커밋됐으므로 실패해도 완료 응답을 바꾸지 않고,
+     * 홈의 연속 출석이 이날을 놓칠 뿐이다.
+     */
+    private void recordAttendance(UUID userId, TestSession session, Instant completedAt) {
+        try {
+            attendance.record(userId, completedAt);
+        } catch (RuntimeException e) {
+            log.warn("출석 기록 실패 sessionId={}", session.id(), e);
         }
     }
 

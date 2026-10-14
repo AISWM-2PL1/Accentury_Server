@@ -24,8 +24,10 @@ import org.springframework.test.web.servlet.request.MockHttpServletRequestBuilde
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.ObjectMapper;
 
+import java.sql.Date;
 import java.sql.Timestamp;
 import java.time.Instant;
+import java.time.LocalDate;
 import java.time.temporal.ChronoUnit;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
@@ -72,6 +74,9 @@ class LearningProgressApiTest extends IntegrationTest {
 
     @Autowired
     private LevelTestRecords levelTestRecords;
+
+    @Autowired
+    private LearningAttendance attendance;
 
     @Autowired
     private AnalysisJobRepository analysisJobRepository;
@@ -155,6 +160,75 @@ class LearningProgressApiTest extends IntegrationTest {
         authed(post("/v0/users/me/withdrawal"), withdrawn.access()).andExpect(status().isNoContent());
         assertFalse(levelTestRecords.record(withdrawn.userId(), entry(4, now)));
         assertTrue(levelTestRecords.find(withdrawn.userId()).isEmpty());
+    }
+
+    // === 연속 출석 (KAN-286) ===
+
+    @Test
+    void 레벨테스트_완주와_학습_완료가_그날_출석을_한_번만_남기고_홈에_보인다() throws Exception {
+        Account account = signUp();
+        JsonNode before = home(account).get("streak");
+        assertEquals(0, before.get("currentDays").asInt());
+        assertFalse(before.get("attendedToday").asBoolean());
+        assertTrue(before.get("lastAttendedDate").isNull());
+
+        LocalDate today = LearningAttendance.attendanceDate(Instant.now());
+        completeLevelTest(account);
+        assertEquals(List.of(today), attendedDates(account.userId()), "레벨테스트 완주는 출석이다");
+
+        // 같은 날 세트를 두 번 끝내도 1행이다. 시작만 한 시도는 출석이 아니다.
+        WordLearningDefinition.Set set = wordRegistry.current().definition().sets().get(0);
+        solve(account, set, 0);
+        solve(account, set, 1);
+        assertEquals(List.of(today), attendedDates(account.userId()));
+
+        JsonNode streak = home(account).get("streak");
+        assertEquals(1, streak.get("currentDays").asInt());
+        assertTrue(streak.get("attendedToday").asBoolean());
+        assertEquals(today.toString(), streak.get("lastAttendedDate").asString());
+
+        // 단어 세트 완료만으로도 출석이다.
+        Account learner = signUp();
+        authed(post("/v0/learning/word-sets/" + set.setId() + "/attempts"), learner.access())
+                .andExpect(status().isCreated());
+        assertEquals(List.of(), attendedDates(learner.userId()), "시작만 하면 출석이 아니다");
+        solve(learner, set, 0);
+        assertEquals(List.of(today), attendedDates(learner.userId()));
+    }
+
+    @Test
+    void 연속_출석은_오늘_아직이면_어제까지를_세고_하루를_건너뛰면_0이다() throws Exception {
+        LocalDate today = LearningAttendance.attendanceDate(Instant.now());
+
+        // 어제와 그제 출석, 오늘은 아직 - 오늘이 끝나기 전이라 끊긴 것으로 보지 않는다.
+        Account account = signUp();
+        seedAttendance(account.userId(), today.minusDays(1), today.minusDays(2), today.minusDays(4));
+        JsonNode streak = home(account).get("streak");
+        assertEquals(2, streak.get("currentDays").asInt());
+        assertFalse(streak.get("attendedToday").asBoolean());
+        assertEquals(today.minusDays(1).toString(), streak.get("lastAttendedDate").asString());
+
+        // 오늘 출석하면 오늘까지 이어진다.
+        assertTrue(attendance.record(account.userId(), Instant.now()));
+        streak = home(account).get("streak");
+        assertEquals(3, streak.get("currentDays").asInt());
+        assertTrue(streak.get("attendedToday").asBoolean());
+
+        // 어제를 건너뛰었으면 0이다 - 마지막 출석일은 그대로 보인다.
+        Account lapsed = signUp();
+        seedAttendance(lapsed.userId(), today.minusDays(2), today.minusDays(3));
+        streak = home(lapsed).get("streak");
+        assertEquals(0, streak.get("currentDays").asInt());
+        assertFalse(streak.get("attendedToday").asBoolean());
+        assertEquals(today.minusDays(2).toString(), streak.get("lastAttendedDate").asString());
+    }
+
+    @Test
+    void 탈퇴한_계정에는_출석을_쓰지_않는다() throws Exception {
+        Account withdrawn = signUp();
+        authed(post("/v0/users/me/withdrawal"), withdrawn.access()).andExpect(status().isNoContent());
+        assertFalse(attendance.record(withdrawn.userId(), Instant.now()));
+        assertEquals(List.of(), attendedDates(withdrawn.userId()));
     }
 
     // === 코스 목록의 완료 표시와 추천 (AC 2, AC 3) ===
@@ -279,7 +353,7 @@ class LearningProgressApiTest extends IntegrationTest {
     // === 탈퇴 (AC 5) ===
 
     @Test
-    void 탈퇴하면_최근_등급과_학습_기록이_전부_파기된다() throws Exception {
+    void 탈퇴하면_최근_등급과_학습_기록과_출석이_전부_파기된다() throws Exception {
         Account account = signUp();
         completeLevelTest(account);
         IntonationLearningDefinition.Course course = intonationRegistry.current().definition().courses().get(0);
@@ -291,13 +365,16 @@ class LearningProgressApiTest extends IntegrationTest {
         completeLevelTest(other);
 
         assertEquals(1, count("select count(*) from level_test_record where user_id = ?", account.userId()));
+        assertEquals(1, count("select count(*) from learning_attendance where user_id = ?", account.userId()));
         authed(post("/v0/users/me/withdrawal"), account.access()).andExpect(status().isNoContent());
 
         assertEquals(0, count("select count(*) from level_test_record where user_id = ?", account.userId()));
         assertEquals(0, count("select count(*) from intonation_learning_attempt where user_id = ?", account.userId()));
         assertEquals(0, count("select count(*) from word_set_attempt where user_id = ?", account.userId()));
         assertEquals(0, count("select count(*) from word_wrong_answer where user_id = ?", account.userId()));
+        assertEquals(0, count("select count(*) from learning_attendance where user_id = ?", account.userId()));
         assertEquals(1, count("select count(*) from level_test_record where user_id = ?", other.userId()));
+        assertEquals(1, count("select count(*) from learning_attendance where user_id = ?", other.userId()));
         authed(get("/v0/learning/home"), account.access()).andExpect(status().isUnauthorized());
     }
 
@@ -357,6 +434,18 @@ class LearningProgressApiTest extends IntegrationTest {
                         values (?, ?, ?, ?, ?, ?, ?, ?)
                         """, "la_" + UUID.randomUUID(), userId, contentVersion, cardId, "k-" + UUID.randomUUID(),
                 status, now, now);
+    }
+
+    private void seedAttendance(UUID userId, LocalDate... dates) {
+        for (LocalDate date : dates) {
+            jdbc.update("insert into learning_attendance (user_id, attended_on) values (?, ?)", userId,
+                    Date.valueOf(date));
+        }
+    }
+
+    private List<LocalDate> attendedDates(UUID userId) {
+        return jdbc.query("select attended_on from learning_attendance where user_id = ? order by attended_on",
+                (rs, rowNum) -> rs.getDate(1).toLocalDate(), userId);
     }
 
     private JsonNode home(Account account) throws Exception {

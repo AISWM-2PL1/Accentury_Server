@@ -15,6 +15,7 @@ import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.stereotype.Component;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionTemplate;
 import tools.jackson.databind.ObjectMapper;
 
 import java.time.Instant;
@@ -22,6 +23,8 @@ import java.time.temporal.ChronoUnit;
 import java.util.Collection;
 import java.util.List;
 import java.util.Objects;
+import java.util.Optional;
+import java.util.UUID;
 
 /**
  * 억양 학습 채점 시도에 AI 결과를 적는다 (KAN-267, 명세서 §3.19) - 레벨테스트와 같은 전달 워커가 부른다.
@@ -29,6 +32,9 @@ import java.util.Objects;
  * 성공이면 원점수를 변환 점수로 바꾸고({@link IntonationScoring}) 올리고 내릴 음절을 JSON으로 함께 저장한다. 행이 결과의
  * 정본이라 폴링은 언제든 같은 본문을 받는다. 전이는 조건부 UPDATE라, 타임아웃 스위퍼나 탈퇴 파기가 먼저 닿은 시도에는
  * 0행으로 버려진다.
+ * <p>
+ * 성공 전이가 커밋되면 그 계정의 그날 출석을 남긴다 ({@link LearningAttendance}, KAN-286). 날짜는 업로드가 아니라 채점이
+ * 끝난 시각이다.
  * <p>
  * 로그에는 시도 id만 남긴다. 점수와 어절 글자는 남기지 않는다 (§2.6).
  */
@@ -41,13 +47,18 @@ public class IntonationAttemptLedger implements LearningAnalysisSink {
     private final IntonationScoring scoring;
     private final ObjectMapper objectMapper;
     private final ObjectProvider<LearningVoiceStore> voices;
+    private final TransactionTemplate transactionTemplate;
+    private final LearningAttendance attendance;
 
     IntonationAttemptLedger(IntonationAttemptRepository attempts, IntonationScoring scoring,
-                            ObjectMapper objectMapper, ObjectProvider<LearningVoiceStore> voices) {
+                            ObjectMapper objectMapper, ObjectProvider<LearningVoiceStore> voices,
+                            TransactionTemplate transactionTemplate, LearningAttendance attendance) {
         this.attempts = attempts;
         this.scoring = scoring;
         this.objectMapper = objectMapper;
         this.voices = voices;
+        this.transactionTemplate = transactionTemplate;
+        this.attendance = attendance;
     }
 
     @Override
@@ -56,20 +67,38 @@ public class IntonationAttemptLedger implements LearningAnalysisSink {
         return attempts.markStartedIfProcessing(jobId, now()) > 0;
     }
 
+    /**
+     * 출석은 전이 트랜잭션이 커밋된 뒤에 남긴다 - 그래서 이 메서드만 선언적 트랜잭션 대신 {@link TransactionTemplate}을 쓴다.
+     * 커밋 뒤 콜백(afterCommit)에서 쓰면 이미 끝난 트랜잭션의 커넥션에 묶여 커밋되지 않는다.
+     */
     @Override
-    @Transactional
     public boolean complete(String jobId, AiAnalysisClient.Completed completed) {
         List<PitchFeedback> feedback = IntonationScoring.feedback(completed.orderSegments());
         int score = scoring.score(completed.intonationScore(), feedback);
-        int updated = attempts.completeIfProcessing(jobId, completed.intonationScore(), score,
-                objectMapper.writeValueAsString(feedback), completed.qualityCode(), completed.modelVersion(),
-                completed.scoreVersion(), now());
-        if (updated == 0) {
+        Instant finishedAt = now();
+        Optional<UUID> owner = Objects.requireNonNull(transactionTemplate.execute(tx -> {
+            int updated = attempts.completeIfProcessing(jobId, completed.intonationScore(), score,
+                    objectMapper.writeValueAsString(feedback), completed.qualityCode(), completed.modelVersion(),
+                    completed.scoreVersion(), finishedAt);
+            return updated == 0 ? Optional.<UUID>empty()
+                    : Optional.of(attempts.findById(jobId).orElseThrow().userId());
+        }));
+        if (owner.isEmpty()) {
             log.warn("늦은 학습 채점 결과를 버린다 - 이미 종결됐거나 탈퇴로 삭제된 시도다 attemptId={}", jobId);
             return false;
         }
         log.info("학습 채점 완료 attemptId={} modelVersion={}", jobId, completed.modelVersion());
+        recordAttendance(owner.get(), jobId, finishedAt);
         return true;
+    }
+
+    /** 실패해도 채점 결과는 이미 커밋됐다 - 홈의 연속 출석이 이날을 놓칠 뿐이다. */
+    private void recordAttendance(UUID userId, String jobId, Instant finishedAt) {
+        try {
+            attendance.record(userId, finishedAt);
+        } catch (RuntimeException e) {
+            log.warn("출석 기록 실패 attemptId={}", jobId, e);
+        }
     }
 
     @Override

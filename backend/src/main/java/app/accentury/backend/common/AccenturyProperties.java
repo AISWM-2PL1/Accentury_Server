@@ -405,7 +405,7 @@ public record AccenturyProperties(Session session,
                        @DefaultValue(Auth.PRIVACY_POLICY_VERSION) String privacyPolicyVersion) {
 
         /** 게시 중인 개인정보처리방침 버전 - privacy.html의 {@code accentury-policy-version} 메타와 같은 값이다 (KAN-240). */
-        public static final String PRIVACY_POLICY_VERSION = "2026-10-04";
+        public static final String PRIVACY_POLICY_VERSION = "2026-10-15";
     }
 
     /**

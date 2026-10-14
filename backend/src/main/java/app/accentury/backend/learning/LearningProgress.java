@@ -33,15 +33,17 @@ public class LearningProgress {
     private final IntonationAttemptRepository intonationAttempts;
     private final WordSetAttemptRepository wordAttempts;
     private final LevelTestRecords levelTestRecords;
+    private final LearningAttendance attendance;
 
     LearningProgress(IntonationLearningRegistry intonationRegistry, WordLearningRegistry wordRegistry,
                      IntonationAttemptRepository intonationAttempts, WordSetAttemptRepository wordAttempts,
-                     LevelTestRecords levelTestRecords) {
+                     LevelTestRecords levelTestRecords, LearningAttendance attendance) {
         this.intonationRegistry = intonationRegistry;
         this.wordRegistry = wordRegistry;
         this.intonationAttempts = intonationAttempts;
         this.wordAttempts = wordAttempts;
         this.levelTestRecords = levelTestRecords;
+        this.attendance = attendance;
     }
 
     /** 코스 목록 (A-1) - 완료 표시와 추천을 채운다. */
@@ -54,7 +56,7 @@ public class LearningProgress {
         return wordSets(userId, baseRank(userId));
     }
 
-    /** 홈 상태 (H-1) - 레벨테스트 완주 여부와 두 목록의 추천. */
+    /** 홈 상태 (H-1) - 레벨테스트 완주 여부, 두 목록의 추천, 연속 출석. */
     LearningHomeResponse home(UUID userId) {
         Optional<LevelTestRecords.Entry> record = levelTestRecords.find(userId);
         @Nullable Integer rank = record.map(LevelTestRecords.Entry::tierRank).orElse(null);
@@ -63,7 +65,8 @@ public class LearningProgress {
         String setId = recommendedId(wordSets(userId, rank).sets(), WordSetListResponse.Summary::recommended,
                 WordSetListResponse.Summary::setId);
         return new LearningHomeResponse(record.isPresent(),
-                record.map(LearningHomeResponse.LevelTest::from).orElse(null), courseId, setId);
+                record.map(LearningHomeResponse.LevelTest::from).orElse(null), courseId, setId,
+                attendance.streak(userId));
     }
 
     private IntonationCourseListResponse courses(UUID userId, @Nullable Integer rank) {
