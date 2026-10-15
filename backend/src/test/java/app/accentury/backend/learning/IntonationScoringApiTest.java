@@ -41,6 +41,7 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.junit.jupiter.api.Assumptions.assumeTrue;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.multipart;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
@@ -331,7 +332,25 @@ class IntonationScoringApiTest extends IntegrationTest {
         LocalDate today = LearningAttendance.attendanceDate(Instant.now());
         assertTrue(ledger.complete(uploaded(access, firstCardId(), "a"), completed(70, List.of())));
         assertTrue(ledger.complete(uploaded(access, secondCardId(), "b"), completed(70, List.of())));
-        assertEquals(List.of(today), attendedDates(userId), "같은 날 두 번 채점해도 1행이다");
+        List<LocalDate> dates = attendedDates(userId);
+        // 실제 시각으로 남기므로 실행 도중 KST 자정을 지나면 판정할 수 없다 (PR #43 리뷰).
+        assumeTrue(today.equals(LearningAttendance.attendanceDate(Instant.now())), "실행 도중 KST 자정을 지났다");
+        assertEquals(List.of(today), dates, "같은 날 두 번 채점해도 1행이다");
+    }
+
+    @Test
+    void 출석_기록이_실패해도_채점_완료는_그대로다() throws Exception {
+        String access = signUp();
+        String attemptId = uploaded(access, firstCardId(), "k");
+        UUID userId = attempts.findById(attemptId).orElseThrow().userId();
+        jdbc.execute("alter table learning_attendance add constraint ck_test_attendance_fails check (false) not valid");
+        try {
+            assertTrue(ledger.complete(attemptId, completed(70, List.of())));
+        } finally {
+            jdbc.execute("alter table learning_attendance drop constraint ck_test_attendance_fails");
+        }
+        assertEquals(List.of(), attendedDates(userId));
+        poll(access, attemptId).andExpect(jsonPath("$.status").value("COMPLETED"));
     }
 
     @Test

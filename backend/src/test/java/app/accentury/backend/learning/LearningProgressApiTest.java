@@ -38,6 +38,7 @@ import java.util.UUID;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.junit.jupiter.api.Assumptions.assumeTrue;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put;
@@ -172,55 +173,77 @@ class LearningProgressApiTest extends IntegrationTest {
         assertFalse(before.get("attendedToday").asBoolean());
         assertTrue(before.get("lastAttendedDate").isNull());
 
-        LocalDate today = LearningAttendance.attendanceDate(Instant.now());
+        LocalDate today = today();
         completeLevelTest(account);
-        assertEquals(List.of(today), attendedDates(account.userId()), "레벨테스트 완주는 출석이다");
-
-        // 같은 날 세트를 두 번 끝내도 1행이다. 시작만 한 시도는 출석이 아니다.
+        List<LocalDate> afterTest = attendedDates(account.userId());
+        // 같은 날 세트를 두 번 끝내도 1행이다.
         WordLearningDefinition.Set set = wordRegistry.current().definition().sets().get(0);
         solve(account, set, 0);
         solve(account, set, 1);
-        assertEquals(List.of(today), attendedDates(account.userId()));
-
+        List<LocalDate> afterSets = attendedDates(account.userId());
         JsonNode streak = home(account).get("streak");
+        assumeSameDay(today);
+        assertEquals(List.of(today), afterTest, "레벨테스트 완주는 출석이다");
+        assertEquals(List.of(today), afterSets);
         assertEquals(1, streak.get("currentDays").asInt());
         assertTrue(streak.get("attendedToday").asBoolean());
         assertEquals(today.toString(), streak.get("lastAttendedDate").asString());
 
-        // 단어 세트 완료만으로도 출석이다.
+        // 단어 세트 완료만으로도 출석이다. 시작만 한 시도는 출석이 아니다.
         Account learner = signUp();
         authed(post("/v0/learning/word-sets/" + set.setId() + "/attempts"), learner.access())
                 .andExpect(status().isCreated());
         assertEquals(List.of(), attendedDates(learner.userId()), "시작만 하면 출석이 아니다");
+        today = today();
         solve(learner, set, 0);
-        assertEquals(List.of(today), attendedDates(learner.userId()));
+        List<LocalDate> learned = attendedDates(learner.userId());
+        assumeSameDay(today);
+        assertEquals(List.of(today), learned);
     }
 
     @Test
     void 연속_출석은_오늘_아직이면_어제까지를_세고_하루를_건너뛰면_0이다() throws Exception {
-        LocalDate today = LearningAttendance.attendanceDate(Instant.now());
+        LocalDate today = today();
 
         // 어제와 그제 출석, 오늘은 아직 - 오늘이 끝나기 전이라 끊긴 것으로 보지 않는다.
         Account account = signUp();
         seedAttendance(account.userId(), today.minusDays(1), today.minusDays(2), today.minusDays(4));
-        JsonNode streak = home(account).get("streak");
-        assertEquals(2, streak.get("currentDays").asInt());
-        assertFalse(streak.get("attendedToday").asBoolean());
-        assertEquals(today.minusDays(1).toString(), streak.get("lastAttendedDate").asString());
-
+        JsonNode pending = home(account).get("streak");
         // 오늘 출석하면 오늘까지 이어진다.
         assertTrue(attendance.record(account.userId(), Instant.now()));
-        streak = home(account).get("streak");
-        assertEquals(3, streak.get("currentDays").asInt());
-        assertTrue(streak.get("attendedToday").asBoolean());
-
+        JsonNode attended = home(account).get("streak");
         // 어제를 건너뛰었으면 0이다 - 마지막 출석일은 그대로 보인다.
         Account lapsed = signUp();
         seedAttendance(lapsed.userId(), today.minusDays(2), today.minusDays(3));
-        streak = home(lapsed).get("streak");
-        assertEquals(0, streak.get("currentDays").asInt());
-        assertFalse(streak.get("attendedToday").asBoolean());
-        assertEquals(today.minusDays(2).toString(), streak.get("lastAttendedDate").asString());
+        JsonNode broken = home(lapsed).get("streak");
+        assumeSameDay(today);
+
+        assertEquals(2, pending.get("currentDays").asInt());
+        assertFalse(pending.get("attendedToday").asBoolean());
+        assertEquals(today.minusDays(1).toString(), pending.get("lastAttendedDate").asString());
+        assertEquals(3, attended.get("currentDays").asInt());
+        assertTrue(attended.get("attendedToday").asBoolean());
+        assertEquals(0, broken.get("currentDays").asInt());
+        assertFalse(broken.get("attendedToday").asBoolean());
+        assertEquals(today.minusDays(2).toString(), broken.get("lastAttendedDate").asString());
+    }
+
+    @Test
+    void 출석_기록이_실패해도_완료_응답은_그대로다() throws Exception {
+        Account account = signUp();
+        WordLearningDefinition.Set set = wordRegistry.current().definition().sets().get(0);
+        // 출석 넣기만 실패하게 한다 - 기존 행은 검사하지 않고(not valid) 새 행은 전부 거부한다.
+        jdbc.execute("alter table learning_attendance add constraint ck_test_attendance_fails check (false) not valid");
+        try {
+            completeLevelTest(account);   // 200 READY를 단언한다
+            solve(account, set, 0);       // 완료 200을 단언한다
+        } finally {
+            jdbc.execute("alter table learning_attendance drop constraint ck_test_attendance_fails");
+        }
+        assertEquals(List.of(), attendedDates(account.userId()));
+        assertTrue(home(account).get("levelTestTaken").asBoolean(), "결과와 최근 등급은 커밋됐다");
+        assertTrue(find(sets(account).get("sets"), "setId", set.setId()).get("completed").asBoolean(),
+                "세트 완료는 커밋됐다");
     }
 
     @Test
@@ -441,6 +464,19 @@ class LearningProgressApiTest extends IntegrationTest {
             jdbc.update("insert into learning_attendance (user_id, attended_on) values (?, ?)", userId,
                     Date.valueOf(date));
         }
+    }
+
+    private static LocalDate today() {
+        return LearningAttendance.attendanceDate(Instant.now());
+    }
+
+    /**
+     * 날짜에 걸린 단언 바로 앞에서 부른다 (PR #43 리뷰). 서비스가 실제 시각으로 출석을 남기므로 실행 도중 KST 자정을 지나면
+     * 정상 구현도 날짜가 갈린다 - 그때는 판정할 수 없어 실패 대신 건너뛴다. 경계 규칙 자체는 LearningAttendanceTest가
+     * 고정 시각으로 본다.
+     */
+    private static void assumeSameDay(LocalDate start) {
+        assumeTrue(start.equals(today()), "실행 도중 KST 자정을 지나 날짜 판정을 건너뛴다");
     }
 
     private List<LocalDate> attendedDates(UUID userId) {
