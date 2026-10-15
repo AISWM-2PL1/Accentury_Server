@@ -23,6 +23,7 @@ import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.support.TransactionTemplate;
 
+import java.time.Duration;
 import java.time.Instant;
 import java.util.Objects;
 import java.util.UUID;
@@ -45,6 +46,9 @@ import java.util.UUID;
  * <p>
  * 계정 귀속 세션이면 같은 자리(커밋 뒤)에서 계정의 최근 등급(KAN-268, §3.20)도 남긴다. 트랜잭션 안에서 쓰지 않는 이유는
  * {@link LevelTestRecords}에 있다 - 세션 행 잠금을 쥔 채 계정 행을 기다리면 탈퇴와 교착이 된다.
+ * <p>
+ * 결과 화면 대기 시간(KAN-284)의 시작점도 같은 잠금 아래에서 세션 행에 남기고, READY를 확정한 호출이 커밋 뒤에
+ * {@link ResultWaitMetrics}에 기록한다 - 롤백된 확정을 세지 않기 위해서다.
  */
 @Service
 public class CompletionService {
@@ -64,6 +68,7 @@ public class CompletionService {
     private final AnalyticsCounters counters;
     private final LevelTestRecords levelTestRecords;
     private final LearningAttendance attendance;
+    private final ResultWaitMetrics resultWaitMetrics;
 
     public CompletionService(SessionService sessionService, TestDefinitionRegistry registry,
                              CompletionJudge judge,
@@ -73,7 +78,7 @@ public class CompletionService {
                              PollIntervals pollIntervals, AccenturyProperties properties,
                              TransactionTemplate transactionTemplate,
                              AnalyticsCounters counters, LevelTestRecords levelTestRecords,
-                             LearningAttendance attendance) {
+                             LearningAttendance attendance, ResultWaitMetrics resultWaitMetrics) {
         this.sessionService = sessionService;
         this.registry = registry;
         this.judge = judge;
@@ -87,6 +92,7 @@ public class CompletionService {
         this.counters = counters;
         this.levelTestRecords = levelTestRecords;
         this.attendance = attendance;
+        this.resultWaitMetrics = resultWaitMetrics;
     }
 
     /**
@@ -99,13 +105,16 @@ public class CompletionService {
      *                       세션의 재시도, 아직 분석 중)는 null이다 - 완주는 세션당 1회만 센다.
      * @param confirmedAt    결과 행의 {@code createdAt}과 같은 시각 - 집계 일자가 결과 행과
      *                       어긋나지 않게 트랜잭션 안에서 정한 값을 그대로 쓴다.
+     * @param resultWait     이 호출이 결과를 새로 확정했을 때 세션의 첫 {@code /complete}부터 확정까지의 대기
+     *                       (KAN-284). 첫 호출에 바로 확정했으면 0이다.
      */
     private record Outcome(CompleteResponse response,
                            @Nullable AggregateScore confirmedScore,
-                           @Nullable Instant confirmedAt) {
+                           @Nullable Instant confirmedAt,
+                           @Nullable Duration resultWait) {
 
         static Outcome pending(CompleteResponse response) {
-            return new Outcome(response, null, null);
+            return new Outcome(response, null, null, null);
         }
     }
 
@@ -146,6 +155,7 @@ public class CompletionService {
             counters.recordSessionCompleted(
                     Objects.requireNonNull(outcome.confirmedAt()), session.testVersion(),
                     confirmed, session.traffic());
+            resultWaitMetrics.recordReady(Objects.requireNonNull(outcome.resultWait()));
             UUID userId = session.userId();
             if (userId != null) {
                 Instant confirmedAt = Objects.requireNonNull(outcome.confirmedAt());
@@ -201,13 +211,16 @@ public class CompletionService {
             throw new ItemsApiException(ErrorCode.RESULT_RETAKE_REQUIRED,
                     ItemsApiException.ItemsField.RETAKE_ITEMS, judgment.retakeItems());
         }
+        // 대기 화면 진입 (KAN-284) - 422와 409를 지난 첫 호출만 시작점이다. 그 둘은 위에서 예외로 롤백되므로 남지 않는다.
+        // 이미 시작점이 있으면 그대로 둔다(폴링 재호출).
+        Instant now = Instant.now();
+        session.markCompleteRequested(now);
         if (!judgment.pendingItems().isEmpty()) {
             return Outcome.pending(CompleteResponse.processing(judgment.pendingItems(), pollAfterMs));
         }
 
         AggregateScore score = aggregator.aggregate(session.scoreVersion(), definition,
                 judgment.intonationScoreByItem(), judgment.chosenChoiceIdByItem());
-        Instant now = Instant.now();
         Instant resultExpiresAt = now.plus(properties.analysis().retention());
         resultRepository.save(new TestResult("r_" + UUID.randomUUID(), session.id(),
                 session.testVersion(), score.scoreVersion(), session.voiceSet(),
@@ -217,6 +230,7 @@ public class CompletionService {
         // 결과 저장과 같은 트랜잭션이다 - 완료 전이만 커밋되고 결과가 없는 상태는 존재하지
         // 않는다. 세션 수명은 결과 수명까지 늘어난다 - 재조회와 410 안내의 전제 (KAN-25)
         session.markCompleted(now, resultExpiresAt);
-        return new Outcome(CompleteResponse.ready(), score, now);
+        Duration resultWait = Duration.between(Objects.requireNonNull(session.completeRequestedAt()), now);
+        return new Outcome(CompleteResponse.ready(), score, now, resultWait);
     }
 }

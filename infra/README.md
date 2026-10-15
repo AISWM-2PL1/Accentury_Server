@@ -2045,7 +2045,7 @@ CloudWatch 표준 경보는 개당 월 0.10달러, 지표 math 경보(`alb-5xx`)
 | 채널 | 환경 | 내용 | 경로 |
 | --- | --- | --- | --- |
 | `#infra-alerts` | 두 환경 | AI ASG 오토스케일링 확대와 축소, 시작 실패 | ASG 이벤트 -> EventBridge 규칙 3개 -> Lambda `accentury-{env}-scale-notify`(희망 용량 조회) -> `accentury-{env}-slack-infra-alerts` -> Chatbot |
-| `#infra-alerts` | 두 환경 | `ai-disk-high`의 ALARM과 OK (이메일도 그대로 간다) | 경보 -> `accentury-{env}-slack-infra-alerts` -> Chatbot |
+| `#infra-alerts` | 두 환경 | `ai-disk-high`와 `result-wait-high`(KAN-284)의 ALARM과 OK (이메일도 그대로 간다) | 경보 -> `accentury-{env}-slack-infra-alerts` -> Chatbot |
 | `#daily-user` | prod만 (`voice_report_enabled`) | 응시 현황 리포트, KST 08시부터 24시까지 짝수 정각 | Scheduler -> Lambda `accentury-prod-voice-report` -> `accentury-prod-slack-daily-user` -> Chatbot |
 
 - 배포의 instance refresh(이미지 배포, AMI 교체)가 내는 시작과 종료는 알리지 않는다. 규칙이 이벤트의 `Cause`에
@@ -2125,11 +2125,11 @@ aws autoscaling set-desired-capacity --auto-scaling-group-name accentury-staging
 | 리소스 | 이름 |
 | --- | --- |
 | 대시보드 1개 | `accentury-{env}-ops` (환경 루트의 `terraform output -raw dashboard_url`이 바로가기) |
-| 경보 3종 | `ai-temp-residue`, `analysis-backlog-high`, `analysis-timeouts-high` |
+| 경보 3종 | `ai-temp-residue`, `analysis-backlog-high`, `analysis-timeouts-high` (뒤에 KAN-272가 `analysis-unscorable-high`, KAN-284가 `result-wait-high`를 더했다) |
 | 로그 그룹 1개 | `/accentury/{env}/ai` (KAN-203, 아래 "ai 컨테이너 로그"). backend `/accentury/{env}/backend`는 KAN-165가 만든다 |
 
 경보는 앞 절과 **같은 SNS 토픽**으로 간다. 심각도별 채널을 나누지 않는다 - 3인 팀에 채널이
-여럿이면 어느 쪽도 보지 않게 된다. 모듈 출력 `alarm_names`가 경보 전부를 준다 (KAN-272 뒤 14종).
+여럿이면 어느 쪽도 보지 않게 된다. 모듈 출력 `alarm_names`가 경보 전부를 준다 (KAN-284 뒤 15종).
 
 | 경보 | 지표 | 조건 | 결측 처리 |
 | --- | --- | --- | --- |
@@ -2137,6 +2137,7 @@ aws autoscaling set-desired-capacity --auto-scaling-group-name accentury-staging
 | `analysis-backlog-high` | `accentury/backend` `accentury.analysis.processing.value` | 1분 최대 >= 60이 5회 연속 | `notBreaching` |
 | `analysis-timeouts-high` | `accentury.analysis.timeouts.count`의 두 사유(stuck, lost) 합 | 5분 합계 > 5 | `notBreaching` |
 | `analysis-unscorable-high` (KAN-272) | `accentury.analysis.judged.count`의 `reason=unscorable` | 5분 합계 > 5 | `notBreaching` |
+| `result-wait-high` (KAN-284) | `accentury.result.wait.percentile.value` (`phi=0.95`, 단위 ms) | 1분 최대 >= 30초가 3회 연속 (`result_wait_threshold_seconds`) | `notBreaching` |
 
 `analysis-unscorable-high`는 KAN-272에서 더했다. AI가 분석 결과에 NaN을 내는 경우(`ANALYSIS_UNSCORABLE`)는
 계약대로 온 판정이라 회로에 실패로 세지 않고 사용자에게 재녹음만 열린다 - 모델이나 참조 데이터 회귀로 모든

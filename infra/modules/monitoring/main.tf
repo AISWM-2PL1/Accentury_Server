@@ -384,7 +384,7 @@ resource "aws_cloudwatch_metric_alarm" "ai_disk_high" {
   threshold           = var.ai_disk_threshold
   treat_missing_data  = "notBreaching"
 
-  # 이메일에 더해 슬랙 #infra-alerts로도 보낸다 (KAN-273) - 다른 경보는 이메일만이다.
+  # 이메일에 더해 슬랙 #infra-alerts로도 보낸다 (KAN-273) - 이것과 result-wait-high(KAN-284) 말고는 이메일만이다.
   alarm_actions = concat(local.alarm_actions, var.slack_alarm_topic_arns)
   ok_actions    = concat(local.alarm_actions, var.slack_alarm_topic_arns)
 
@@ -634,4 +634,40 @@ resource "aws_cloudwatch_metric_alarm" "translation_quota_exhausted" {
   ok_actions    = local.alarm_actions
 
   tags = { Name = "${local.name}-translation-quota-exhausted" }
+}
+
+# ---- 경보: 결과 화면 대기 (KAN-284) ----
+
+# backend의 accentury.result.wait - 세션의 첫 /complete 호출부터 READY를 돌려준 호출까지, 사용자가 결과 화면에서
+# 기다린 시간이다. analysis-backlog-high가 "AI가 밀린다"라면 이쪽은 "그래서 사용자가 실제로 오래 기다린다"이다.
+# 값에 폴링 간격이 들어가므로 혼잡 간격(pollAfterMs 최대 60초, KAN-272)이 길게 걸리면 그만큼 운다 - 그것이 의도다.
+#
+# 백분위 게이지(.percentile.value, phi=0.95)는 태스크마다 따로 올라오므로 Maximum으로 접는다 - "가장 나쁜 태스크의 P95"다
+# (dashboard.tf 머리말). 단위는 ms라 임계는 초 변수에 1000을 곱한다.
+#
+# 임계 30초는 초기값이다. 혼잡 시 pollAfterMs 상한(60초)의 절반이고, 운영 1주 뒤 실측 분포로 다시 정한다.
+# 3분 연속을 요구하는 것은 한 세션의 긴 대기(표본이 적은 분의 P95는 그 한 건이다)로는 서지 않게 하기 위해서다.
+#
+# treat_missing_data = "notBreaching": 완주가 없는 분에는 백분위가 비어 있는 것이 정상이고, backend가 죽은 것은
+# no-healthy-target이 잡는다.
+resource "aws_cloudwatch_metric_alarm" "result_wait_high" {
+  alarm_name        = "${local.name}-result-wait-high"
+  alarm_description = "accentury ${var.env}: 결과 화면 대기 P95가 ${var.result_wait_evaluation_periods}분 연속 ${var.result_wait_threshold_seconds}초를 넘었습니다. 사용자가 마지막 문항 뒤 결과를 받기까지 그만큼 기다리고 있습니다. analysis-backlog-high와 대시보드의 혼잡 발동, AI 호스트 대수를 확인하세요. (KAN-284)"
+
+  namespace   = var.backend_metric_namespace
+  metric_name = "accentury.result.wait.percentile.value"
+  dimensions  = { env = var.env, phi = "0.95" }
+
+  statistic           = "Maximum"
+  period              = 60
+  evaluation_periods  = var.result_wait_evaluation_periods
+  comparison_operator = "GreaterThanOrEqualToThreshold"
+  threshold           = var.result_wait_threshold_seconds * 1000
+  treat_missing_data  = "notBreaching"
+
+  # 사용자 체감 지표라 ai-disk-high처럼 슬랙 #infra-alerts로도 보낸다 (KAN-284 결정).
+  alarm_actions = concat(local.alarm_actions, var.slack_alarm_topic_arns)
+  ok_actions    = concat(local.alarm_actions, var.slack_alarm_topic_arns)
+
+  tags = { Name = "${local.name}-result-wait-high" }
 }
