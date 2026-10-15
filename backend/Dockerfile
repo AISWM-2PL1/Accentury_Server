@@ -44,7 +44,7 @@ COPY --from=build /workspace/build/app.jar /app/app.jar
 # 디렉터리를 먼저 만든다 - ADD가 상위 디렉터리를 만들면 --chmod(644)가 디렉터리에도 걸려 실행 비트가 빠지고,
 # 비루트 사용자가 파일에 닿지 못한다 (2026-10-03 로컬 빌드에서 확인).
 RUN mkdir -m 755 /app/certs
-ADD --checksum=sha256:fe45bbebf92ad3e27a583bbb2ddd1553c521ed4d49af5514dc0a40372ea5395c --chmod=644 \
+ADD --checksum=sha256:90a6f1a7978a1b1b096dca6c57511ca48d3b8cf052f8e704baf358f34ea2f21b --chmod=644 \
     https://truststore.pki.rds.amazonaws.com/global/global-bundle.pem /app/certs/rds-global-bundle.pem
 USER accentury
 
