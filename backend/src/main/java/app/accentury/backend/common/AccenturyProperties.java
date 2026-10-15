@@ -461,6 +461,12 @@ public record AccenturyProperties(Session session,
         /** 입력 길이 상한 - 앞뒤 공백을 뺀 코드 포인트 수다. FE와 공유하는 값이라 설정이 아니라 상수다 (명세서 §3.18). */
         public static final int MAX_INPUT_LENGTH = 100;
 
+        /**
+         * 계정당 하루 번역 상한 - 성공한 번역만 세고 한국 시각 자정에 바뀐다 (명세서 §3.18, 2026-10-15 결정). 사업자 무료 한도
+         * (prod RPD 500)를 한 사람이 다 쓰지 못하게 한다. 오류 메시지에 박혀 있는 값이라 설정이 아니라 상수다.
+         */
+        public static final int DAILY_LIMIT = 5;
+
         /** 키가 들어 있는가 - 비었거나 자리 표시 값이면 번역은 503이다. */
         public boolean apiKeyConfigured() {
             return apiKey != null && !apiKey.isBlank() && !SsmPlaceholder.UNSET.equals(apiKey);

@@ -25,7 +25,7 @@ class TranslationController {
 
     /**
      * 200 / 400 {@code VALIDATION_FAILED} / 401 {@code AUTH_TOKEN_INVALID} / 422 {@code TRANSLATION_TOO_LONG},
-     * {@code TRANSLATION_REJECTED} / 503 {@code TRANSLATION_UNAVAILABLE}.
+     * {@code TRANSLATION_REJECTED} / 429 {@code TRANSLATION_DAILY_LIMIT_EXCEEDED} / 503 {@code TRANSLATION_UNAVAILABLE}.
      */
     @PostMapping(value = "/v0/translations", consumes = MediaType.APPLICATION_JSON_VALUE)
     ResponseEntity<TranslationResponse> translate(@AuthenticatedUser AppUser user,

@@ -11,6 +11,8 @@
  * 하나다 ({@link app.accentury.backend.translation.TranslationRecordStore}) - 버킷 설정
  * {@code accentury.translation.record-bucket}이 없으면(staging, 로컬, 테스트) 기록 코드가 돌지 않는다. 기록에는 계정 ID
  * 대신 대체 ID를 적고 대응표는 DB에 있다 ({@link app.accentury.backend.translation.TranslationSubjects}).
+ * <p>
+ * 계정당 하루 5건이고 성공한 번역만 센다 (2026-10-15 결정, {@link app.accentury.backend.translation.TranslationQuota}).
  */
 @NullMarked
 package app.accentury.backend.translation;

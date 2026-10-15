@@ -100,10 +100,12 @@ public enum ErrorCode {
     // === TRANSLATION_* : 사투리 텍스트 번역 (§3.18, KAN-266) ===
     // 길이 초과와 번역 불가는 같은 입력으로 다시 보내도 결과가 같아 retryable=false다. 번역 불가의 메시지는 화면 문구
     // 그대로다 (2026-10-08 결정). LLM 호출 실패, 시간 초과, 사업자 무료 한도 소진(429)은 하나로 묶는다 - 클라이언트가 할
-    // 일이 "잠시 뒤 다시"로 같고, 상류 사업자 사정을 클라이언트에 나눠 알릴 이유가 없다.
+    // 일이 "잠시 뒤 다시"로 같고, 상류 사업자 사정을 클라이언트에 나눠 알릴 이유가 없다. 일일 한도 저장소(Redis) 장애도
+    // 여기로 묶는다. 일일 한도 초과는 다음 날에야 풀리므로 RATE_RETAKE_EXCEEDED처럼 retryable=false다 (2026-10-15).
     TRANSLATION_TOO_LONG(HttpStatus.UNPROCESSABLE_CONTENT, false, "문장이 너무 깁니다. (최대 100자)"),
     TRANSLATION_REJECTED(HttpStatus.UNPROCESSABLE_CONTENT, false, "올바른 문장을 넣어주세요."),
     TRANSLATION_UNAVAILABLE(HttpStatus.SERVICE_UNAVAILABLE, true, "번역을 할 수 없습니다. 잠시 뒤 다시 시도해 주세요."),
+    TRANSLATION_DAILY_LIMIT_EXCEEDED(HttpStatus.TOO_MANY_REQUESTS, false, "오늘 번역 횟수(5회)를 다 썼습니다. 내일 다시 시도해 주세요."),
 
     // === SHARE_* : 카카오톡 공유 웹훅 (§3.8, KAN-164) ===
     // 호출자가 앱이 아니라 카카오 서버라 ADMIN_*처럼 §2.4 밖의 별도 묶음이다. 헤더 누락, 다른 스킴,
