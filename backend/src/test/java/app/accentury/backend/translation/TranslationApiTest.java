@@ -139,7 +139,8 @@ class TranslationApiTest extends IntegrationTest {
         translate(access, "  밥 먹었어?  ")
                 .andExpect(status().isOk())
                 .andExpect(header().string(HttpHeaders.CACHE_CONTROL, "no-store"))
-                .andExpect(jsonPath("$.dialect").value("밥 뭇나?"));
+                .andExpect(jsonPath("$.dialect").value("밥 뭇나?"))
+                .andExpect(jsonPath("$.remaining").value(4));
 
         // LLM에는 앞뒤 공백을 뺀 문장이 간다.
         assertEquals(List.of("밥 먹었어?"), translator.inputs);
@@ -240,6 +241,57 @@ class TranslationApiTest extends IntegrationTest {
                 .andExpect(jsonPath("$.code").value("TRANSLATION_UNAVAILABLE"))
                 .andExpect(jsonPath("$.retryable").value(true));
         assertEquals(TranslationResult.LLM_FAILED, onlyRecord().result());
+    }
+
+    // === 일일 한도 (2026-10-15 결정) ===
+
+    @Test
+    void 성공은_하루_다섯_건이고_여섯_번째는_LLM_없이_429다() throws Exception {
+        String access = signUp();
+        for (int remaining = 4; remaining >= 0; remaining--) {
+            translate(access, "밥 먹었어?").andExpect(status().isOk())
+                    .andExpect(jsonPath("$.remaining").value(remaining));
+        }
+        translate(access, "밥 먹었어?")
+                .andExpect(status().isTooManyRequests())
+                .andExpect(jsonPath("$.code").value("TRANSLATION_DAILY_LIMIT_EXCEEDED"))
+                .andExpect(jsonPath("$.retryable").value(false))
+                .andExpect(header().doesNotExist(HttpHeaders.RETRY_AFTER));
+
+        assertEquals(5, translator.inputs.size(), "한도를 넘은 요청은 LLM을 부르지 않는다");
+        TranslationRecord limited = store.records.get(5);
+        assertEquals(TranslationResult.LIMITED, limited.result());
+        assertNull(limited.output());
+        assertNull(limited.llmMs());
+    }
+
+    @Test
+    void 실패한_번역은_한도를_쓰지_않는다() throws Exception {
+        String access = signUp();
+        translate(access, "가".repeat(101)).andExpect(status().isUnprocessableContent());
+        rejected(translate(access, "ㅓㅗㅁ니ㅏㅓㅗㅁㅇ니랑노라ㅣㅓ"));
+        translator.script = text -> DialectTranslator.Reply.of(DialectTranslator.Kind.REFUSED);
+        rejected(translate(access, "심한 욕설이 들어간 문장"));
+        translator.script = text -> {
+            throw new DialectTranslator.Unavailable("429");
+        };
+        translate(access, "밥 먹었어?").andExpect(status().isServiceUnavailable());
+
+        translator.script = text -> DialectTranslator.Reply.translated(text);
+        translate(access, "밥 먹었어?").andExpect(status().isOk())
+                .andExpect(jsonPath("$.remaining").value(4));
+    }
+
+    @Test
+    void 한도는_계정마다_따로다() throws Exception {
+        String first = signUp();
+        for (int i = 0; i < AccenturyProperties.Translation.DAILY_LIMIT; i++) {
+            translate(first, "밥 먹었어?").andExpect(status().isOk());
+        }
+        translate(first, "밥 먹었어?").andExpect(status().isTooManyRequests());
+
+        translate(signUp(), "밥 먹었어?").andExpect(status().isOk())
+                .andExpect(jsonPath("$.remaining").value(4));
     }
 
     // === 하네스 (AC 5) ===

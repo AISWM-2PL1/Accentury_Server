@@ -7,7 +7,7 @@ import org.testcontainers.containers.GenericContainer;
 import org.testcontainers.utility.DockerImageName;
 
 /**
- * 계정 인증 테스트가 쓰는 Redis 컨테이너 (KAN-223) - Refresh 토큰 저장소다.
+ * 계정 인증 테스트가 쓰는 Redis 컨테이너 (KAN-223) - Refresh 토큰 저장소이자 번역 일일 한도 카운터다 (KAN-266).
  * <p>
  * {@link PostgresTestcontainer}와 같은 모양이다: JVM당 하나를 static으로 띄우고, 컨텍스트가 닫혀도 멈추지 않게
  * 소멸 메서드를 비운다. 이미지는 배포(ElastiCache 7.1)와 로컬 compose와 같은 7 메이저다.
