@@ -124,6 +124,14 @@ public class TestSession implements Persistable<String> {
     @Column(name = "completed_at")
     private @Nullable Instant completedAt;
 
+    /**
+     * 결과 화면 대기의 시작 시각 (KAN-284) - 완주 판정이 PROCESSING 또는 READY까지 간 첫 {@code /complete} 호출이
+     * 기록한다. 422와 409로 끝난 호출은 롤백되므로 남기지 않는다. {@code /complete}가 READY를 확정할 때 이 값부터의
+     * 경과를 {@code accentury.result.wait}로 남긴다. null이면 아직 대기 화면에 들어오지 않았다.
+     */
+    @Column(name = "complete_requested_at")
+    private @Nullable Instant completeRequestedAt;
+
     /** 코드 생성 인스턴스만 신규다 - JPA의 protected 생성자 경로는 false로 남는다. */
     @Transient
     private boolean isNew = false;
@@ -210,6 +218,16 @@ public class TestSession implements Persistable<String> {
         this.expiresAt = resultExpiresAt;
     }
 
+    /**
+     * 결과 화면 대기의 시작을 기록한다 (KAN-284) - 처음 한 번만 쓰고 이후 호출은 무시한다. 완료 전이와 같은 세션 행
+     * 잠금 아래에서 부른다.
+     */
+    public void markCompleteRequested(Instant requestedAt) {
+        if (this.completeRequestedAt == null) {
+            this.completeRequestedAt = requestedAt;
+        }
+    }
+
     @Override
     public String getId() {
         return id;
@@ -281,5 +299,9 @@ public class TestSession implements Persistable<String> {
 
     public @Nullable Instant completedAt() {
         return completedAt;
+    }
+
+    public @Nullable Instant completeRequestedAt() {
+        return completeRequestedAt;
     }
 }

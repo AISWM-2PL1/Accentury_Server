@@ -93,6 +93,15 @@ public final class ServiceMetrics {
      */
     public static final String ANALYSIS_JUDGED = "accentury.analysis.judged";
 
+    // ---- 결과 (ResultWaitMetrics) ----
+
+    /**
+     * 결과 화면 대기 시간 (KAN-284) - 세션의 첫 {@code /complete} 호출부터 READY를 돌려준 호출까지다. 세션당 1건이고
+     * 첫 호출에 바로 READY면 0이다. 폴링 간격이 포함된 사용자 체감 시간이라 {@link #ANALYSIS_DURATION}(음성 문항 1건의
+     * 분석 소요)과 다르다. 경보 {@code result-wait-high}가 P95를 읽는다 (infra/modules/monitoring).
+     */
+    public static final String RESULT_WAIT = "accentury.result.wait";
+
     // ---- 학습 데이터 (S3TrainingSampleStore, 수집을 켠 환경 한정) ----
 
     /**

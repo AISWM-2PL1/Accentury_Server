@@ -6,8 +6,11 @@ import app.accentury.backend.analysis.AnalysisJobRepository;
 import app.accentury.backend.analysis.AnalysisJobStatus;
 import app.accentury.backend.analysis.AnalysisJobTransitions;
 import app.accentury.backend.common.AccenturyProperties;
+import app.accentury.backend.observability.ServiceMetrics;
 import app.accentury.backend.session.TestSession;
 import app.accentury.backend.session.TestSessionRepository;
+import io.micrometer.core.instrument.MeterRegistry;
+import io.micrometer.core.instrument.Timer;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
@@ -19,11 +22,14 @@ import org.springframework.test.web.servlet.RequestBuilder;
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.ObjectMapper;
 
+import java.time.Duration;
 import java.time.Instant;
 import java.util.HashSet;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Set;
 import java.util.UUID;
+import java.util.concurrent.TimeUnit;
 
 import static org.hamcrest.Matchers.hasSize;
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -69,6 +75,9 @@ class CompleteApiTest extends IntegrationTest {
 
     @Autowired
     private AccenturyProperties properties;
+
+    @Autowired
+    private MeterRegistry meterRegistry;
 
     // === 완료와 결과 확정 (§3.6, AC - 재시도 중복 생성 없음) ===
 
@@ -332,7 +341,98 @@ class CompleteApiTest extends IntegrationTest {
                 .andExpect(jsonPath("$.code").value("SESSION_FORBIDDEN"));
     }
 
+    // === 결과 화면 대기 시간 (KAN-284, accentury.result.wait) ===
+    // 컨텍스트를 공유하는 테스트끼리 Timer가 누적되므로 호출 전후의 차이로 본다.
+
+    @Test
+    void 첫_호출에_바로_READY면_대기_0으로_1건_기록된다() throws Exception {
+        SessionHandle session = createSession();
+        answerVocab(session, CORRECT_CHOICES);
+        completeVoice(session, Map.of("v1", 75, "v2", 75, "v3", 75, "v4", 75, "v5", 75));
+        long countBefore = resultWait().count();
+        double totalBefore = resultWait().totalTime(TimeUnit.NANOSECONDS);
+
+        mockMvc.perform(complete(session, "ready-at-once"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.status").value("READY"));
+
+        // 0도 1건이다 - 빼면 바로 끝난 세션이 분포의 분모에서 빠져 P95가 부풀려진다.
+        assertEquals(countBefore + 1, resultWait().count());
+        assertEquals(totalBefore, resultWait().totalTime(TimeUnit.NANOSECONDS));
+        TestSession completed = sessionRepository.findById(session.id()).orElseThrow();
+        assertEquals(completed.completedAt(), completed.completeRequestedAt());
+    }
+
+    @Test
+    void 첫_PROCESSING부터_READY까지를_세션당_1건_기록하고_완료_뒤_재시도는_세지_않는다() throws Exception {
+        SessionHandle session = createSession();
+        answerVocab(session, CORRECT_CHOICES);
+        completeVoice(session, Map.of("v1", 75, "v2", 75, "v4", 75, "v5", 75));
+        AnalysisJob pending = saveJob(session, "v3", 1, Instant.now());
+        long countBefore = resultWait().count();
+        double totalBefore = resultWait().totalTime(TimeUnit.NANOSECONDS);
+
+        mockMvc.perform(complete(session, "wait-1"))
+                .andExpect(jsonPath("$.status").value("PROCESSING"));
+        Instant requestedAt = sessionRepository.findById(session.id()).orElseThrow().completeRequestedAt();
+        assertNotNull(requestedAt, "첫 PROCESSING 호출이 대기 시작점이다");
+        // 폴링 재호출은 시작점을 옮기지 않는다.
+        mockMvc.perform(complete(session, "wait-2"))
+                .andExpect(jsonPath("$.status").value("PROCESSING"));
+        assertEquals(requestedAt, sessionRepository.findById(session.id()).orElseThrow().completeRequestedAt());
+        assertEquals(countBefore, resultWait().count(), "READY 전에는 기록하지 않는다");
+
+        completeJob(pending, 75);
+        mockMvc.perform(complete(session, "wait-3"))
+                .andExpect(jsonPath("$.status").value("READY"));
+
+        assertEquals(countBefore + 1, resultWait().count());
+        TestSession completed = sessionRepository.findById(session.id()).orElseThrow();
+        Duration expected = Duration.between(requestedAt, Objects.requireNonNull(completed.completedAt()));
+        double recorded = resultWait().totalTime(TimeUnit.NANOSECONDS) - totalBefore;
+        // DB 컬럼은 마이크로초까지라 읽어 온 두 시각의 차이와 메모리에서 잰 값이 1ms 안에서 같다.
+        assertTrue(recorded > 0, "PROCESSING을 거친 대기는 0보다 길다");
+        assertEquals(expected.toNanos(), recorded, TimeUnit.MILLISECONDS.toNanos(1));
+
+        // 완료 뒤 재시도(READY 재확인)는 대기가 아니다.
+        mockMvc.perform(complete(session, "wait-retry"))
+                .andExpect(jsonPath("$.status").value("READY"));
+        assertEquals(countBefore + 1, resultWait().count());
+    }
+
+    @Test
+    void 미제출_422와_재녹음_409로_끝난_호출은_대기_시작점을_남기지_않는다() throws Exception {
+        SessionHandle session = createSession();
+        answerVocab(session, CORRECT_CHOICES);
+        completeVoice(session, Map.of("v1", 75, "v3", 75, "v4", 75));
+
+        // v2, v5 미제출 - 422
+        mockMvc.perform(complete(session, "start-422"))
+                .andExpect(status().isUnprocessableContent());
+        assertNull(sessionRepository.findById(session.id()).orElseThrow().completeRequestedAt());
+
+        // v5는 냈지만 v2가 전부 실패 - 409
+        completeVoice(session, Map.of("v5", 75));
+        failJob(saveJob(session, "v2", 1, Instant.now()), "AUDIO_TOO_QUIET");
+        mockMvc.perform(complete(session, "start-409"))
+                .andExpect(status().isConflict());
+        assertNull(sessionRepository.findById(session.id()).orElseThrow().completeRequestedAt());
+
+        // 재녹음 뒤 다시 온 첫 호출이 시작점이다 - 바로 READY라 대기는 0이다.
+        long countBefore = resultWait().count();
+        double totalBefore = resultWait().totalTime(TimeUnit.NANOSECONDS);
+        completeJob(saveJob(session, "v2", 2, Instant.now()), 75);
+        mockMvc.perform(complete(session, "start-after-retake"))
+                .andExpect(jsonPath("$.status").value("READY"));
+        assertEquals(countBefore + 1, resultWait().count());
+        assertEquals(totalBefore, resultWait().totalTime(TimeUnit.NANOSECONDS));
+    }
+
     // === 헬퍼 ===
+
+    private Timer resultWait() {
+        return meterRegistry.get(ServiceMetrics.RESULT_WAIT).timer();
+    }
 
     private record SessionHandle(String id, String token) {
     }
