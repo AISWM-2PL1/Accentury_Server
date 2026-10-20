@@ -1,0 +1,96 @@
+# AI 호스트 AMI 사전 적재 컴포넌트 (KAN-285). EC2 Image Builder가 빌드 인스턴스에서 순서대로 실행한다.
+# ai-host 모듈 user_data.sh.tftpl의 첫 부팅 중 "매번 같은 일"(docker 설치, compose 플러그인, 이미지 pull)을
+# 여기로 옮겼다. user_data는 그 셋이 이미 있으면 건너뛰므로 두 파일은 같은 결과를 만들어야 한다.
+# 이 파일을 고치면 main.tf의 recipe_version을 올려야 한다 (컴포넌트는 같은 버전으로 재생성되지 않는다).
+name: accentury-ai-host-prebake
+description: docker, compose plugin, and the active accentury/ai image baked in (KAN-285)
+schemaVersion: 1.0
+
+parameters:
+  - Registry:
+      type: string
+      description: ECR registry host (account.dkr.ecr.region.amazonaws.com)
+  - Repository:
+      type: string
+      description: ECR repository name (accentury/ai)
+  - ImageTagParameter:
+      type: string
+      description: SSM parameter holding the image tag to bake (/accentury/prod/IMAGE_TAG)
+  - ComposeVersion:
+      type: string
+      description: docker compose plugin version to install (v2.x.y)
+  - Region:
+      type: string
+      description: AWS region for SSM and ECR calls
+
+phases:
+  - name: build
+    steps:
+      # user_data.sh.tftpl의 docker 설치와 같다. 빌드 인스턴스에서는 pull을 위해 바로 띄운다.
+      - name: InstallDocker
+        action: ExecuteBash
+        inputs:
+          commands:
+            - |
+              set -euxo pipefail
+              dnf install -y docker
+              systemctl enable --now docker
+              usermod -aG docker ec2-user
+
+      # user_data.sh.tftpl의 compose 설치와 같다. 경로와 버전이 같아야 user_data의 버전 검사가 통과한다.
+      - name: InstallCompose
+        action: ExecuteBash
+        inputs:
+          commands:
+            - |
+              set -euxo pipefail
+              mkdir -p /usr/local/lib/docker/cli-plugins
+              curl -fsSL "https://github.com/docker/compose/releases/download/{{ ComposeVersion }}/docker-compose-linux-x86_64" \
+                -o /usr/local/lib/docker/cli-plugins/docker-compose
+              chmod +x /usr/local/lib/docker/cli-plugins/docker-compose
+              test "$(docker compose version --short)" = "{{ ComposeVersion }}" || test "v$(docker compose version --short)" = "{{ ComposeVersion }}"
+
+      # 빌드 시점의 활성 태그를 SSM에서 읽어 그 이미지를 당긴다. accentury-up.sh가 부팅 때 같은 이름으로
+      # compose up을 하므로 태그가 같으면 pull이 없고, 다르면 바뀐 레이어(코드 쪽 약 66MB)만 받는다.
+      # 로그인 토큰(12시간)은 AMI에 남기지 않는다 - 어차피 호스트는 부팅마다 자기 역할로 다시 로그인한다.
+      - name: PullImage
+        action: ExecuteBash
+        inputs:
+          commands:
+            - |
+              set -euxo pipefail
+              tag="$(aws ssm get-parameter --name '{{ ImageTagParameter }}' --region '{{ Region }}' --query Parameter.Value --output text)"
+              test -n "$tag"
+              aws ecr get-login-password --region '{{ Region }}' | docker login --username AWS --password-stdin '{{ Registry }}'
+              docker pull '{{ Registry }}/{{ Repository }}:'"$tag"
+              docker logout '{{ Registry }}'
+              docker image inspect '{{ Registry }}/{{ Repository }}:'"$tag" > /dev/null
+              docker image ls '{{ Registry }}/{{ Repository }}'
+              mkdir -p /etc/accentury
+              echo "$tag" > /etc/accentury/ami-image-tag
+
+      # 스냅샷 전에 docker를 멈춰 overlay2가 정합한 상태로 담기게 한다. 호스트의 user_data가 enable --now로 다시
+      # 띄운다. dnf 캐시와 root의 docker 설정(로그인 흔적)은 AMI에 남길 이유가 없다.
+      - name: Quiesce
+        action: ExecuteBash
+        inputs:
+          commands:
+            - |
+              set -euxo pipefail
+              systemctl stop docker.socket docker.service
+              rm -f /root/.docker/config.json
+              dnf clean all
+              rm -rf /var/cache/dnf
+
+  - name: validate
+    steps:
+      - name: CheckArtifacts
+        action: ExecuteBash
+        inputs:
+          commands:
+            - |
+              set -euxo pipefail
+              test -x /usr/bin/docker
+              test -x /usr/local/lib/docker/cli-plugins/docker-compose
+              test -s /etc/accentury/ami-image-tag
+              systemctl is-enabled docker

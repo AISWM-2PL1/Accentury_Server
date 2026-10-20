@@ -19,7 +19,9 @@ import tools.jackson.core.JacksonException;
 import tools.jackson.databind.ObjectMapper;
 
 import java.io.InputStream;
+import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 import java.util.Locale;
 import java.net.SocketTimeoutException;
 import java.net.http.HttpConnectTimeoutException;
@@ -242,7 +244,46 @@ class RestAiAnalysisClient implements AiAnalysisClient {
         String qualityCode = parsed.quality() != null && parsed.quality().code() != null
                 ? parsed.quality().code() : "OK";
         return new Completed(parsed.intonationScore(), qualityCode,
-                parsed.modelVersion(), parsed.scoreVersion());
+                parsed.modelVersion(), parsed.scoreVersion(), orderSegments(parsed.segments()));
+    }
+
+    /** 모델 {@code segments}의 {@code kind}가 order인 항목 이름 (§3.19). */
+    static final String ORDER_SEGMENT_KIND = "order";
+
+    /**
+     * 응답 {@code segments}에서 order 항목만 골라 옮긴다 (KAN-267, §3.19) - 억양 학습 채점만 읽는다.
+     * <p>
+     * 모양이 어긋난 항목은 건너뛰고 응답 전체를 계약 위반으로 끊지 않는다. 레벨테스트는 이 값을 쓰지 않으므로
+     * 피드백 항목 하나의 모양 때문에 레벨테스트 점수까지 잃으면 안 된다. 건너뛴 건수만 남기고 어절 글자는 로그에
+     * 남기지 않는다 (§2.6 - 발화 내용).
+     */
+    static List<AiAnalysisClient.OrderSegment> orderSegments(@Nullable List<@Nullable Map<String, @Nullable Object>> segments) {
+        if (segments == null || segments.isEmpty()) {
+            return List.of();
+        }
+        List<AiAnalysisClient.OrderSegment> orders = new ArrayList<>();
+        int skipped = 0;
+        for (Map<String, @Nullable Object> segment : segments) {
+            if (segment == null || !ORDER_SEGMENT_KIND.equals(segment.get("kind"))) {
+                continue;
+            }
+            Object word = segment.get("word");
+            Object raise = segment.get("raise");
+            Object lower = segment.get("lower");
+            Object refAgree = segment.get("refAgree");
+            if (!(word instanceof String w) || w.isBlank()
+                    || (raise != null && !(raise instanceof String))
+                    || (lower != null && !(lower instanceof String))
+                    || !(refAgree instanceof Number agree) || !Double.isFinite(agree.doubleValue())) {
+                skipped++;
+                continue;
+            }
+            orders.add(new AiAnalysisClient.OrderSegment(w, (String) raise, (String) lower, agree.doubleValue()));
+        }
+        if (skipped > 0) {
+            log.warn("모양이 어긋난 order 항목을 건너뛴다 skipped={}", skipped);
+        }
+        return orders;
     }
 
     /** §2.4에 정의된 코드만 판정으로 인정한다 - 모르는 코드는 null */
@@ -306,10 +347,14 @@ class RestAiAnalysisClient implements AiAnalysisClient {
                        List<String> acceptsVerdicts) {
     }
 
-    /** §4.1 응답 - 필요한 필드만 읽는다. segments, confidence, processingMs는 BE가 쓰지 않는다. */
+    /**
+     * §4.1 응답 - 필요한 필드만 읽는다. confidence, processingMs는 BE가 쓰지 않는다. segments는 order 항목만
+     * 억양 학습 채점이 읽는다 (KAN-267, §3.19).
+     */
     record AnalyzeResponse(@Nullable String status, @Nullable Integer intonationScore,
                            @Nullable Quality quality, @Nullable Boolean retryable,
-                           @Nullable String modelVersion, @Nullable String scoreVersion) {
+                           @Nullable String modelVersion, @Nullable String scoreVersion,
+                           @Nullable List<@Nullable Map<String, @Nullable Object>> segments) {
 
         record Quality(@Nullable String code) {
         }

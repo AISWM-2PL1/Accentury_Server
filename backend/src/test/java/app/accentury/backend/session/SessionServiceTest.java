@@ -138,7 +138,9 @@ class SessionServiceTest extends IntegrationTest {
                 "userId",
                 // 익명 세션의 음성 저장 선택 동의 (KAN-269) - 동의한 문구의 버전과 시각뿐이다. 누구인지가 아니라
                 // 이 세션의 음성을 저장해도 되는지를 적는다.
-                "voiceConsentVersion", "voiceConsentAt");
+                "voiceConsentVersion", "voiceConsentAt",
+                // 결과 화면 대기의 시작 시각 (KAN-284) - 시각뿐, 식별 정보 아님
+                "completeRequestedAt");
 
         Set<String> actual = Stream.of(TestSession.class.getDeclaredFields())
                 // @Transient는 컬럼이 아니다 - 이 검사는 저장소에 남는 것만 본다 (예: Persistable의 isNew 플래그).

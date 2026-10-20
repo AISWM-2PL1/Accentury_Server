@@ -58,7 +58,7 @@ dependencies {
 	runtimeOnly 'software.amazon.awssdk:cloudwatch'
 	runtimeOnly 'software.amazon.awssdk:netty-nio-client'
 	// 계정 인증 (KAN-223). Refresh 토큰 저장소가 Redis(ElastiCache)다 - 세션과 요청 제한은 여전히 DB와 메모리이고
-	// Redis는 Refresh에만 쓴다 (명세서 §2.1). 클라이언트는 Boot 기본인 Lettuce다.
+	// Redis는 Refresh와 번역 일일 한도(KAN-266)에만 쓴다 (명세서 §2.1). 클라이언트는 Boot 기본인 Lettuce다.
 	implementation 'org.springframework.boot:spring-boot-starter-data-redis'
 	// Access JWT(HS256) 발급과 검증, 구글과 애플 ID 토큰의 JWKS 서명 검증을 한 라이브러리로 한다 (KAN-223).
 	// Spring Security는 들이지 않는다 - 보호할 경로가 넷뿐이라 필터 체인 도입 비용이 더 크다. Boot BOM 밖이라 버전을 적는다.
@@ -81,4 +81,8 @@ dependencies {
 
 tasks.named('test') {
 	useJUnitPlatform()
+	// 테스트 JVM 힙 (KAN-282, 2026-10-13). Gradle 기본 512MB에서는 통합 테스트가 캐시에 쌓는 Spring 컨텍스트 26개가
+	// 힙을 거의 다 차지해(로컬 GC 로그 기준 Full GC 뒤에도 약 508MB) CI에서 컨텍스트 생성 중 OutOfMemoryError로 죽었다.
+	// 컨텍스트 수가 늘 때마다 다시 경계에 닿지 않도록 두 배로 둔다. GitHub 러너와 개발 장비 모두 여유가 있다.
+	maxHeapSize = '1g'
 }

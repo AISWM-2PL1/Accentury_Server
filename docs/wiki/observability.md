@@ -241,6 +241,7 @@ sum, count, avg, max만 쓴다. 그래서 `ServiceMetrics.registerPercentiles`�
 | `accentury.analysis.judged` | Counter | `reason` (unscorable, misread, other) | AI가 판정 실패(422)로 답한 건수 (KAN-272). `unscorable`은 결과에 NaN이 섞인 채점 불가라 사용자 발화가 아니라 모델 쪽 결함의 신호다. 경보 `analysis-unscorable-high`가 본다 |
 | `accentury.analysis.poll` | Counter | `congested` (true, false) | 혼잡 pollAfterMs 발동 비율 |
 | `accentury.analysis.duration` | Timer + P95 | 없음 | 업로드 접수부터 분석 완료까지, NFR-PF-01(3초) |
+| `accentury.result.wait` | Timer + P95 | 없음 | 세션의 첫 `/complete`부터 READY까지, 결과 화면 체감 대기 (KAN-284). 세션당 1건, 첫 호출 READY면 0. 경보 `result-wait-high`가 본다 |
 | `accentury.ai.circuit.state` | Gauge | 없음 | AI 회로 (KAN-36) |
 | `accentury.upload.temp.files` | Gauge | 없음 | backend 임시파일 잔존 (KAN-27) |
 | `accentury.upload.temp.oldest.age` | Gauge | 없음 | 같은 파일의 최장 잔존 시간 |
@@ -312,6 +313,15 @@ CloudWatch가 전체 표본에서 p50과 p95를 계산한다 - backend 쪽이 "�
 `accentury.analysis.duration`은 **성공한 건만** 센다. 실패와 타임아웃을 섞으면 분포가 "AI가
 답하는 데 걸리는 시간"이 아니라 "포기하는 데 걸리는 시간"과 뒤섞여 NFR-PF-01 판단에 쓸 수 없다.
 
+`accentury.result.wait`(KAN-284)는 `analysis.duration`과 재는 대상이 다르다. `analysis.duration`은 **음성 문항 1건**의
+업로드 접수부터 분석 완료까지이고, `result.wait`는 **세션 하나가 결과 화면에서 기다린 시간**이다. 7문항 구성(KAN-260)에서는
+어휘 문항을 푸는 동안 음성 분석이 뒤에서 돌므로, 분석이 28초 걸려도 사용자는 결과 화면에서 0초를 기다릴 수 있고 반대로
+분석이 짧아도 혼잡 폴링 간격(최대 60초, KAN-272) 때문에 오래 기다릴 수 있다. 시작은 세션의 첫 `/complete` 호출이 완주
+판정까지 간 시각(`test_session.complete_requested_at`, 422와 409로 끝난 호출은 제외)이고, 끝은 READY를 돌려준 호출이다.
+폴링 간격이 값에 들어가는 것이 의도다 - 서버 준비 시간이 아니라 사용자가 체감한 시간을 잰다. 만료로 끊긴 대기는 세지 않는다.
+backend 태스크가 여럿이라 폴링이 다른 태스크로 가므로 시작 시각은 메모리가 아니라 세션 행에 둔다. 조합 수는 5개(Timer 4 +
+백분위 1)라 환경당 월 1.5달러가 늘어난다.
+
 ### actuator는 여전히 health만 노출한다
 
 `management.endpoints.web.exposure.include: health`는 그대로다. 지표는 push로 나가므로 웹에
@@ -362,6 +372,7 @@ KAN-134/165/36의 9종은 "서버가 죽었다"를 알린다(근거는 `infra/RE
 | `analysis-backlog-high` | 진행 중 >= 12가 5분 연속 | 폴링 혼잡 임계치(6, KAN-172)의 두 배. 서버가 폴링 간격을 올려 압력을 뺀 뒤에도 그만큼 쌓였다면 사람이 볼 일이다. AI가 1건 10초라 12건은 대기열 2분이다 |
 | `analysis-timeouts-high` | 5분에 타임아웃 5건 초과 | 정상 운영에서는 0이다. 배포 중 태스크 교체로 나는 한두 건 위에 선을 긋는다 |
 | `analysis-unscorable-high` (KAN-272) | 5분에 채점 불가 5건 초과 | AI가 분석 결과에 NaN을 낸 건수다. 2026-10 prod에서 분석의 약 5%(5분에 2건 안팎)였고 그 위에 선을 긋는다. 판정(422)이라 회로가 열리지 않으므로 모델 회귀를 잡는 경보는 이것뿐이다 |
+| `result-wait-high` (KAN-284) | 결과 화면 대기 P95 >= 30초가 3분 연속 | 초기값이다. 혼잡 시 pollAfterMs 상한(60초)의 절반이고, 운영 1주 뒤 실측 분포로 다시 정한다. 슬랙 `#infra-alerts`에도 간다 |
 
 `analysis-backlog-high`가 보는 것은 **전 인스턴스 합**(DB의 PROCESSING 행 수)이다. 태스크별
 인메모리 카운터로 걸면 태스크 셋이 임계치를 나눠 가져 아무도 울지 않는다 - KAN-167이 혼잡 판정을
@@ -370,12 +381,24 @@ DB로 옮긴 것과 같은 이유다. 태스크마다 같은 값을 올리므로
 `analysis-timeouts-high`가 두 사유를 합해서 보는 것은 사용자에게는 어느 쪽이든 같은 실패이기
 때문이다 - 어느 쪽이었는지는 대시보드가 나눠 그린다.
 
+### 슬랙으로도 가는 것 (KAN-273)
+
+이메일과 별도로 `#infra-alerts` 슬랙 채널에 두 가지가 온다. 위 경보 중에는 `ai-disk-high`와 `result-wait-high`(KAN-284)만 슬랙에도
+가고(ALARM과 OK), 나머지는 이메일뿐이다. 또 하나는 경보가 아니라 AI ASG의 오토스케일링 이벤트(확대, 축소, 시작 실패)다 - 스케일아웃은
+경보가 ASG 정책만 실행해 원래 아무에게도 알리지 않았다. 배포의 instance refresh로 생기는 교체는 알리지 않는다.
+확대와 축소 제목에는 변경 뒤 희망 용량이 `(현재: n대)`로 붙는다 - Lambda가 ASG를 조회해 넣는다 (슬랙 배너에는 제목만 보인다).
+
+prod에는 `#daily-user` 채널로 응시 현황 리포트가 KST 08시부터 24시까지 짝수 정각에 온다. 음성 버킷의 키만 세어
+세션 수, 동의와 미동의, 완주와 이탈과 진행 중, 완주율을 최근 구간, 오늘 누적, 전체 누적으로 보여 준다. 숫자의 정의와
+설정 절차는 `infra/README.md` "슬랙 알림 (KAN-273)"이다.
+
 ### 임계치를 언제 다시 보는가
 
 - `ai_temp_residue_threshold` - 동시 추론 상한이 바뀔 때 (워커 수 `dispatch-concurrency`,
   오토스케일링 상한 KAN-168)
 - `analysis_backlog_threshold` - `congestion-threshold`를 바꿀 때 (이 값의 두 배가 근거다)
 - 셋 다 - 부하 테스트(KAN-40) 뒤에 실측으로 재조정한다
+- `result_wait_threshold_seconds` - 운영 1주 뒤 `accentury.result.wait` 실측 분포로 (KAN-284), 혼잡 pollAfterMs 상한을 바꿀 때
 
 ## 6. 이 티켓이 남긴 것
 

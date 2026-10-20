@@ -6,15 +6,23 @@
 # 이 파일만 user_data 16KB 상한에 든다 - compose와 스크립트 3개는 S3에서 받는다 (KAN-38, main.tf).
 set -euxo pipefail
 
-dnf install -y docker
+# docker와 compose 플러그인은 사전 적재 AMI(ai-ami 모듈, KAN-285)에 이미 들어 있다 - 있으면 건너뛴다. 맨 AL2023
+# AMI(KAN-246의 SSM 최신 AMI)로 띄워도 여기서 깔리므로 AMI 종류와 무관하게 같은 호스트가 된다. 이미지도 AMI에
+# 있으면 accentury-up.sh의 compose up이 pull 없이(태그가 다르면 바뀐 레이어만) 지나간다.
+if ! command -v docker > /dev/null; then
+  dnf install -y docker
+fi
 systemctl enable --now docker
 usermod -aG docker ec2-user
 
-# docker compose 플러그인 (AL2023 dnf에는 없다). 버전은 재현성을 위해 고정.
-mkdir -p /usr/local/lib/docker/cli-plugins
-curl -fsSL "https://github.com/docker/compose/releases/download/${compose_version}/docker-compose-linux-x86_64" \
-  -o /usr/local/lib/docker/cli-plugins/docker-compose
-chmod +x /usr/local/lib/docker/cli-plugins/docker-compose
+# docker compose 플러그인 (AL2023 dnf에는 없다). 버전은 재현성을 위해 고정 - AMI에 든 것이 다른 버전이면 다시 받는다.
+compose_plugin=/usr/local/lib/docker/cli-plugins/docker-compose
+if [ ! -x "$compose_plugin" ] || [ "v$(docker compose version --short)" != "${compose_version}" ]; then
+  mkdir -p /usr/local/lib/docker/cli-plugins
+  curl -fsSL "https://github.com/docker/compose/releases/download/${compose_version}/docker-compose-linux-x86_64" \
+    -o "$compose_plugin"
+  chmod +x "$compose_plugin"
+fi
 
 # ---- 환경별 값 (비밀 아님). accentury-up.sh와 ai 스크립트가 source 한다. ----
 mkdir -p /etc/accentury

@@ -38,7 +38,8 @@ public class IntonationLearningRegistry {
      * 발행본 하나와 거기서 미리 만든 공개 응답.
      *
      * @param definition      scriptKey 포함 원본 - 채점(KAN-267)이 카드를 찾는 정본
-     * @param listResponse    코스 목록 응답 (§3.17) - 발행본이 불변이라 한 번 만든다
+     * @param listResponse    코스 목록 응답 (§3.17) - 발행본이 불변이라 한 번 만든다. 진도는 비어 있다 (계정마다
+     *                        {@link LearningProgress}가 채운다)
      * @param courseResponses courseId별 상세 응답
      */
     public record Published(IntonationLearningDefinition definition, IntonationCourseListResponse listResponse,
@@ -51,6 +52,21 @@ public class IntonationLearningRegistry {
                 throw new ApiException(ErrorCode.LEARNING_COURSE_NOT_FOUND);
             }
             return response;
+        }
+
+        /**
+         * 카드 하나 - 채점(KAN-267, §3.19)이 업로드 받은 {@code cardId}로 scriptKey를 찾는다. 없으면 404
+         * {@code LEARNING_CARD_NOT_FOUND}. 발행본 카드는 백여 장이라 업로드마다 훑어도 된다.
+         */
+        public IntonationLearningDefinition.Card card(String cardId) {
+            for (IntonationLearningDefinition.Course course : definition.courses()) {
+                for (IntonationLearningDefinition.Card card : course.cards()) {
+                    if (card.cardId().equals(cardId)) {
+                        return card;
+                    }
+                }
+            }
+            throw new ApiException(ErrorCode.LEARNING_CARD_NOT_FOUND);
         }
     }
 
@@ -101,7 +117,7 @@ public class IntonationLearningRegistry {
             responses.put(course.courseId(), IntonationCourseResponse.from(sorted.contentVersion(), course));
         }
         List<IntonationCourseListResponse.Summary> summaries = ordered.stream()
-                .map(course -> new IntonationCourseListResponse.Summary(course.courseId(), course.seq(),
+                .map(course -> IntonationCourseListResponse.Summary.unstarted(course.courseId(), course.seq(),
                         course.level(), course.topic(), course.title(), course.cards().size()))
                 .toList();
         return new Published(sorted, new IntonationCourseListResponse(sorted.contentVersion(), summaries),

@@ -12,7 +12,8 @@ import java.util.List;
  * ({@code scriptKey})를 뺀 공개용 사본이다. 응답 전용 타입을 따로 두는 이유: 도메인에 필드가
  * 추가돼도 여기 명시적으로 옮기지 않는 한 클라이언트로 새지 않는다 (KAN-10 AC - 응답에 정답
  * 정보 미포함). 기준 음성 관련 필드는 아예 없다 (범위 제외 - 2026-07-31, KAN-12).
- * {@code scriptKey}는 BE에서 AI로 가는 meta 전용이라 싣지 않는다 (KAN-182).
+ * {@code scriptKey}는 BE에서 AI로 가는 meta 전용이라 싣지 않는다 (KAN-182). {@code emotion}은 화면용이라
+ * 그대로 싣는다 (KAN-282).
  *
  * @param voiceSet      이 응답이 담은 세트 번호 (1부터) - 세션 생성의 {@code voiceSet}과 같은 값
  * @param voiceSetCount 이 버전의 세트 수 - 앱이 "모든 세트 경험" UI를 만들 때 쓴다 (KAN-182)
@@ -39,13 +40,19 @@ public record TestDefinitionResponse(
                 setDefinition.items().stream().map(Item::from).toList());
     }
 
-    /** 유형별 미소유 필드(VOICE의 choices, VOCABULARY의 maxDurationMs와 guideF0)는 직렬화에서 빠진다. */
+    /**
+     * 유형별 미소유 필드(VOICE의 choices, VOCABULARY의 maxDurationMs, guideF0, emotion)는 직렬화에서 빠진다.
+     *
+     * @param emotion VOICE의 감정 톤 (KAN-282) - 정의 값 그대로다. 감정이 없는 정의(gn-2026.10.1까지)의
+     *                문항에는 필드가 없고, 클라이언트는 없으면 그 줄을 그리지 않는다 (KAN-283).
+     */
     @JsonInclude(JsonInclude.Include.NON_NULL)
     public record Item(
             String itemId,
             int seq,
             TestDefinition.ItemType type,
             String prompt,
+            @Nullable String emotion,
             @Nullable Integer maxDurationMs,
             TestDefinition.@Nullable GuideF0 guideF0,
             @Nullable List<TestDefinition.Choice> choices) {
@@ -56,7 +63,7 @@ public record TestDefinitionResponse(
             Integer maxDurationMs = item.type() == TestDefinition.ItemType.VOICE
                     ? TestDefinition.VOICE_MAX_DURATION_MS
                     : null;
-            return new Item(item.itemId(), item.seq(), item.type(), item.prompt(),
+            return new Item(item.itemId(), item.seq(), item.type(), item.prompt(), item.emotion(),
                     maxDurationMs, item.guideF0(), item.choices());
         }
     }

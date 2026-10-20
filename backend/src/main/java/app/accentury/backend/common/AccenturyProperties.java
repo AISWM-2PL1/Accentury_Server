@@ -32,6 +32,7 @@ import java.util.Map;
  * @param training       staging 전용 학습 데이터 S3 (KAN-201) - 버킷이 없으면 저장 코드가 호출되지 않는다.
  * @param auth           앱 계정 인증 (KAN-223) - Access JWT, Refresh 회전, IdP 검증 설정
  * @param learning       단어 학습 API의 요청 제한 (KAN-265)
+ * @param translation    사투리 텍스트 번역의 LLM 호출과 prod 번역 기록 버킷 (KAN-266)
  * @param trustedProxies 요청 제한의 기준 IP를 정할 때 신뢰하는 프록시 대역 (KAN-28, §2.5).
  *                       CIDR 또는 단일 IP 목록이고, 직접 접속한 상대가 이 목록에 들어야만
  *                       {@code X-Forwarded-For}를 읽는다. 비어 있으면 헤더를 무시하고 접속 IP만
@@ -50,6 +51,7 @@ public record AccenturyProperties(Session session,
                                   @DefaultValue Training training,
                                   @DefaultValue Auth auth,
                                   @DefaultValue Learning learning,
+                                  @DefaultValue Translation translation,
                                   @DefaultValue List<String> trustedProxies) {
 
     /**
@@ -403,17 +405,72 @@ public record AccenturyProperties(Session session,
                        @DefaultValue(Auth.PRIVACY_POLICY_VERSION) String privacyPolicyVersion) {
 
         /** 게시 중인 개인정보처리방침 버전 - privacy.html의 {@code accentury-policy-version} 메타와 같은 값이다 (KAN-240). */
-        public static final String PRIVACY_POLICY_VERSION = "2026-10-04";
+        public static final String PRIVACY_POLICY_VERSION = "2026-10-15";
     }
 
     /**
-     * 단어 학습 (KAN-265, {@code learning} 패키지, 명세서 §3.16).
+     * 단어 학습 (KAN-265, 명세서 §3.16)과 억양 학습 채점 (KAN-267, §3.19) - {@code learning} 패키지.
      *
-     * @param rateLimitPerMinute 계정당 분당 쓰기 요청(시도 시작, 답안, 완료 - 한 통) 허용 횟수 (§2.5). 정상은
-     *                           세트 하나에 시도 1 + 답안 10 이하 + 완료 1이라 어휘 답안(60)과 같은 여유 배수다.
-     *                           목록과 상세 조회는 제한하지 않는다.
+     * @param rateLimitPerMinute           단어 학습의 계정당 분당 쓰기 요청(시도 시작, 답안, 완료 - 한 통) 허용 횟수
+     *                                     (§2.5). 정상은 세트 하나에 시도 1 + 답안 10 이하 + 완료 1이라 어휘 답안(60)과
+     *                                     같은 여유 배수다. 목록과 상세 조회는 제한하지 않는다.
+     * @param intonationRateLimitPerMinute 억양 학습 녹음 업로드의 계정당 분당 허용 횟수 (§2.5, KAN-267). 한 건마다
+     *                                     AI 추론을 쓰고 레벨테스트와 같은 큐를 나눠 쓰므로 단어 학습보다 낮다 - 녹음과
+     *                                     대기만으로 한 건에 10초 이상 걸려 정상 사용은 분당 수 건이다. 결과 조회는
+     *                                     제한하지 않는다.
+     * @param intonationScoreVersion       억양 학습 점수 변환에 쓰는 점수 버전 (§3.19, 2026-10-10 결정) - 레벨테스트와
+     *                                     같은 억양 전처리(구간 계수)를 이 버전의 seed에서 읽는다. AI 요청의
+     *                                     {@code scoreVersion}과 시도 기록에도 이 값이 실린다. 발행된 버전이 아니면
+     *                                     기동하지 않는다.
+     * @param perfectScoreThreshold        100점 처리 기준 (§3.19, 2026-10-10 결정) - 변환 점수가 이 값 이상이고 올리고
+     *                                     내릴 음절이 하나도 없으면 100점이다. 학습에만 적용한다. 0~100 밖이면
+     *                                     기동하지 않는다.
      */
-    public record Learning(@DefaultValue("60") int rateLimitPerMinute) {
+    public record Learning(@DefaultValue("60") int rateLimitPerMinute,
+                           @DefaultValue("20") int intonationRateLimitPerMinute,
+                           @DefaultValue("sv-0.5") String intonationScoreVersion,
+                           @DefaultValue("90") int perfectScoreThreshold) {
+    }
+
+    /**
+     * 사투리 텍스트 번역 (KAN-266, {@code translation} 패키지, 명세서 §3.18).
+     *
+     * @param apiKey       Gemini API 키 (Google AI Studio, 환경별 프로젝트). SSM SecureString
+     *                     {@code ACCENTURY_TRANSLATION_APIKEY}가 넣는다 - 콘솔이 발급하는 값이라 Terraform은 자리만 만든다.
+     *                     <b>없거나 자리 표시 값({@link SsmPlaceholder#UNSET})이면 번역이 전부 503
+     *                     {@code TRANSLATION_UNAVAILABLE}이다</b> - 기동과 다른 기능은 영향이 없다 (후기 슬랙 URL과 같은 사정).
+     * @param model        호출할 모델 이름. 코드 수정 없이 바꾸는 자리다 (2026-10-08 결정 - 품질이 모자라면
+     *                     {@code gemini-3.8-flash}). 배포에서는 SSM {@code ACCENTURY_TRANSLATION_MODEL}이 넣는다.
+     * @param baseUrl      Gemini API 기준 주소. 테스트가 MockWebServer로 바꾸는 자리다.
+     * @param timeout      Gemini 호출 전체 상한 - 재시도까지 이 안에서 끝난다 (2026-10-08 결정, 동기 응답).
+     * @param recordBucket 번역 기록 버킷 이름 (2026-10-08 결정, prod만). <b>미설정이 기본값이고, 그러면 S3 클라이언트도 기록
+     *                     빈도 대체 ID도 만들어지지 않는다</b> - staging, 로컬, 테스트가 이 상태다. SSM
+     *                     {@code ACCENTURY_TRANSLATION_RECORDBUCKET}이 prod에만 있다. 빈 문자열은 설정 실수로 보고 기동을 세운다.
+     * @param region       그 버킷의 리전. 비우면 SDK 기본 체인이다 ({@link Training#region()}과 같다).
+     */
+    public record Translation(@Nullable String apiKey,
+                              @DefaultValue(Translation.DEFAULT_MODEL) String model,
+                              @DefaultValue("https://generativelanguage.googleapis.com") String baseUrl,
+                              @DefaultValue("10s") Duration timeout,
+                              @Nullable String recordBucket,
+                              @Nullable String region) {
+
+        /** 2026-10-08 결정 모델 - 구글 모델 문서가 속도와 비용이 중요한 단순 텍스트 작업에 권장하는 최신 모델이다. */
+        public static final String DEFAULT_MODEL = "gemini-3.5-flash-lite";
+
+        /** 입력 길이 상한 - 앞뒤 공백을 뺀 코드 포인트 수다. FE와 공유하는 값이라 설정이 아니라 상수다 (명세서 §3.18). */
+        public static final int MAX_INPUT_LENGTH = 100;
+
+        /**
+         * 계정당 하루 번역 상한 - 성공한 번역만 세고 한국 시각 자정에 바뀐다 (명세서 §3.18, 2026-10-15 결정). 사업자 무료 한도
+         * (prod RPD 500)를 한 사람이 다 쓰지 못하게 한다. 오류 메시지에 박혀 있는 값이라 설정이 아니라 상수다.
+         */
+        public static final int DAILY_LIMIT = 5;
+
+        /** 키가 들어 있는가 - 비었거나 자리 표시 값이면 번역은 503이다. */
+        public boolean apiKeyConfigured() {
+            return apiKey != null && !apiKey.isBlank() && !SsmPlaceholder.UNSET.equals(apiKey);
+        }
     }
 
     /**

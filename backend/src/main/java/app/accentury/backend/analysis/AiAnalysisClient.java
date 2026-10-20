@@ -3,6 +3,8 @@ package app.accentury.backend.analysis;
 import app.accentury.backend.common.ErrorCode;
 import org.jspecify.annotations.Nullable;
 
+import java.util.List;
+
 /**
  * BE -> AI 분석 호출의 경계 (KAN-24, API 명세서 §4.1).
  * <p>
@@ -38,7 +40,33 @@ public interface AiAnalysisClient {
      * @param intonationScore 0~100 원값 - 20점 만점 환산은 BE 집계(KAN-21, 25)가 한다 (§4.3).
      */
     record Completed(int intonationScore, String qualityCode,
-                     String modelVersion, String scoreVersion) implements Outcome {
+                     String modelVersion, String scoreVersion,
+                     List<OrderSegment> orderSegments) implements Outcome {
+
+        public Completed {
+            orderSegments = List.copyOf(orderSegments);
+        }
+
+        /** order 항목이 없는 성공 - 레벨테스트는 이 모양만 쓴다 (order 항목은 학습 채점만 읽는다, §3.19). */
+        public Completed(int intonationScore, String qualityCode, String modelVersion, String scoreVersion) {
+            this(intonationScore, qualityCode, modelVersion, scoreVersion, List.of());
+        }
+    }
+
+    /**
+     * 모델 응답 {@code segments} 중 {@code kind}가 {@code order}인 항목 하나 - 높낮이 순서가 경남 화자와 다른 어절이다
+     * (KAN-267, §3.19). 억양 학습 채점만 읽고 레벨테스트는 버린다.
+     * <p>
+     * 값은 모델이 준 글자 그대로다 (2026-10-10 결정 - 인덱스로 바꾸지 않는다). 모델은 경남 화자끼리 순서가 갈리는
+     * 어절({@code refAgree} 0.6 미만)과 가장 높인 음절이 경남 화자와 같은 어절에서 {@code raise}와 {@code lower}를
+     * null로 준다 - 둘을 가르는 것은 {@code refAgree}다.
+     *
+     * @param word     어절 글자
+     * @param raise    경남 화자가 가장 높이는 음절 글자 - 없으면 null
+     * @param lower    사용자가 가장 높인 음절 글자 - 없으면 null
+     * @param refAgree 경남 화자들이 최빈 순서를 따르는 비율 (0~1)
+     */
+    record OrderSegment(String word, @Nullable String raise, @Nullable String lower, double refAgree) {
     }
 
     /**
@@ -58,7 +86,7 @@ public interface AiAnalysisClient {
          * 서버가 고장 났다는 증거다. 이 구분이 없으면 응답만 하고 계약을 어기는 AI 앞에서
          * 회로가 영영 닫혀 있는다.
          */
-        enum Cause {
+        public enum Cause {
             /** AI가 계약대로 판정했다 (§4.1 422) - 서버는 정상이다. */
             JUDGED,
             /** 응답은 왔지만 계약(§4.1)과 다르다 - 답은 하지만 쓸 수 없는 상태다. */

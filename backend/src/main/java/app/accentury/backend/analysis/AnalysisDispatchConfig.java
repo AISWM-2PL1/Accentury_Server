@@ -85,7 +85,8 @@ class AnalysisDispatchConfig {
                                           AnalysisMetrics metrics,
                                           ObjectMapper objectMapper,
                                           MeterRegistry meterRegistry,
-                                          ObjectProvider<TrainingSampleStore> trainingSamples) {
+                                          ObjectProvider<TrainingSampleStore> trainingSamples,
+                                          ObjectProvider<LearningAnalysisSink> learningSink) {
         String aiBaseUrl = properties.analysis().aiBaseUrl();
         if (aiBaseUrl == null || aiBaseUrl.isBlank()) {
             return new NoopAnalysisDispatcher();
@@ -138,6 +139,8 @@ class AnalysisDispatchConfig {
                 analysisExecutor, transitions, backlog, circuitBreaker, metrics,
                 // 학습 샘플 저장소는 수집을 켠 환경에만 빈이 있다 (KAN-201, TrainingConfig) - 없으면 no-op이다.
                 trainingSamples.getIfAvailable(() -> TrainingSampleStore.NONE),
+                // 억양 학습 채점(KAN-267)은 같은 큐로 들어와 결과만 학습 시도에 적는다 - 레벨테스트와 같은 큐 공유.
+                learningSink.getIfAvailable(() -> LearningAnalysisSink.NONE),
                 properties.analysis().aiRetries(), HttpAnalysisDispatcher.RETRY_BACKOFF_MS);
     }
 

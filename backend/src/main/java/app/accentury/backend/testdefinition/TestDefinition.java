@@ -60,7 +60,7 @@ public record TestDefinition(
      * VOCABULARY는 {@code choices}와 {@code correctChoiceId}. 소유 규칙은 발행 검증이 강제한다.
      * 녹음 길이 상한은 문항이 아니라 {@link #VOICE_MAX_DURATION_MS}가 정본이다.
      * <p>
-     * 세트 정의의 문항은 풀 정의의 문항 그대로다 (같은 itemId, scriptKey, guideF0) - 세트를
+     * 세트 정의의 문항은 풀 정의의 문항 그대로다 (같은 itemId, scriptKey, guideF0, emotion) - 세트를
      * 만들 때 바뀌는 것은 {@code seq}뿐이다 ({@link VoiceSets}).
      *
      * @param scriptKey VOICE 전용. 실모델(KAN-159 전달본)이 문장을 찾는 참조 키 문자열이다
@@ -68,6 +68,12 @@ public record TestDefinition(
      *                  다뤄 AI로 가는 meta(§4.1)에 그대로 싣는다 (KAN-182, KAN-22에서 이관).
      *                  정의 단위로 전부 있거나 전부 없어야 하며(all-or-nothing), 없으면 meta에서
      *                  생략된다 - 실모델로 채점할 수 없는 더미 정의({@code gn-2026.08.1})가 그렇다.
+     * @param emotion   VOICE 전용. 문장을 어떤 감정으로 읽을지 알려 주는 감정 형용 표현이다
+     *                  ("다급한", "차분하게 설명하는" - 2026-10-13 검수본의 18종, KAN-282). 화면 문구
+     *                  ("~ 느낌으로 말해주세요!")는 클라이언트가 붙이므로 값에는 감정 표현만 담는다.
+     *                  문장(prompt)에 섞지 않는 이유는 문장이 scriptKey와 guideF0에 묶여 있어서다.
+     *                  scriptKey처럼 정의 단위 all-or-nothing이고, 없는 정의({@code gn-2026.10.1}까지)는
+     *                  그대로 발행된다. 채점에는 쓰지 않는다 - AI meta에 싣지 않는다.
      */
     public record Item(
             String itemId,
@@ -77,18 +83,26 @@ public record TestDefinition(
             @Nullable String scriptKey,
             @Nullable GuideF0 guideF0,
             @Nullable List<Choice> choices,
-            @Nullable String correctChoiceId) {
+            @Nullable String correctChoiceId,
+            @Nullable String emotion) {
+
+        /** emotion 없는 문항 - gn-2026.10.1까지의 발행본 모양이다. 픽스처와 세트 유도가 쓴다. */
+        public Item(String itemId, int seq, ItemType type, String prompt, @Nullable String scriptKey,
+                    @Nullable GuideF0 guideF0, @Nullable List<Choice> choices,
+                    @Nullable String correctChoiceId) {
+            this(itemId, seq, type, prompt, scriptKey, guideF0, choices, correctChoiceId, null);
+        }
 
         /** scriptKey 없는 문항 - 더미 정의와 픽스처가 쓴다. 발행본 JSON은 정식 생성자로 파싱된다. */
         public Item(String itemId, int seq, ItemType type, String prompt,
                     @Nullable GuideF0 guideF0, @Nullable List<Choice> choices,
                     @Nullable String correctChoiceId) {
-            this(itemId, seq, type, prompt, null, guideF0, choices, correctChoiceId);
+            this(itemId, seq, type, prompt, null, guideF0, choices, correctChoiceId, null);
         }
 
         /** 같은 문항에 seq만 새로 매긴 사본 - 세트 응답의 출제 순서 부여용 ({@link VoiceSets}). */
         Item withSeq(int newSeq) {
-            return new Item(itemId, newSeq, type, prompt, scriptKey, guideF0, choices, correctChoiceId);
+            return new Item(itemId, newSeq, type, prompt, scriptKey, guideF0, choices, correctChoiceId, emotion);
         }
     }
 

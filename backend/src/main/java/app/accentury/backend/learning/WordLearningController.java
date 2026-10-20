@@ -25,15 +25,17 @@ import org.springframework.web.bind.annotation.RestController;
 class WordLearningController {
 
     private final WordLearningService service;
+    private final LearningProgress progress;
 
-    WordLearningController(WordLearningService service) {
+    WordLearningController(WordLearningService service, LearningProgress progress) {
         this.service = service;
+        this.progress = progress;
     }
 
-    /** 어휘 세트 목록 (W-1). 200 / 401. */
+    /** 어휘 세트 목록 (W-1) - 계정의 완료 표시, 최근 정답률, 추천 1개(KAN-268)를 채운다. 200 / 401. */
     @GetMapping("/word-sets")
     ResponseEntity<WordSetListResponse> listSets(@AuthenticatedUser AppUser user) {
-        return noStore(service.listSets());
+        return noStore(progress.wordSets(user.id()));
     }
 
     /** 세트 상세 - 카드와 문항, 정답 없음 (W-2, W-3). 200 / 401 / 404 {@code LEARNING_SET_NOT_FOUND}. */

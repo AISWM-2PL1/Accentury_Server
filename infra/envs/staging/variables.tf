@@ -62,7 +62,13 @@ variable "training_bucket_enabled" {
 
 variable "ai_ami_id" {
   type        = string
-  description = "AI 호스트의 AMI ID (KAN-246). AL2023 x86_64. 월 1회 staging, prod 순으로 최신 값으로 바꾼다 (README \"AI 호스트 AMI 갱신\")."
+  description = "AI 호스트의 AMI ID (KAN-246, KAN-285). ai-ami 파이프라인이 구운 사전 적재 AMI(accentury-ai-host-<빌드 날짜>, AL2023 x86_64 + docker + compose + 활성 ai 이미지)다. 월 1회 파이프라인을 돌려 staging, prod 순으로 새 값으로 바꾼다 (README \"AI 호스트 AMI 갱신\"). 맨 AL2023 AMI를 넣어도 user_data가 같은 호스트를 만들지만 첫 부팅이 약 2분 30초 길다."
+}
+
+variable "ai_ami_pipeline_enabled" {
+  type        = bool
+  description = "AI 호스트 AMI 사전 적재 파이프라인(EC2 Image Builder, modules/ai-ami)을 이 환경이 가질지 (KAN-285). 구운 AMI는 두 환경이 함께 쓰므로 prod만 true다. 빌드는 수동이고 이 환경의 SSM IMAGE_TAG를 담는다."
+  default     = false
 }
 
 variable "ai_root_volume_size" {
@@ -193,4 +199,61 @@ variable "auth_apple_key_id" {
   type        = string
   description = "Sign in with Apple 키의 Key ID - 탈퇴 때 애플 토큰 revoke용 (KAN-241)"
   default     = "unset-put-parameter-after-apply"
+}
+
+variable "translation_records_enabled" {
+  type        = bool
+  description = "이 환경에 번역 기록 버킷(accentury-translator-prompt-<계정 ID>)을 만들고 backend가 번역 요청마다 기록을 남길지 (KAN-266). true면 버킷, 버킷 정책, SSM ACCENTURY_TRANSLATION_RECORDBUCKET, 태스크 역할의 translations/ PutObject가 생긴다. prod만 true다 (2026-10-08 결정 - staging은 비용 때문에 저장하지 않는다). 버킷은 prevent_destroy라 true에서 false로 바꾸는 apply는 plan이 실패한다 - 끄려면 사람이 판단해 state에서 먼저 뺀다."
+  default     = false
+}
+
+variable "translation_record_reader_principal_arns" {
+  type        = list(string)
+  description = "번역 기록 버킷의 객체를 읽을 수 있는 IAM 주체 ARN 목록 (KAN-266, 2026-10-08 결정 - 팀 전원). null이면 IAM 사용자 accentury-cli, jaeyoung, seongju(2026-10-08 IAM의 사용자 전부)다. 이 목록 밖의 주체는 관리자 자격 증명이어도 버킷 정책이 객체 읽기를 거부한다. 팀원이 늘면 이 목록만 고친다."
+  default     = null
+}
+
+variable "translation_model" {
+  type        = string
+  description = "번역 LLM 모델 이름 (KAN-266). SSM ACCENTURY_TRANSLATION_MODEL로 backend에 들어간다. 품질이 모자라면 gemini-3.8-flash로 바꾸는 선택지가 있다 (2026-10-08 결정)."
+  default     = "gemini-3.5-flash-lite"
+}
+
+# ---- 슬랙 알림 (KAN-273) ----
+
+# 워크스페이스와 채널 ID는 시크릿이 아니고 두 환경이 같은 값이라 alert_email처럼 기본값으로 둔다.
+variable "slack_team_id" {
+  type        = string
+  description = "AWS Chatbot 콘솔에서 승인한 슬랙 워크스페이스 ID (2026-10-13 승인)."
+  default     = "T0BC03GKAM7"
+}
+
+variable "slack_infra_alerts_channel_id" {
+  type        = string
+  description = "#infra-alerts 채널 ID. AI 스케일 이벤트와 ai-disk-high 경보가 두 환경에서 온다."
+  default     = "C0C9KN2NA2C"
+}
+
+variable "slack_daily_user_channel_id" {
+  type        = string
+  description = "#daily-user 채널 ID. 응시 현황 2시간 리포트가 온다 (voice_report_enabled인 환경만)."
+  default     = "C0C8L27E9BP"
+}
+
+variable "voice_report_enabled" {
+  type        = bool
+  description = "음성 버킷 응시 현황 2시간 리포트를 #daily-user로 보낼지. prod만 true다 (2026-10-13 결정)."
+  default     = false
+}
+
+variable "slack_channel_configs_enabled" {
+  type        = bool
+  description = "Chatbot 채널 설정을 이 환경이 가질지. 슬랙 채널 하나에 계정당 설정이 하나만 허용되므로(2026-10-13 실측) prod만 true다."
+  default     = false
+}
+
+variable "slack_infra_alerts_peer_envs" {
+  type        = list(string)
+  description = "#infra-alerts 채널 설정에 토픽을 함께 붙일 다른 환경. slack_channel_configs_enabled인 환경(prod)에서 [\"staging\"]이다."
+  default     = []
 }

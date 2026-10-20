@@ -820,7 +820,8 @@ CloudFront 5xxErrorRate 0 (13:45부터 15:15). 클라이언트 쪽은 세 phase 
 
 ## ai 호스트 컨테이너 기동 (KAN-124, 전용 호스트 KAN-36, 내부 ALB KAN-201)
 
-ai 호스트는 무상태이고 내부 ALB 뒤의 ASG(min 1, max 3)다 (아래 "내부 ALB와 오토스케일링"). `modules/ai-host`의 첫 부팅 user_data가 docker와 compose 플러그인을 깔고,
+ai 호스트는 무상태이고 내부 ALB 뒤의 ASG(min 1, max 3)다 (아래 "내부 ALB와 오토스케일링"). `modules/ai-host`의 첫 부팅 user_data가 docker와 compose 플러그인을 깔고
+(AMI에 이미 있으면 건너뛴다 - KAN-285, 아래 "AI 호스트 AMI 갱신"),
 운영 compose 파일(`modules/ai-host/docker-compose.ai.yml`, 호스트에서는
 `/opt/accentury/docker-compose.yml`)과 스크립트 3개(`accentury-up.sh`, `ai-egress-guard.sh`,
 `ai-health-metric.sh`)를 **부팅 자산 버킷에서 내려받은 뒤**(KAN-38, 아래 "부팅 자산 버킷") systemd
@@ -852,8 +853,8 @@ backend 쪽은 무변경이다 - `ACCENTURY_ANALYSIS_AIBASEURL`(`http://ai.accen
 | 상태 검사 | `GET /internal/v0/health` 200, 15초 x 정상 2회 / 비정상 3회 | 워밍업 전(503 STARTING)에는 트래픽이 가지 않는다. 토큰 불필요 |
 | ALB idle timeout | 90초 | backend 읽기 타임아웃(ai-timeout 85초)보다 길어야 한다. 기본 60초면 긴 추론이 504로 끊긴다 |
 | 등록 해제 지연 | 90초 | 빠지는 인스턴스의 진행 중 추론(AI 상한 75초)이 끝날 시간 |
-| ASG 상태 검사 | ELB, 유예 900초 | 첫 부팅(docker 설치 + 이미지 7GB pull + 모델 적재)이 실측 3분 20초 - 파이프라인의 healthy 대기(600초)에 pull을 더한 여유다 |
-| 확대 | `accentury.analysis.processing.value` Maximum >= 6, 1분 x 1회 -> +1, 워밍업 600초 | backend의 폴링 혼잡 임계치와 같은 지점. CPU는 추론 1건이 10초라 밀림보다 늦다. 판정은 KAN-272에서 2회 연속에서 1회로 줄였다 - 한 사람이 5문항을 연달아 올려도 5건이라 6에 닿지 않는다 |
+| ASG 상태 검사 | ELB, 유예 900초 | 첫 부팅(docker 설치 + 이미지 7GB pull + 모델 적재)이 실측 3분 22초 - 파이프라인의 healthy 대기(600초)에 pull을 더한 여유다. 사전 적재 AMI(KAN-285, 미채택)는 최대 5분 34초였다 |
+| 확대 | `accentury.analysis.processing.value` Maximum >= 6, 1분 x 1회 -> +1, 워밍업 300초 | backend의 폴링 혼잡 임계치와 같은 지점. CPU는 추론 1건이 10초라 밀림보다 늦다. 판정은 KAN-272에서 2회 연속에서 1회로 줄였다 - 한 사람이 5문항을 연달아 올려도 5건이라 6에 닿지 않는다. 워밍업은 prod 실측 부팅(시작에서 healthy까지) 약 3분 + 경보 해제 지연 1~2분이다 (KAN-281에서 600초를 줄였다 - 2026-10-06에 2번째가 이미 일하는데 3번째를 약 7분 막아 물결 최고치 14건을 2대로 받았다). 사전 적재 AMI(KAN-285)는 부팅이 2분 50초~5분 34초로 불규칙해 쓰지 않으므로 값은 그대로다 |
 | 축소 | 같은 지표 <= 1, 1분 x 15회 -> -1, 그 뒤 ALARM이 유지되는 동안 약 3분마다 다시 -1 (min까지) | 늘어난 인스턴스는 늘어난 동안만 과금이라 확대보다 훨씬 느리게 접는다. 실측 3에서 2가 16분, 2에서 1이 19분 |
 | SG | backend-sg -> ai-alb-sg -> ai-sg (8000) | backend 태스크가 호스트에 직접 닿는 길은 없다 |
 
@@ -944,6 +945,46 @@ aws ec2 describe-instances --filters "Name=tag:Name,Values=$(terraform output -r
 
 # 5. 스모크 한 바퀴 (아래 "원격 스모크 수동 실행")를 돌린 뒤 prod에서 1~4를 되풀이한다
 ```
+
+#### 사전 적재 AMI는 쓰지 않는다 (KAN-285, 2026-10-14 실측)
+
+첫 부팅 3분 22초 중 docker 설치 40초와 이미지 pull 1분 53초가 매번 같은 일이라, EC2 Image Builder로 그 둘을 미리
+넣은 AMI(`modules/ai-ami`, prod 스택이 소유, 수동 실행)를 만들어 두 환경에 적용해 봤다. 결과는 **더 느리고 불규칙**해서
+tfvars를 맨 AMI로 되돌렸다. AMI에서 만든 루트 볼륨은 블록을 처음 읽을 때 S3 스냅샷에서 가져오는데(EBS 지연 로딩),
+그 대역폭이 볼륨마다 초당 약 15~50MB로 달라 모델 가중치 3~4GB를 읽는 적재 구간이 15초에서 1~4분으로 늘었다. 맨
+AMI는 pull이 디스크에 새로 쓰므로 적재가 항상 15초고, 전체도 3분 20초 안팎으로 일정하다. 오토스케일링 워밍업(300초)은
+예측 가능한 쪽이 안전하다.
+
+| 표본 | OS 부팅 완료 | 컨테이너까지 | 모델 적재 | 시작 -> ALB healthy |
+| --- | --- | --- | --- | --- |
+| 맨 AMI (prod 00:17) | 9초 | 2분 52초 (docker 40초 + pull 1분 53초) | 15초 | 약 3분 22초 |
+| 맨 AMI, 새 user_data (staging 01:02) | - | pull 1분 52초 | - | 약 3분 20초 |
+| 사전 적재 (staging 01:36, 태그 다름 - pull 2초) | 36초 | 1분 11초 | 1분 7초 | 약 2분 50초 |
+| 사전 적재 + 선읽기 (staging 01:47) | 37초 | 1분 20초 | 3분 41초 (선읽기와 경쟁) | 약 5분 28초 |
+| 사전 적재 (staging 01:58) | - | 1분 28초 | 3분 7초 | 약 4분 40초 |
+| 사전 적재 (prod 02:00, 태그 같음 - pull 없음) | 33초 | 1분 6초 | 3분 58초 | 약 5분 34초 |
+
+선읽기(user_data 첫머리에서 docker 레이어의 큰 파일을 백그라운드로 `cat`)는 역효과였다 - 같은 지연 로딩 파이프를
+나눠 써 적재가 선읽기가 끝나는 순간까지 밀렸다. 이 한계를 넘는 길은 Fast Snapshot Restore(스냅샷당 AZ당 시간 요금)
+뿐이고 쓰지 않기로 했다.
+
+남긴 것: `modules/ai-ami`(파이프라인, 레시피, 빌드 역할과 SG - prod 스택, tfvars `ai_ami_pipeline_enabled`)와 user_data의
+"있으면 건너뛰기"(docker, compose 버전 검사). 파이프라인은 FSR을 켜 보거나 가중치를 이미지 밖으로 빼는 날 다시 쓸 수
+있다. 비용은 구운 AMI의 스냅샷(20GiB, 월 1달러 미만)뿐이다 - 되돌림용으로 하나 두고 그 전 것은 등록 해제한다.
+파이프라인을 치우려면 prod tfvars의 `ai_ami_pipeline_enabled`를 false로 apply한다 (AMI는 남는다).
+
+파이프라인 구성과 실행 방법:
+
+| 항목 | 값 |
+| --- | --- |
+| 실행 | `aws imagebuilder start-image-pipeline-execution --image-pipeline-arn "$(terraform -chdir=infra/envs/prod output -raw ai_ami_pipeline_arn)"` (약 20분). 결과는 `list-image-pipeline-images`, 실패 로그는 출력 `ai_ami_build_log_group` |
+| 부모 이미지 | SSM 퍼블릭 파라미터 참조 `ssm:/aws/service/ami-amazon-linux-latest/al2023-ami-kernel-default-x86_64` - 빌드 때마다 그때의 최신 AL2023. Image Builder 관리형 AL2023 이미지는 이 리전에 DOCKER 형식뿐이라 못 쓴다 |
+| 컴포넌트 | `modules/ai-ami/component.yml` - docker 설치, compose 플러그인, SSM `/accentury/prod/IMAGE_TAG`를 읽어 ECR pull, docker 정지. user_data.sh.tftpl의 같은 단계를 옮긴 것이라 두 파일이 같은 결과를 만들어야 한다. 로그인 토큰은 AMI에 남기지 않는다 |
+| 빌드 인스턴스 | c7i.xlarge, prod 퍼블릭 서브넷, 전용 SG(인바운드 없음, 아웃바운드 443만), IMDSv2, 실패 시 종료. `resource_tags`에 `Name`은 예약 키라 못 넣는다 |
+| 빌드 역할 | SSM 코어 + Image Builder 관리형 + ECR 읽기 + `IMAGE_TAG` 1개, 그 밖의 파라미터 읽기는 명시 Deny. `AmazonSSMManagedInstanceCore`가 `ssm:GetParameter`를 `*`에 허용하므로 Allow를 좁히는 것만으로는 경계가 서지 않는다 (Codex 리뷰). ai 호스트 역할도 같은 관리형 정책을 붙이고 있어 같은 틈이 있다 - 별도 티켓 |
+| 루트 볼륨 | 20GiB gp3 암호화 - 호스트 시작 템플릿(40GiB)보다 작아야 띄울 수 있다 |
+| 이미지 테스트 | 끔 (staging instance refresh가 대신한다) |
+| 버전 | `recipe_version`(1.0.0). component.yml이나 레시피 인자를 바꾸면 올린다 - 같은 이름과 버전의 레시피는 다시 못 만든다 |
 
 **교체는 무중단이다.** instance refresh가 `min_healthy_percentage = 100`, `max_healthy_percentage = 200`이라 새
 인스턴스를 먼저 띄운다. 새 인스턴스가 대상 그룹 healthy(모델 적재 완료)가 되고 워밍업 120초가 지난 뒤에야 옛
@@ -1253,6 +1294,46 @@ WAF의 AWS 관리 규칙(KAN-149)은 `/recording`만 제외하고 이 경로에�
 **이 URL은 시크릿이다.** 값을 아는 사람은 누구나 그 채널에 아무 메시지나 쓸 수 있으므로
 (별도 인증이 없다) 레포, 노션, 지라 티켓, 스크린샷 어디에도 적지 않는다. backend 로그도 이 값을
 지운다 (`LogMasking`) - 켜짐 로그는 URL이 아니라 채널 라벨만 찍는다.
+
+### 사투리 텍스트 번역 - Gemini API 키, 번역 기록 버킷, 무료 한도 경보 (KAN-266)
+
+앱의 사투리 번역기(`POST /v0/translations`, 명세서 §3.18)는 backend가 Google Gemini API 무료 등급을 직접 부른다.
+backend SG는 HTTPS 443을 이미 전체로 열어 두어(`modules/network`의 `backend_https_ipv4`) 아웃바운드 추가는 없다.
+Terraform이 만드는 것은 넷이다.
+
+| 자원 | 환경 | 내용 |
+|---|---|---|
+| SSM `ACCENTURY_TRANSLATION_APIKEY` | 둘 다 | SecureString 자리 표시 값(write-only). 값은 apply 뒤에 사람이 넣는다 |
+| SSM `ACCENTURY_TRANSLATION_MODEL` | 둘 다 | tfvars `translation_model`(기본 `gemini-3.5-flash-lite`). 품질이 모자라면 이 값만 바꾼다 |
+| 버킷 `accentury-translator-prompt-<계정 ID>`와 SSM `ACCENTURY_TRANSLATION_RECORDBUCKET`, 태스크 역할 `translations/` PutObject | prod만 | tfvars `translation_records_enabled = true`. 버전 관리 켬, 만료 없음, `prevent_destroy`, 객체 읽기는 IAM 사용자 accentury-cli, jaeyoung, seongju만 |
+| 경보 `accentury-<env>-translation-quota-exhausted` | 둘 다 | `accentury.translation.llm.calls{outcome=rate_limited}`가 5분에 0건을 넘으면 운다 (무료 한도 소진 429) |
+
+**apply와 배포의 순서 제약이 없다.** 키는 `DeploymentConfigGuard`의 필수 목록 밖이라, 키가 없거나 자리 표시 값인
+backend는 번역만 503 `TRANSLATION_UNAVAILABLE`이고 기동 로그에 `번역 API 키가 없다`가 남는다. 기록 버킷 파라미터가
+없는 환경(staging)은 기록 코드가 돌지 않는다.
+
+1. 환경마다 Google AI Studio 프로젝트를 따로 만들고(team2pl1@gmail.com, 결제 수단 연결 안 함) 각 프로젝트에서
+   API 키를 받는다 (2026-10-08 결정 - staging 실증이 prod 무료 한도를 쓰지 않게).
+2. 환경마다 값을 넣고 backend 태스크를 새로 띄운다 (secrets는 태스크 시작 시 한 번 읽힌다). 키는 채팅이나 문서에
+   붙이지 않는다.
+
+   ```
+   aws ssm put-parameter --overwrite --type SecureString \
+     --name /accentury/staging/ACCENTURY_TRANSLATION_APIKEY --value '<staging 프로젝트의 API 키>'
+   aws ssm put-parameter --overwrite --type SecureString \
+     --name /accentury/prod/ACCENTURY_TRANSLATION_APIKEY --value '<prod 프로젝트의 API 키>'
+   aws ecs update-service --cluster accentury-staging --service backend --force-new-deployment
+   aws ecs update-service --cluster accentury-prod    --service backend --force-new-deployment
+   ```
+
+3. 확인 - backend 로그에 `번역 LLM model=gemini-3.5-flash-lite`가 뜨는지 본다. AI Studio의 rate limit 화면에서 실제
+   무료 한도(RPM, RPD)를 확인해 KAN-266에 남기고, 분당 한도에 잠깐 닿는 정도를 허용하려면 monitoring 모듈의
+   `translation_quota_exhausted_threshold`를 올린다.
+4. 끄기 - 키를 자리 표시 리터럴로 되돌리면(`--value 'unset-put-parameter-after-apply'`) 번역만 503이 된다.
+
+**prod 기록 버킷은 지우지 않는다.** `translation_records_enabled`를 false로 바꾸는 apply는 `prevent_destroy` 때문에
+plan이 실패한다 - 그것이 의도다. 기록을 멈추려면 사람이 판단해 state에서 먼저 빼고(버킷과 객체는 남는다) 스위치를 끈다.
+객체 본문에는 계정 ID가 없고 대체 ID만 있다. 대체 ID와 계정의 대응표는 DB `translation_subject`이고 탈퇴가 그 행을 지운다.
 
 ### 앱 계정 인증 - Refresh 저장소 Redis, JWT 키, IdP 값 (KAN-223)
 
@@ -1955,6 +2036,81 @@ CloudWatch 표준 경보는 개당 월 0.10달러, 지표 math 경보(`alb-5xx`)
 `MemoryUsedPercent` 3개 + backend `accentury.*` 약 5개)가 이름당 월 0.30달러로 약 2.40달러다. SNS 이메일 알림은 월 1000건까지 무료다. 두 환경
 합산 월 5달러 안팎이라 상시 켜 둔다. KAN-38이 더하는 몫은 아래 절에 따로 적는다.
 
+### 슬랙 알림 (KAN-273)
+
+이메일과 별도로 AWS Chatbot(콘솔 이름 "Amazon Q Developer in chat applications")이 SNS 토픽을 슬랙 채널로 옮긴다
+(`infra/modules/slack-alerts`). 이메일 토픽(`accentury-{env}-alerts`)에는 Chatbot을 붙이지 않는다 - 붙이면 모든
+경보가 슬랙으로 간다.
+
+| 채널 | 환경 | 내용 | 경로 |
+| --- | --- | --- | --- |
+| `#infra-alerts` | 두 환경 | AI ASG 오토스케일링 확대와 축소, 시작 실패 | ASG 이벤트 -> EventBridge 규칙 3개 -> Lambda `accentury-{env}-scale-notify`(희망 용량 조회) -> `accentury-{env}-slack-infra-alerts` -> Chatbot |
+| `#infra-alerts` | 두 환경 | `ai-disk-high`와 `result-wait-high`(KAN-284)의 ALARM과 OK (이메일도 그대로 간다) | 경보 -> `accentury-{env}-slack-infra-alerts` -> Chatbot |
+| `#daily-user` | prod만 (`voice_report_enabled`) | 응시 현황 리포트, KST 08시부터 24시까지 짝수 정각 | Scheduler -> Lambda `accentury-prod-voice-report` -> `accentury-prod-slack-daily-user` -> Chatbot |
+
+- 배포의 instance refresh(이미지 배포, AMI 교체)가 내는 시작과 종료는 알리지 않는다. 규칙이 이벤트의 `Cause`에
+  `instance refresh`가 들어 있으면 거른다. 시작 실패는 원인과 무관하게 알린다.
+- 메시지 머리의 `[staging]`/`[prod]`로 환경을 구분한다. 두 환경이 `#infra-alerts` 하나를 함께 쓴다.
+- 확대와 축소 알림의 제목은 `[prod] AI 호스트 1대 늘었습니다 (현재: 3대)`처럼 변경 뒤 희망 용량을 붙인다 - 슬랙 배너에는
+  제목만 보인다. 이벤트에는 대수 필드가 없어(Cause 문장 끝 `from 2 to 3`에만 있다) Lambda `scale_notify`가 ASG의
+  `DesiredCapacity`를 조회해 붙이고, 조회가 실패하면 Cause의 숫자로, 그것도 없으면 대수 없이 보낸다. 시작 실패 제목에는
+  붙이지 않는다 (희망 용량은 늘었지만 실제로 늘지 않았다). 문구는 `scale_notify/scale_notify.py`의 `TITLES`다.
+- Chatbot 채널 설정은 서울에 API가 없어 `aws.chatbot` provider(us-east-2)로 만든다. 토픽과 규칙과 Lambda는 서울이다.
+- 슬랙 채널 하나에는 계정당 Chatbot 채널 설정을 하나만 만들 수 있다(2026-10-13 실측, 두 번째는 `has already been configured
+  for AWS account`로 거부). 그래서 prod(`slack_channel_configs_enabled = true`)가 두 채널 설정을 모두 갖고, `#infra-alerts`
+  설정에 staging 토픽(`slack_infra_alerts_peer_envs = ["staging"]`)도 붙인다. staging은 토픽과 규칙, 경보만 만든다.
+  처음 적용도 staging(토픽 생성)이 먼저다.
+  **staging을 부수고 다시 지으면 토픽이 새로 생겨 구독이 끊긴다.** 토픽 ARN은 이름이 같아 그대로이므로 prod plan은
+  "No changes"로 나오고 그냥 apply해서는 복구되지 않는다. prod에서 채널 설정을 다시 만든다:
+
+  ```
+  terraform -chdir=infra/envs/prod apply -replace='module.slack_alerts.aws_chatbot_slack_channel_configuration.infra[0]'
+  ```
+
+  확인은 `aws sns list-subscriptions-by-topic --topic-arn <staging 토픽 ARN>`에 `global.sns-api.chatbot.amazonaws.com` 구독이 있는지다.
+- 채널 역할에는 정책이 없고 가드레일은 `CloudWatchReadOnlyAccess`다. 슬랙에서 AWS 명령을 실행하지 않는다.
+
+**처음 한 번 사람이 하는 일** (Terraform이 못 한다):
+
+1. 슬랙에 `#infra-alerts`와 `#daily-user` 채널을 만든다.
+2. https://us-east-2.console.aws.amazon.com/chatbot/home#/chat-clients 에서 **Configure new client** > Slack을
+   골라 워크스페이스를 승인한다. 콘솔 검색의 "Amazon Q Developer"는 Kiro(코딩 도구) 화면이라 다른 곳이다.
+3. 승인 화면의 워크스페이스 ID와 두 채널 ID(채널 이름 클릭 > 맨 아래)를 `envs/*/variables.tf`의
+   `slack_team_id`, `slack_infra_alerts_channel_id`, `slack_daily_user_channel_id` 기본값에 넣는다. 시크릿이 아니다.
+4. 두 채널에서 `/invite`로 승인한 앱(슬랙에 "Amazon Q" 계열 이름으로 보인다)을 초대한다. 초대 전에는 apply가 성공해도 메시지가 오지 않는다.
+
+**리포트 숫자의 정의** (`voice_report/voice_report.py`). 음성 버킷의 키와 `LastModified`만 본다 - Lambda 역할에는
+`prod/` 접두의 `s3:ListBucket`만 있고 `GetObject`가 없다. 음성 버킷 정책은 List를 거부하지 않으므로 bootstrap은 바꾸지 않는다.
+
+| 값 | 정의 |
+| --- | --- |
+| 동의 세션 | WAV가 하나라도 있다 |
+| 미동의 세션 | `_no-audio` 아래 JSON만 있다 (`_no-audio`에는 미동의 세션의 음성 라벨과 모든 세션의 단어 정오가 함께 쌓인다) |
+| 완주 | 서로 다른 문항(itemId) 수가 그 버전의 기록 문항 수 이상. 기본 7, `gn-2026.10.1`은 3(단어 정오 기록 전), `gn-2026.09.4`는 5 |
+| 진행 중 / 이탈 | 완주 전이고 마지막 객체가 30분(세션 TTL) 안이면 진행 중, 아니면 이탈 |
+| 완주율 | 완주 / (완주 + 이탈) |
+| 구간 소속 | 세션의 첫 객체 시각. 08시 리포트는 00~08시, 00시(24시) 리포트의 "오늘"은 막 끝난 날 |
+
+새 레벨테스트 버전이 7문항이 아니면 `voice_report.py`의 `DEFAULT_ITEMS_PER_VERSION`에 더한다. 세션 시작만 하고
+문항을 하나도 내지 않은 방문자는 S3에 흔적이 없어 세지 않는다.
+
+**확인과 실증**:
+
+```
+# 리포트를 지금 한 번 보내기 (prod)
+aws lambda invoke --function-name accentury-prod-voice-report /dev/stdout
+
+# 디스크 경보를 슬랙에 띄웠다 되돌리기 (이메일도 함께 간다)
+aws cloudwatch set-alarm-state --alarm-name accentury-staging-ai-disk-high --state-value ALARM --state-reason "KAN-273 실증"
+aws cloudwatch set-alarm-state --alarm-name accentury-staging-ai-disk-high --state-value OK --state-reason "KAN-273 실증"
+
+# 스케일 알림 (staging, 수 분 뒤 축소 경보가 다시 1대로 되돌린다)
+aws autoscaling set-desired-capacity --auto-scaling-group-name accentury-staging-ai --desired-capacity 2
+```
+
+끄려면 채널 설정을 지운다(`aws_chatbot_slack_channel_configuration`). 리포트만 끄려면 prod tfvars의
+`voice_report_enabled = false`다. 비용은 EventBridge 규칙과 Scheduler, Lambda(리포트 하루 9회 + 스케일 이벤트마다 1회, 수 초), SNS 모두 무료 한도 안이다.
+
 ## 관측성 지표와 대시보드 (KAN-38)
 
 앞 절이 "서버가 죽었다"를 알린다면 이 절은 **"서버는 살아 있는데 파이프라인이 고장 났다"**를
@@ -1969,11 +2125,11 @@ CloudWatch 표준 경보는 개당 월 0.10달러, 지표 math 경보(`alb-5xx`)
 | 리소스 | 이름 |
 | --- | --- |
 | 대시보드 1개 | `accentury-{env}-ops` (환경 루트의 `terraform output -raw dashboard_url`이 바로가기) |
-| 경보 3종 | `ai-temp-residue`, `analysis-backlog-high`, `analysis-timeouts-high` |
+| 경보 3종 | `ai-temp-residue`, `analysis-backlog-high`, `analysis-timeouts-high` (뒤에 KAN-272가 `analysis-unscorable-high`, KAN-284가 `result-wait-high`를 더했다) |
 | 로그 그룹 1개 | `/accentury/{env}/ai` (KAN-203, 아래 "ai 컨테이너 로그"). backend `/accentury/{env}/backend`는 KAN-165가 만든다 |
 
 경보는 앞 절과 **같은 SNS 토픽**으로 간다. 심각도별 채널을 나누지 않는다 - 3인 팀에 채널이
-여럿이면 어느 쪽도 보지 않게 된다. 모듈 출력 `alarm_names`가 경보 전부를 준다 (KAN-272 뒤 14종).
+여럿이면 어느 쪽도 보지 않게 된다. 모듈 출력 `alarm_names`가 경보 전부를 준다 (KAN-284 뒤 15종).
 
 | 경보 | 지표 | 조건 | 결측 처리 |
 | --- | --- | --- | --- |
@@ -1981,6 +2137,7 @@ CloudWatch 표준 경보는 개당 월 0.10달러, 지표 math 경보(`alb-5xx`)
 | `analysis-backlog-high` | `accentury/backend` `accentury.analysis.processing.value` | 1분 최대 >= 60이 5회 연속 | `notBreaching` |
 | `analysis-timeouts-high` | `accentury.analysis.timeouts.count`의 두 사유(stuck, lost) 합 | 5분 합계 > 5 | `notBreaching` |
 | `analysis-unscorable-high` (KAN-272) | `accentury.analysis.judged.count`의 `reason=unscorable` | 5분 합계 > 5 | `notBreaching` |
+| `result-wait-high` (KAN-284) | `accentury.result.wait.percentile.value` (`phi=0.95`, 단위 ms) | 1분 최대 >= 30초가 3회 연속 (`result_wait_threshold_seconds`) | `notBreaching` |
 
 `analysis-unscorable-high`는 KAN-272에서 더했다. AI가 분석 결과에 NaN을 내는 경우(`ANALYSIS_UNSCORABLE`)는
 계약대로 온 판정이라 회로에 실패로 세지 않고 사용자에게 재녹음만 열린다 - 모델이나 참조 데이터 회귀로 모든
@@ -2500,6 +2657,12 @@ terraform destroy
   파라미터를 읽고 `ignore_changes = [image_id]`로 묶었는데(KAN-36), 손대지 않은 plan에 교체가 끼어드는 것은
   막았지만 최초 생성 시점의 AMI에 영구히 고정돼 OS 보안 업데이트가 들어오지 않았다. 명시하면 plan은 여전히
   조용하고, 갱신은 값 한 줄을 바꾸는 일이 된다 ("AI 호스트 AMI 갱신").
+- **AMI 사전 적재는 만들었지만 쓰지 않는다 (ai 호스트, KAN-285, 2026-10-14)**: 첫 부팅 3분 22초 중 docker 설치와
+  이미지 pull 2분 33초가 매번 같은 일이라 EC2 Image Builder 파이프라인(`modules/ai-ami`, 수동 실행)으로 AMI에 넣어
+  봤다. 두 환경 실측에서 EBS 지연 로딩이 그 이득을 넘어서는 비용(모델 적재 15초 -> 1~4분, 전체 2분 50초~5분 34초)을
+  물려 맨 AMI로 되돌렸다 ("사전 적재 AMI는 쓰지 않는다"). 파이프라인과 user_data의 건너뛰기 로직은 남겨 두었다 -
+  FSR을 켜거나 가중치를 이미지 밖으로 빼는 날 다시 쓴다. AMI ID를 Terraform이 자동으로 읽지 않는 이유는 위 "AMI는
+  tfvars에 명시"와 같다.
 - **PriceClass_200**: 한국이 포함되는 최소 티어.
 - **지표 수집은 Micrometer CloudWatch push (2026-09-05, KAN-38)**: 티켓이 남긴 선택지는
   "레지스트리 push"와 "구조화 로그 기반(Logs Insights)"이었다. push를 택한 이유는 셋이다 -

@@ -1,5 +1,5 @@
 output "parameter_names" {
-  # 음성 저장 파라미터 둘(KAN-201, KAN-269)은 버킷 이름을 넘긴 환경에만 붙는다 - 목록이 곧 태스크 정의 secrets와
+  # 음성 저장 파라미터 둘(KAN-201, KAN-269)과 번역 기록 버킷 파라미터(KAN-266)는 버킷 이름을 넘긴 환경에만 붙는다 - 목록이 곧 태스크 정의 secrets와
   # 실행 역할 허용 목록이라, 저장을 끈 환경의 목록에는 그 이름이 없어야 한다.
   value = concat([
     aws_ssm_parameter.spring_profiles_active.name,
@@ -26,7 +26,10 @@ output "parameter_names" {
     aws_ssm_parameter.apple_team_id.name,
     aws_ssm_parameter.apple_key_id.name,
     aws_ssm_parameter.apple_private_key.name,
-  ], aws_ssm_parameter.training_bucket[*].name, aws_ssm_parameter.training_key_prefix[*].name)
+    aws_ssm_parameter.translation_api_key.name,
+    aws_ssm_parameter.translation_model.name,
+    ], aws_ssm_parameter.training_bucket[*].name, aws_ssm_parameter.training_key_prefix[*].name,
+  aws_ssm_parameter.translation_record_bucket[*].name)
   description = "이 모듈이 만드는 backend용 SSM 파라미터 이름. fargate 모듈이 태스크 정의 secrets와 실행 역할 허용 목록으로 쓴다 (KAN-165). IMAGE_TAG(KAN-128)는 여기 없다."
 }
 

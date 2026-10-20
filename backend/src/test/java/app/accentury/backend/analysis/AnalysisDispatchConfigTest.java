@@ -32,7 +32,7 @@ class AnalysisDispatchConfigTest {
         AnalysisDispatchConfig config = new AnalysisDispatchConfig();
         // 검증이 조립보다 먼저 실행되므로 협력자는 쓰이지 않는다.
         assertThrows(IllegalStateException.class, () -> config.analysisDispatcher(
-                props(Duration.ofSeconds(240)), null, null, null, null, null, null, noStore()));
+                props(Duration.ofSeconds(240)), null, null, null, null, null, null, noStore(), noLearning()));
     }
 
     @Test
@@ -42,7 +42,7 @@ class AnalysisDispatchConfigTest {
         AnalysisDispatcher dispatcher = new AnalysisDispatchConfig().analysisDispatcher(
                 props(Duration.ofSeconds(300)), new ThreadPoolTaskExecutor(), null,
                 new AnalysisBacklog(), TestMetrics.analysisMetrics(meterRegistry), new ObjectMapper(),
-                meterRegistry, noStore());
+                meterRegistry, noStore(), noLearning());
 
         assertInstanceOf(HttpAnalysisDispatcher.class, dispatcher);
         // 회로 상태 게이지가 등록되고 닫힘(0)으로 시작한다 (KAN-36) - CloudWatch 경보 ai-circuit-open의 입력이다.
@@ -57,7 +57,7 @@ class AnalysisDispatchConfigTest {
                 PropertiesFixture.analysis(6, "http://ai.test", Duration.ofSeconds(300), Duration.ofSeconds(85)));
 
         assertThrows(IllegalStateException.class, () -> new AnalysisDispatchConfig().analysisDispatcher(
-                props, null, null, null, null, null, null, noStore()));
+                props, null, null, null, null, null, null, noStore(), noLearning()));
     }
 
     @Test
@@ -111,7 +111,7 @@ class AnalysisDispatchConfigTest {
                 PropertiesFixture.analysis(6, null, Duration.ofSeconds(300), Duration.ofSeconds(1)));
 
         AnalysisDispatcher dispatcher = new AnalysisDispatchConfig().analysisDispatcher(
-                props, null, null, null, null, null, null, noStore());
+                props, null, null, null, null, null, null, noStore(), noLearning());
 
         assertInstanceOf(NoopAnalysisDispatcher.class, dispatcher);
     }
@@ -127,6 +127,15 @@ class AnalysisDispatchConfigTest {
         return new ObjectProvider<>() {
             @Override
             public Stream<TrainingSampleStore> stream() {
+                return Stream.empty();
+            }
+        };
+    }
+
+    private static ObjectProvider<LearningAnalysisSink> noLearning() {
+        return new ObjectProvider<>() {
+            @Override
+            public Stream<LearningAnalysisSink> stream() {
                 return Stream.empty();
             }
         };

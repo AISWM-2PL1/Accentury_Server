@@ -106,6 +106,10 @@ public final class LogMasking {
      * 없다), 애플 SDK 이름 {@code identityToken}, Access JWT 서명 키의 설정 키와 필드와 환경 변수
      * ({@code ACCENTURY_AUTH_JWTSECRET}), Refresh 저장소(Redis) 비밀번호의 환경 변수와 설정 키.
      * <p>
+     * 번역의 Gemini API 키(KAN-266)도 같은 갈래다 - 헤더 {@code x-goog-api-key}(끝의 {@code api-key}가 잡는다), 바인딩된
+     * 필드 {@code apiKey}, 설정 키 {@code api-key}와 {@code accentury.translation.api-key}, 환경 변수
+     * {@code ACCENTURY_TRANSLATION_APIKEY}. 이름 없이 값만 찍힌 형태는 {@link #GOOGLE_API_KEY}가 잡는다.
+     * <p>
      * 따옴표로 열린 값은 <b>닫는 따옴표까지</b> 통째로 받는다 - 공백을 만나면 멈추게 두면
      * {@code "opaque value"} 같은 값의 뒷부분이 로그에 그대로 남고, 열린 따옴표만 닫혀
      * JSON 한 줄이 깨진다. 따옴표가 없으면 예전처럼 공백에서 끊는다 -
@@ -122,7 +126,8 @@ public final class LogMasking {
                     + "|ACCENTURY_FEEDBACK_SLACK_?WEBHOOK_?URL"
                     + "|refreshToken|idToken|accessToken|identityToken"
                     + "|jwtSecret|jwt-secret|accentury\\.auth\\.jwt-secret|ACCENTURY_AUTH_JWT_?SECRET"
-                    + "|SPRING_DATA_REDIS_PASSWORD|spring\\.data\\.redis\\.password)\\b"
+                    + "|SPRING_DATA_REDIS_PASSWORD|spring\\.data\\.redis\\.password"
+                    + "|apiKey|api-key|accentury\\.translation\\.api-key|ACCENTURY_TRANSLATION_API_?KEY)\\b"
                     + "(\"?\\s*[=:]\\s*)(?:\"([^\"\\r\\n]*)\"|([^\\s\",;}]+))");
 
     /**
@@ -140,6 +145,12 @@ public final class LogMasking {
      */
     private static final Pattern SLACK_WEBHOOK = Pattern.compile(
             "https://hooks\\.slack\\.com/[^\\s\",;}]+");
+
+    /**
+     * 구글 API 키 (KAN-266) - {@code AIza}로 시작하는 39자다. 이름 없이 값만 찍힌 경우를 잡는다 (요청 URI에 키를 싣는
+     * 클라이언트 오류 메시지 등). 번역 호출은 키를 헤더로만 보내므로 1차 방어는 코드 쪽이다.
+     */
+    private static final Pattern GOOGLE_API_KEY = Pattern.compile("AIza[0-9A-Za-z_\\-]{35}");
 
     /**
      * 이메일 주소 (KAN-211) - 이용 후기의 선택 입력인 회신 주소가 이 서비스가 받는 유일한
@@ -220,6 +231,7 @@ public final class LogMasking {
                     + (quoted ? "\"***\"" : "***"));
         });
         masked = SLACK_WEBHOOK.matcher(masked).replaceAll("https://hooks.slack.com/***");
+        masked = GOOGLE_API_KEY.matcher(masked).replaceAll("AIza***");
         masked = EMAIL.matcher(masked).replaceAll("***@***");
         masked = LONG_BLOB.matcher(masked)
                 .replaceAll(matchResult -> "***(" + matchResult.group().length() + "자 생략)");

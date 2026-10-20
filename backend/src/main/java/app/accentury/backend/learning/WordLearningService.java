@@ -31,13 +31,15 @@ import java.util.stream.Collectors;
  * 직렬화되므로 (attempt_id, item_id) 유니크 제약은 마지막 안전망이다.
  * <p>
  * <b>쓰기 트랜잭션은 계정 행 잠금으로 시작한다</b> (Codex 리뷰 P2). 인증 단계에서 읽은 계정은 트랜잭션 밖의 스냅샷이라,
- * 그 사이 탈퇴가 커밋되면 파기({@link WordLearningRecords#purge}) 뒤에 새 시도가 들어가 탈퇴한 계정에 학습 기록이 영구히
+ * 그 사이 탈퇴가 커밋되면 파기({@link LearningRecords#purge}) 뒤에 새 시도가 들어가 탈퇴한 계정에 학습 기록이 영구히
  * 남는다 (탈퇴는 계정 행을 지우지 않아 FK가 막지 못한다). 탈퇴({@code WithdrawalService})와 같은 순서(계정 -> 시도)로
  * 잠그므로 교착도 없다 - 시도 행을 먼저 잠그고 오답 INSERT의 FK 검사가 계정 행을 기다리면, 계정을 잠근 채 시도 행을
  * 지우려는 탈퇴와 서로 기다린다. 탈퇴가 먼저 커밋됐으면 401 {@code AUTH_TOKEN_INVALID}다 (§2.1의 계정 확인과 같다).
  * <p>
  * 시각은 마이크로초로 자른다 - 열이 {@code timestamp(6)}라 나노초가 있는 플랫폼(Linux)에서는 메모리의 값과 DB에서 다시
  * 읽은 값이 달라져 "완료 재호출은 같은 본문"(§3.16)이 깨진다 (Codex 리뷰 P2).
+ * <p>
+ * 세트가 처음 완료로 바뀌면 커밋 뒤에 그날 출석을 남긴다 ({@link LearningAttendance}, KAN-286).
  * <p>
  * 로그에는 시도 id, 세트 id, 문항 id만 남긴다 - 고른 보기와 정오는 남기지 않는다 (§2.6의 취지).
  */
@@ -53,11 +55,12 @@ public class WordLearningService {
     private final WordWrongAnswerRepository wrongAnswers;
     private final TransactionTemplate transactionTemplate;
     private final RateLimits rateLimits;
+    private final LearningAttendance attendance;
 
     public WordLearningService(WordLearningRegistry registry, AppUserRepository users,
                                WordSetAttemptRepository attempts, WordAttemptAnswerRepository answers,
                                WordWrongAnswerRepository wrongAnswers, TransactionTemplate transactionTemplate,
-                               RateLimits rateLimits) {
+                               RateLimits rateLimits, LearningAttendance attendance) {
         this.registry = registry;
         this.users = users;
         this.attempts = attempts;
@@ -65,11 +68,7 @@ public class WordLearningService {
         this.wrongAnswers = wrongAnswers;
         this.transactionTemplate = transactionTemplate;
         this.rateLimits = rateLimits;
-    }
-
-    /** 세트 목록 (W-1) - 현재 발행본. 완료 표시와 추천은 KAN-268이다. */
-    WordSetListResponse listSets() {
-        return registry.current().listResponse();
+        this.attendance = attendance;
     }
 
     /** 세트 상세 (W-2, W-3) - 정답과 해설 없음. 없는 세트는 404. */
@@ -175,11 +174,24 @@ public class WordLearningService {
         }));
         if (completed.transitioned()) {
             log.info("단어 학습 세트 완료 attemptId={} setId={}", attemptId, completed.response().setId());
+            recordAttendance(user.id(), attemptId, completed.response().completedAt());
         }
         return completed.response();
     }
 
     private record Completed(boolean transitioned, WordAttemptResultResponse response) {
+    }
+
+    /**
+     * 완료 커밋 뒤의 출석 기록 (KAN-286) - 트랜잭션 안에서 넣지 않는 이유는 {@link LearningAttendance}에 있다. 실패해도
+     * 완료 응답은 그대로다.
+     */
+    private void recordAttendance(UUID userId, String attemptId, Instant completedAt) {
+        try {
+            attendance.record(userId, completedAt);
+        } catch (RuntimeException e) {
+            log.warn("출석 기록 실패 attemptId={}", attemptId, e);
+        }
     }
 
     /**

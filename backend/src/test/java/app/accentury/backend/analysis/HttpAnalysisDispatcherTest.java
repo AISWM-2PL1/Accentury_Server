@@ -885,6 +885,95 @@ class HttpAnalysisDispatcherTest extends IntegrationTest {
         }
     }
 
+    // === 억양 학습 채점 (KAN-267) - 같은 큐로 들어와 결과만 학습 시도에 적는다 ===
+
+    @Test
+    void 학습_요청의_성공은_학습_기록에_order_항목과_함께_적히고_레벨테스트_기록과_샘플은_건드리지_않는다() {
+        List<AiAnalysisClient.OrderSegment> orders =
+                List.of(new AiAnalysisClient.OrderSegment("끓일라고", "끓", "라", 0.8));
+        ScriptedClient client = new ScriptedClient()
+                .then(new AiAnalysisClient.Completed(95, "OK", "track1-test", "sv-0.5", orders));
+        RecordingStore store = new RecordingStore();
+        RecordingSink sink = new RecordingSink();
+        byte[] audio = {1, 2, 3};
+        long jobsBefore = repository.count();
+
+        learningDispatcher(client, store, sink).dispatch(AnalysisDispatcher.AnalysisRequest.forLearning(
+                "la_1", "ic01c01", "1|10", "in-gn-2026.10.1", "sv-0.5", "GYEONGNAM", 3000, CONSENT, audio));
+
+        assertEquals(List.of("start la_1", "complete la_1 95"), sink.events);
+        assertEquals(orders, sink.completed.orderSegments());
+        // 음성 저장은 상태 전이 뒤, 버퍼를 지우기 전이다 - 저장 시점에는 원본이 살아 있었다.
+        assertArrayEquals(new byte[] {1, 2, 3}, sink.audioSeen);
+        assertArrayEquals(new byte[] {0, 0, 0}, audio);
+        assertTrue(store.samples.isEmpty(), "학습 요청이 레벨테스트 학습 샘플로 저장됐다");
+        assertEquals(jobsBefore, repository.count());
+    }
+
+    @Test
+    void 학습_요청의_판정_실패와_재전송_소진은_학습_기록에_실패로_적힌다() {
+        RecordingSink sink = new RecordingSink();
+        ScriptedClient client = new ScriptedClient()
+                .then(AiAnalysisClient.Rejected.judged("ANALYSIS_MISREAD", true))
+                .then(new AiAnalysisClient.AiUnavailableException("연결 실패",
+                        AiAnalysisClient.AiUnavailableException.Kind.UNREACHED, null));
+        HttpAnalysisDispatcher dispatcher = learningDispatcher(client, new RecordingStore(), sink);
+
+        dispatcher.dispatch(learningRequest("la_misread"));
+        dispatcher.dispatch(learningRequest("la_unreached"));
+
+        assertEquals(List.of("start la_misread", "fail la_misread RETRYABLE_FAILED ANALYSIS_MISREAD",
+                "start la_unreached", "fail la_unreached RETRYABLE_FAILED ANALYSIS_UNAVAILABLE"), sink.events);
+    }
+
+    /** 학습 기록을 받아 적는 가짜 - 순서와 인자를 문자열로 남긴다. */
+    private static final class RecordingSink implements LearningAnalysisSink {
+        final List<String> events = new ArrayList<>();
+        AiAnalysisClient.@Nullable Completed completed;
+        byte @Nullable [] audioSeen;
+
+        @Override
+        public boolean start(String jobId) {
+            events.add("start " + jobId);
+            return true;
+        }
+
+        @Override
+        public boolean complete(String jobId, AiAnalysisClient.Completed completed) {
+            events.add("complete " + jobId + " " + completed.intonationScore());
+            this.completed = completed;
+            return true;
+        }
+
+        @Override
+        public void fail(String jobId, AnalysisJobStatus failedStatus, String errorCode) {
+            events.add("fail " + jobId + " " + failedStatus + " " + errorCode);
+        }
+
+        @Override
+        public int failAll(java.util.Collection<String> jobIds, AnalysisJobStatus failedStatus, String errorCode) {
+            jobIds.forEach(id -> events.add("fail " + id + " " + failedStatus + " " + errorCode));
+            return jobIds.size();
+        }
+
+        @Override
+        public void keepVoice(AnalysisDispatcher.AnalysisRequest request, AiAnalysisClient.@Nullable Outcome outcome,
+                              String correlationId) {
+            audioSeen = request.audio().clone();
+        }
+    }
+
+    private static AnalysisDispatcher.AnalysisRequest learningRequest(String attemptId) {
+        return AnalysisDispatcher.AnalysisRequest.forLearning(attemptId, "ic01c01", "1|10", "in-gn-2026.10.1",
+                "sv-0.5", null, 3000, null, new byte[] {1, 2, 3});
+    }
+
+    private HttpAnalysisDispatcher learningDispatcher(AiAnalysisClient client, TrainingSampleStore store,
+                                                      LearningAnalysisSink sink) {
+        return new HttpAnalysisDispatcher(client, new SyncTaskExecutor(), transitions, new AnalysisBacklog(),
+                openCircuitNever(), TestMetrics.analysisMetrics(), store, sink, 0, 0);
+    }
+
     private HttpAnalysisDispatcher dispatcher(AiAnalysisClient client, int retries, TrainingSampleStore store) {
         return new HttpAnalysisDispatcher(client, new SyncTaskExecutor(), transitions,
                 new AnalysisBacklog(), openCircuitNever(), TestMetrics.analysisMetrics(), store, retries, 0);

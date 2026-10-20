@@ -126,3 +126,13 @@ output "training_key_prefix" {
   value       = var.training_bucket_enabled ? var.env : null
   description = "음성 버킷 안에서 이 환경이 쓰는 키 접두사 (KAN-269). 샘플 확인: aws s3 ls s3://<training_bucket>/<이 값>/ --recursive"
 }
+
+output "ai_ami_pipeline_arn" {
+  value       = one(module.ai_ami[*].pipeline_arn)
+  description = "AI 호스트 AMI 사전 적재 파이프라인 ARN (KAN-285). ai_ami_pipeline_enabled인 환경(prod)만 값이 있다. 실행: aws imagebuilder start-image-pipeline-execution --image-pipeline-arn <이 값>"
+}
+
+output "ai_ami_build_log_group" {
+  value       = one(module.ai_ami[*].image_log_group_name)
+  description = "AMI 빌드 로그 그룹 (KAN-285). 빌드 실패 원인은 여기부터 본다."
+}

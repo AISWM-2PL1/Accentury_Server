@@ -18,6 +18,7 @@ import java.util.function.UnaryOperator;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -186,6 +187,58 @@ class TestDefinitionRegistryTest {
                 item -> new TestDefinition.Item(item.itemId(), item.seq(), item.type(), item.prompt(),
                         null, item.guideF0(), null, null));
         assertRejected(partial, "전부 없어야");
+    }
+
+    // === KAN-282 - emotion: 정의 단위 all-or-nothing, VOICE 전용 ===
+
+    @Test
+    void emotion이_없는_기존_정의는_그대로_발행된다() {
+        // gn-2026.10.1까지의 발행본에는 emotion이 없다 - 발행 후 불변(§5.4)을 지키려면 새 검증이 기존 행을 깨뜨리면 안 된다.
+        TestDefinitionRegistry.validate(withEmotions(pool(7), false));
+    }
+
+    @Test
+    void 전_음성_문항에_emotion이_있는_정의는_발행된다() {
+        TestDefinitionRegistry.validate(withEmotions(withScriptKeys(pool(7), true), true));
+    }
+
+    @Test
+    void 일부_음성_문항에만_emotion이_있으면_발행_거부다() {
+        TestDefinition partial = withItem(withEmotions(pool(7), true), "v2",
+                item -> new TestDefinition.Item(item.itemId(), item.seq(), item.type(), item.prompt(),
+                        item.scriptKey(), item.guideF0(), null, null, null));
+        assertRejected(partial, "emotion은 전 음성 문항에 있거나 전부 없어야 한다");
+    }
+
+    @Test
+    void emotion이_공백이면_발행_거부다() {
+        TestDefinition blank = withItem(withEmotions(pool(7), true), "v2",
+                item -> new TestDefinition.Item(item.itemId(), item.seq(), item.type(), item.prompt(),
+                        item.scriptKey(), item.guideF0(), null, null, " "));
+        assertRejected(blank, "emotion이 비어 있다: v2");
+    }
+
+    @Test
+    void 어휘_문항에_emotion이_있으면_발행_거부다() {
+        TestDefinition leaked = withItem(withEmotions(pool(7), true), "w1",
+                item -> new TestDefinition.Item(item.itemId(), item.seq(), item.type(), item.prompt(),
+                        null, null, item.choices(), item.correctChoiceId(), "궁금한"));
+        assertRejected(leaked, "VOCABULARY 문항에 음성 필드가 있다: w1");
+    }
+
+    @Test
+    void 세트_유도는_emotion을_그대로_옮긴다() {
+        // 세트 문항은 풀 문항 그대로고 바뀌는 것은 seq뿐이다 - emotion도 scriptKey, guideF0처럼 따라간다.
+        TestDefinition pool = withEmotions(pool(7), true);
+        for (TestDefinition set : VoiceSets.derive(pool)) {
+            for (TestDefinition.Item item : set.items()) {
+                if (item.type() == TestDefinition.ItemType.VOICE) {
+                    assertEquals("궁금한 " + item.itemId(), item.emotion(), "세트의 " + item.itemId());
+                } else {
+                    assertNull(item.emotion(), "어휘 문항 " + item.itemId());
+                }
+            }
+        }
     }
 
     @Test
@@ -645,6 +698,17 @@ class TestDefinitionRegistryTest {
                         : new TestDefinition.Item(item.itemId(), item.seq(), item.type(), item.prompt(),
                                 present ? "1|" + item.itemId().substring(1) : null,
                                 item.guideF0(), null, null))
+                .toList();
+        return withItems(base, items);
+    }
+
+    /** 음성 문항마다 서로 다른 emotion("궁금한 v1" 꼴)을 넣거나 전부 뺀 사본 - 어휘 문항은 그대로다. */
+    private static TestDefinition withEmotions(TestDefinition base, boolean present) {
+        List<TestDefinition.Item> items = base.items().stream()
+                .map(item -> item.type() != TestDefinition.ItemType.VOICE ? item
+                        : new TestDefinition.Item(item.itemId(), item.seq(), item.type(), item.prompt(),
+                                item.scriptKey(), item.guideF0(), null, null,
+                                present ? "궁금한 " + item.itemId() : null))
                 .toList();
         return withItems(base, items);
     }

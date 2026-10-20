@@ -109,6 +109,10 @@ public interface AnalysisDispatcher {
      *                  남기지 않는다.
      * @param audio     WAV 원본 - 클라이언트 업로드를 그대로 패스스루한다 (§4.1).
      *                  소유권은 {@code dispatch()}로 넘어간다 (위 계약 참조).
+     * @param purpose   어느 기록에 결과를 쓰는가 (KAN-267) - 레벨테스트는 {@code analysis_job}, 억양 학습 채점은
+     *                  {@code intonation_learning_attempt}다. 학습 채점은 세션이 없어 {@code analysisJobId}와
+     *                  {@code sessionId} 자리에 둘 다 시도 id를 싣고, {@code itemId}는 카드 id, {@code testVersion}은
+     *                  발행본 버전이다 (§3.19). AI 호출과 재전송, 회로, 큐는 두 용도가 같다.
      */
     record AnalysisRequest(
             String analysisJobId,
@@ -121,7 +125,40 @@ public interface AnalysisDispatcher {
             long durationMs,
             @Nullable VoiceConsent voiceConsent,
             boolean labelOnlyWithoutConsent,
-            byte[] audio) {
+            byte[] audio,
+            Purpose purpose) {
+
+        /** 분석 결과를 쓸 기록의 종류 (KAN-267). */
+        public enum Purpose {
+            /** 레벨테스트 문항 - {@code analysis_job} (§3.3). */
+            LEVEL_TEST,
+            /** 억양 학습 카드 - {@code intonation_learning_attempt} (§3.19). */
+            LEARNING
+        }
+
+        /** 레벨테스트 요청 (KAN-267 이전 모양). */
+        public AnalysisRequest(String analysisJobId, String sessionId, String itemId, @Nullable String scriptKey,
+                               String testVersion, String scoreVersion, @Nullable String region, long durationMs,
+                               @Nullable VoiceConsent voiceConsent, boolean labelOnlyWithoutConsent, byte[] audio) {
+            this(analysisJobId, sessionId, itemId, scriptKey, testVersion, scoreVersion, region, durationMs,
+                    voiceConsent, labelOnlyWithoutConsent, audio, Purpose.LEVEL_TEST);
+        }
+
+        /**
+         * 억양 학습 채점 요청 (KAN-267, §3.19). 세션이 없어 시도 id가 작업 id와 세션 id 자리를 함께 맡는다.
+         * 동의가 없으면 아무것도 남기지 않는다 - 학습에는 라벨 전용 저장이 없다 (2026-10-10 결정).
+         */
+        public static AnalysisRequest forLearning(String attemptId, String cardId, String scriptKey,
+                                               String contentVersion, String scoreVersion, @Nullable String region,
+                                               long durationMs, @Nullable VoiceConsent voiceConsent, byte[] audio) {
+            return new AnalysisRequest(attemptId, attemptId, cardId, scriptKey, contentVersion, scoreVersion, region,
+                    durationMs, voiceConsent, false, audio, Purpose.LEARNING);
+        }
+
+        /** 억양 학습 채점 요청인가 (KAN-267). */
+        public boolean learning() {
+            return purpose == Purpose.LEARNING;
+        }
 
         /** 음성 저장 동의가 없는 계정 세션 모양의 요청 - 아무것도 남지 않는다 (KAN-269). */
         public AnalysisRequest(String analysisJobId, String sessionId, String itemId, @Nullable String scriptKey,

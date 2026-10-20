@@ -245,3 +245,42 @@ variable "analysis_unscorable_threshold" {
     error_message = "analysis_unscorable_threshold는 0 이상이어야 합니다."
   }
 }
+
+variable "translation_quota_exhausted_threshold" {
+  type        = number
+  description = "5분 동안 허용하는 Gemini 무료 한도 소진(429) 응답 수 (KAN-266). 기본 0이라 한 번이라도 오면 운다 - 무료 등급에서 429는 그 시각의 번역이 전부 503이라는 뜻이다. AI Studio에서 실제 한도(RPM, RPD)를 확인하고 분당 한도에 잠깐 닿는 정도를 허용하려면 올린다."
+  default     = 0
+
+  validation {
+    condition     = var.translation_quota_exhausted_threshold >= 0
+    error_message = "translation_quota_exhausted_threshold는 0 이상이어야 합니다."
+  }
+}
+
+variable "result_wait_threshold_seconds" {
+  type        = number
+  description = "결과 화면 대기 P95 상한(초, KAN-284). 초기값 30은 혼잡 시 pollAfterMs 상한(60초, KAN-272)의 절반이다. 운영 1주 뒤 실측 분포로 다시 정한다."
+  default     = 30
+
+  validation {
+    condition     = var.result_wait_threshold_seconds >= 1
+    error_message = "result_wait_threshold_seconds는 1 이상이어야 합니다."
+  }
+}
+
+variable "result_wait_evaluation_periods" {
+  type        = number
+  description = "result-wait-high가 요구하는 연속 위반 분 수. 한 세션의 긴 대기로는 서지 않을 만큼."
+  default     = 3
+
+  validation {
+    condition     = var.result_wait_evaluation_periods >= 1
+    error_message = "result_wait_evaluation_periods는 1 이상이어야 합니다."
+  }
+}
+
+variable "slack_alarm_topic_arns" {
+  type        = list(string)
+  description = "ai-disk-high(KAN-273)와 result-wait-high(KAN-284)의 ALARM과 OK를 이메일에 더해 보낼 SNS 토픽 (slack-alerts 모듈의 #infra-alerts 토픽). 다른 경보에는 걸지 않는다."
+  default     = []
+}

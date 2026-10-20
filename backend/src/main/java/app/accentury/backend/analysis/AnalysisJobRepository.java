@@ -29,8 +29,14 @@ public interface AnalysisJobRepository extends JpaRepository<AnalysisJob, String
      * 서버측 프리페어드 문장의 범용 계획을 고르는 순간 매개변수가 인덱스 조건을 함의한다는 것을
      * 증명하지 못해 부분 인덱스가 후보에서 빠지고, 24시간치 종결 행을 매초 전체 스캔하게 된다.
      * 조건이 문장에 박혀 있으면 계획기가 항상 부분 인덱스를 본다.
+     * <p>
+     * 억양 학습 채점 시도(KAN-267, V13)의 PROCESSING도 더한다 - 같은 전달 큐를 나눠 쓰므로 레벨테스트의 대기를
+     * 실제로 늘린다 (2026-10-10 결정). 그 표도 같은 모양의 부분 인덱스가 있다.
      */
-    @Query(value = "select count(*) from analysis_job where status = 'PROCESSING'", nativeQuery = true)
+    @Query(value = """
+            select (select count(*) from analysis_job where status = 'PROCESSING')
+                 + (select count(*) from intonation_learning_attempt where status = 'PROCESSING')
+            """, nativeQuery = true)
     long countProcessing();
 
     /**
@@ -38,10 +44,14 @@ public interface AnalysisJobRepository extends JpaRepository<AnalysisJob, String
      * (§3.4의 {@code queue.ahead}, KAN-272).
      * <p>
      * 위 {@link #countProcessing()}과 같은 이유로 상태 조건을 문장에 박는다 - 부분 인덱스로 PROCESSING
-     * 몇십 건만 집은 뒤 접수 시각으로 거른다. 혼잡 판정이 켜진 폴링에서만 나가는 조회다.
+     * 몇십 건만 집은 뒤 접수 시각으로 거른다. 혼잡 판정이 켜진 폴링에서만 나가는 조회다. 먼저 접수된 억양 학습
+     * 채점 시도도 센다 (KAN-267, 같은 큐).
      */
-    @Query(value = "select count(*) from analysis_job where status = 'PROCESSING' and created_at < :before",
-            nativeQuery = true)
+    @Query(value = """
+            select (select count(*) from analysis_job where status = 'PROCESSING' and created_at < :before)
+                 + (select count(*) from intonation_learning_attempt
+                     where status = 'PROCESSING' and created_at < :before)
+            """, nativeQuery = true)
     long countProcessingCreatedBefore(@Param("before") Instant before);
 
     /** 멱등 재전송 판별 (§5.2) - 유니크 제약과 같은 키 조합의 단건 조회 */

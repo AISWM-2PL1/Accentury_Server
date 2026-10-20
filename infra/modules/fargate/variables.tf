@@ -197,3 +197,9 @@ variable "training_key_prefix" {
     error_message = "training_bucket_arn이 있으면 training_key_prefix(환경 이름)도 있어야 합니다 (KAN-269)."
   }
 }
+
+variable "translation_record_bucket_arn" {
+  type        = string
+  description = "번역 기록 버킷 ARN (KAN-266 - accentury-translator-prompt-<계정 ID>, prod만). 값이 있으면 태스크 역할에 그 버킷의 translations/ 아래로 한정한 s3:PutObject 문장이 생긴다 - Get, List, Delete는 없다. null이면 문장 자체가 없다."
+  default     = null
+}

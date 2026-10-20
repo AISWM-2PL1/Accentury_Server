@@ -79,6 +79,15 @@ class TrainingConfig {
      * 단어 정오 기록의 대기 상한 (KAN-276). 기록 1건은 작은 PutObject 하나라 스레드 하나로 충분하다. S3가 멈춰도
      * 대기열이 이 수를 넘으면 버리므로 메모리가 자라지 않는다 - 응시 7문항 중 단어 4문항이라 1000건은 세션 250개다.
      */
+    /** 억양 학습 녹음의 음성 저장 (KAN-267, §3.19) - 레벨테스트 음성과 같은 버킷, 같은 환경 접두의 {@code _learning} 트리다. */
+    @Bean
+    LearningVoiceStore learningVoiceStore(S3Client trainingS3Client, AccenturyProperties properties,
+                                          TrainingVoiceOwners owners, VoiceConsents consents,
+                                          ObjectMapper objectMapper, MeterRegistry meterRegistry) {
+        return new S3LearningVoiceStore(trainingS3Client, requireBucket(properties), requireKeyPrefix(properties),
+                owners, consents, objectMapper, Clock.systemUTC(), meterRegistry);
+    }
+
     static final int VOCAB_ANSWER_QUEUE_CAPACITY = 1000;
 
     /**

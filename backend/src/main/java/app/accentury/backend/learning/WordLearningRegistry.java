@@ -44,7 +44,8 @@ public class WordLearningRegistry {
      *
      * @param definition   정답 포함 원본 - 채점의 정본
      * @param sets         setId로 찾는 세트
-     * @param listResponse 세트 목록 응답 (§3.16) - 발행본이 불변이라 한 번 만든다
+     * @param listResponse 세트 목록 응답 (§3.16) - 발행본이 불변이라 한 번 만든다. 진도는 비어 있다 (계정마다
+     *                     {@link LearningProgress}가 채운다)
      * @param setResponses setId별 상세 응답 - 정답과 해설을 뺀 것
      */
     public record Published(WordLearningDefinition definition, Map<String, WordLearningDefinition.Set> sets,
@@ -122,8 +123,8 @@ public class WordLearningRegistry {
         Map<String, WordLearningDefinition.Set> sets = new LinkedHashMap<>();
         Map<String, WordSetResponse> responses = new LinkedHashMap<>();
         List<WordSetListResponse.Summary> summaries = ordered.stream()
-                .map(set -> new WordSetListResponse.Summary(set.setId(), set.seq(), set.level(), set.category(),
-                        set.title(), set.cards().size(), set.items().size()))
+                .map(set -> WordSetListResponse.Summary.unstarted(set.setId(), set.seq(), set.level(),
+                        set.category(), set.title(), set.cards().size(), set.items().size()))
                 .toList();
         for (WordLearningDefinition.Set set : ordered) {
             sets.put(set.setId(), set);
