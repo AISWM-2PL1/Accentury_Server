@@ -738,20 +738,47 @@ def _worker_main(argv: list[str]) -> int:
     return 0
 
 
+#: 전달본이 쓰는 옛 단계 이름 -> KAN-204 합의 이름 (KAN-293).
+#:
+#: 2026-10-24에 ECR ``ai-model:26ac67a``의 ``serve.py``를 꺼내 보니 ``score()``가 이미
+#: ``detail.stageMs = {"stt", "mfa", "score"}``(ms)를 돌려주고 있었다. 이름이 합의와 달라 어댑터가
+#: 전부 버리고 있었던 것이고, 이 표가 그 간극을 메운다. 전달본이 합의 이름 다섯으로 바꿔 올리면
+#: 이 표는 더 쓰이지 않는다 (옛 ``score``는 F0 추출까지 합친 값이라 ``scoring``으로 보낸다).
+_LEGACY_MODEL_STAGES = {"stt": "transcribe", "mfa": "align", "score": "scoring"}
+
+
 def _stage_ms(envelope: Any) -> Any:
-    """전달본이 실은 단계 시간 dict를 봉투에서 **덜어 낸다** (KAN-204).
+    """전달본이 실은 단계 시간 dict를 봉투에서 꺼낸다 (KAN-204, KAN-293).
 
     합의한 인터페이스는 봉투 안의 ``stageMs``이고, 값은 단계 이름 -> ms다 (이름은
-    :data:`app.stages.MODEL_STAGES`). 덜어 내는 이유는 그 값이 §4.1 봉투에 없는 값이라서다 -
+    :data:`app.stages.MODEL_STAGES`). 최상위 ``stageMs``는 **덜어 낸다** - §4.1 봉투에 없는 값이라
     그대로 두면 어댑터가 봉투를 옮기는 자리(:meth:`Track1Engine._outcome_of`)와 계약 스위트가
     보는 것이 조금씩 갈린다.
 
-    전달본이 아직 이 값을 돌려주지 않으므로 지금은 언제나 ``None``이다. 인터페이스만 먼저
-    열어 두고, 전달본이 채우기 시작하면 어댑터도 지표도 고칠 것이 없다.
+    전달본이 실제로 싣는 자리는 ``detail.stageMs``다 (KAN-293). 최상위가 없으면 거기서 읽고,
+    둘 다 있으면 최상위가 우선이다. ``detail``은 원래 봉투에 실려 가던 값이라 건드리지 않는다 -
+    부모의 :meth:`Track1Engine._outcome_of`가 읽지 않는 자리다.
+
+    이름은 :data:`_LEGACY_MODEL_STAGES`로 옮긴다. 합의 이름이 이미 있으면 옛 이름은 그것을 덮지
+    않는다. 목록에 없는 이름을 버리는 것과 dict가 아닌 값에 경고하는 것은 부모의
+    :meth:`app.stages.StageRecord.merge` 몫이다 - 여기서 하면 워커가 로그 자리를 둘로 가른다.
     """
-    if isinstance(envelope, dict):
-        return envelope.pop("stageMs", None)
-    return None
+    if not isinstance(envelope, dict):
+        return None
+    values = envelope.pop("stageMs", None)
+    if values is None:
+        detail = envelope.get("detail")
+        if isinstance(detail, Mapping):
+            values = detail.get("stageMs")
+    if not isinstance(values, Mapping):
+        return values
+    renamed: dict[str, Any] = {}
+    for stage, ms in values.items():
+        target = _LEGACY_MODEL_STAGES.get(stage, stage) if isinstance(stage, str) else stage
+        if target in renamed and target != stage:
+            continue
+        renamed[target] = ms
+    return renamed
 
 
 def _non_finite_fields(envelope: Any) -> list[str]:

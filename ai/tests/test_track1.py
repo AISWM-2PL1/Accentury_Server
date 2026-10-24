@@ -71,7 +71,9 @@ class Track1Scorer:
         self.sentences = {{"1|5": {{"대본": "내일 잔치가 있어서"}}, "slow": {{"대본": "느린 문장"}},
                           "broken": {{"대본": "참조가 빠진 문장"}},
                           "nan": {{"대본": "채점 값이 NaN이 되는 문장"}},
-                          "set": {{"대본": "직렬화할 수 없는 값이 섞이는 문장"}}}}
+                          "set": {{"대본": "직렬화할 수 없는 값이 섞이는 문장"}},
+                          "legacy": {{"대본": "단계 시간이 detail에 옛 이름으로 있는 문장"}},
+                          "both": {{"대본": "단계 시간이 최상위와 detail에 둘 다 있는 문장"}}}}
 
     def score(self, wav, script_key, transcript=None, with_feedback=True):
         if script_key not in self.sentences:
@@ -101,6 +103,23 @@ class Track1Scorer:
             # NaN이 아닌 직렬화 실패 - 이쪽은 여전히 모델 내부 오류(500)다
             return {{"status": "OK", "intonationScore": 87, "confidence": 0.9,
                     "quality": {{"code": "OK"}}, "segments": [{{"kind": object()}}]}}
+        if script_key == "legacy":
+            # 진짜 전달본(ai-model:26ac67a serve.py)의 모양 - 단계 시간이 최상위가 아니라 detail 안에,
+            # 합의 이름이 아니라 stt, mfa, score로 있다 (KAN-293). detail의 나머지도 그대로 실린다
+            return {{
+                "status": "OK", "intonationScore": 87, "confidence": 0.9, "quality": {{"code": "OK"}},
+                "segments": [], "modelVersion": self.model_version, "processingMs": 9600,
+                "detail": {{"scriptKey": script_key, "scoreW": 1.0,
+                           "stageMs": {{"stt": 7000, "mfa": 2000, "score": 500, "낯선것": 1}}}},
+            }}
+        if script_key == "both":
+            # 최상위와 detail에 둘 다 있으면 최상위가 우선이다 (KAN-293)
+            return {{
+                "status": "OK", "intonationScore": 87, "confidence": 0.9, "quality": {{"code": "OK"}},
+                "segments": [], "modelVersion": self.model_version, "processingMs": 9600,
+                "stageMs": {{"transcribe": 40.0}},
+                "detail": {{"stageMs": {{"stt": 7000, "mfa": 2000}}}},
+            }}
         return {{
             "status": "OK",
             "intonationScore": 87,
@@ -572,6 +591,53 @@ def test_요청마다_단계_시간과_콜드_웜이_적힌다(tmp_path, transfe
     assert 단계["model"] > 0
     assert 첫째.warm == "cold"
     assert 둘째.warm == "warm"
+
+
+def test_전달본이_detail에_옛_이름으로_실은_단계_시간을_합의_이름으로_받는다(tmp_path, transfer):
+    """진짜 전달본은 ``detail.stageMs = {stt, mfa, score}``를 돌려준다 (KAN-293).
+
+    어댑터가 최상위 ``stageMs``만 봐서 2026-10-24까지 prod에 안쪽 단계가 0건이었던 자리다. 워커가
+    detail에서 읽어 옛 이름을 합의 이름으로 옮기고, 목록에 없는 이름은 부모가 버린다.
+    """
+    settings = _settings(tmp_path, transfer)
+    engine = Track1Engine(settings)
+
+    async def scenario():
+        await engine.warm_up()
+        request = _request(settings, script_key="legacy")
+        try:
+            outcome = await engine.analyze(request)
+        finally:
+            await engine.close()
+        return outcome, request.stages
+
+    outcome, stages = asyncio.run(scenario())
+
+    assert outcome.status == "OK"
+    단계 = dict(stages.items())
+    assert set(단계) == {"lockWait", "model", "transcribe", "align", "scoring"}
+    assert 단계["transcribe"] == 7000
+    assert 단계["align"] == 2000
+    assert 단계["scoring"] == 500
+
+
+def test_최상위_stageMs가_detail의_단계_시간보다_우선한다(tmp_path, transfer):
+    """전달본이 합의 인터페이스(최상위)로 바꿔 올리면 detail 쪽은 더 읽지 않는다 (KAN-293)."""
+    settings = _settings(tmp_path, transfer)
+    engine = Track1Engine(settings)
+
+    async def scenario():
+        await engine.warm_up()
+        request = _request(settings, script_key="both")
+        try:
+            await engine.analyze(request)
+        finally:
+            await engine.close()
+        return request.stages
+
+    단계 = dict(asyncio.run(scenario()).items())
+    assert set(단계) == {"lockWait", "model", "transcribe"}
+    assert 단계["transcribe"] == 40.0
 
 
 def test_재적재를_기다린_요청만_적재_대기를_적는다(tmp_path, transfer):
