@@ -36,8 +36,9 @@ log = logging.getLogger(__name__)
 
 #: 전달본(``Track1Scorer.score``) **안쪽** 단계 - 어댑터에서는 잴 수 없다 (KAN-204 요구사항).
 #:
-#: 워커 결과 JSON의 ``stageMs``로 받는다 (:meth:`StageRecord.merge`). 전달본이 그 값을 돌려주기
-#: 전까지 이 다섯은 비어 있고, 어댑터가 재는 바깥 구간만 올라간다.
+#: 워커 결과 JSON의 ``stageMs``로 받는다 (:meth:`StageRecord.merge`). 전달본은 이 값을 봉투의
+#: ``detail.stageMs``에 옛 이름(``stt``, ``mfa``, ``score``)으로 싣고 있어 워커가 이 이름으로 옮긴다
+#: (KAN-293, ``app.track1._stage_ms``). ``f77011c``부터는 전달본이 이 다섯 이름으로 직접 싣는다.
 MODEL_STAGES = (
     "transcribe",  # 전사 (Whisper)
     "gate",        # 내용 게이트 판정
@@ -103,8 +104,9 @@ class StageRecord:
         인터페이스, 워커 결과 JSON의 ``stageMs``). 어댑터 몫의 이름은 받지 않는다 - 전달본이
         ``model``이나 ``total``까지 덮으면 어댑터가 실제로 잰 값이 사라진다.
 
-        전달본이 아직 이 값을 돌려주지 않으므로 지금은 ``None``이 들어온다. 그때는 아무 일도
-        하지 않는다 - 인터페이스만 먼저 열어 둔 자리다.
+        채점까지 가지 않은 봉투에는 이 값이 없어 ``None``이 들어온다. 그때는 아무 일도 하지
+        않는다. 전달본이 쓰는 옛 이름은 워커가 이 이름으로 옮겨 보낸다 (KAN-293) - 여기서는
+        합의 이름만 안다.
         """
         if values is None:
             return
