@@ -73,7 +73,8 @@ class Track1Scorer:
                           "nan": {{"대본": "채점 값이 NaN이 되는 문장"}},
                           "set": {{"대본": "직렬화할 수 없는 값이 섞이는 문장"}},
                           "legacy": {{"대본": "단계 시간이 detail에 옛 이름으로 있는 문장"}},
-                          "both": {{"대본": "단계 시간이 최상위와 detail에 둘 다 있는 문장"}}}}
+                          "both": {{"대본": "단계 시간이 최상위와 detail에 둘 다 있는 문장"}},
+                          "gatefail": {{"대본": "게이트에서 탈락해 MFA까지 가지 않는 문장"}}}}
 
     def score(self, wav, script_key, transcript=None, with_feedback=True):
         if script_key not in self.sentences:
@@ -111,6 +112,13 @@ class Track1Scorer:
                 "segments": [], "modelVersion": self.model_version, "processingMs": 9600,
                 "detail": {{"scriptKey": script_key, "scoreW": 1.0,
                            "stageMs": {{"stt": 7000, "mfa": 2000, "score": 500, "낯선것": 1}}}},
+            }}
+        if script_key == "gatefail":
+            # 대본과 다른 발화 - 전사와 게이트까지만 돌고 MFA는 돌지 않는다 (KAN-293 콜드 기준의 자리)
+            return {{
+                "status": "FAILED", "quality": {{"code": "ANALYSIS_MISREAD"}}, "retryable": False,
+                "modelVersion": self.model_version, "processingMs": 4700,
+                "detail": {{"reason": "gate", "stageMs": {{"transcribe": 4600, "gate": 0}}}},
             }}
         if script_key == "both":
             # 최상위와 detail에 둘 다 있으면 최상위가 우선이다 (KAN-293)
@@ -619,6 +627,35 @@ def test_전달본이_detail에_옛_이름으로_실은_단계_시간을_합의_
     assert 단계["transcribe"] == 7000
     assert 단계["align"] == 2000
     assert 단계["scoring"] == 500
+
+
+def test_콜드는_그_워커에서_MFA가_처음_실제로_돈_요청까지다(tmp_path, transfer):
+    """게이트 탈락이 첫 채점이면 콜드를 소비하지 않는다 (KAN-293).
+
+    staging 실측에서 첫 요청(220Hz 톤, 게이트 탈락)이 콜드를 가져가고 진짜 첫 MFA 실행 17.5초가
+    웜으로 올라갔다. 첫 호출 오버헤드의 실체가 MFA 첫 실행이므로 align이 처음 돈 요청까지 콜드다.
+    """
+    settings = _settings(tmp_path, transfer)
+    engine = Track1Engine(settings)
+
+    async def scenario():
+        await engine.warm_up()
+        탈락, 첫MFA, 둘째MFA = (_request(settings, script_key="gatefail"), _request(settings, script_key="legacy"),
+                            _request(settings, script_key="legacy"))
+        try:
+            for request in (탈락, 첫MFA, 둘째MFA):
+                await engine.analyze(request)
+        finally:
+            await engine.close()
+        return 탈락.stages, 첫MFA.stages, 둘째MFA.stages
+
+    탈락, 첫MFA, 둘째MFA = asyncio.run(scenario())
+
+    assert set(dict(탈락.items())) == {"lockWait", "model", "transcribe", "gate"}
+    assert 탈락.warm == "cold"
+    assert 첫MFA.warm == "cold"
+    assert "align" in dict(첫MFA.items())
+    assert 둘째MFA.warm == "warm"
 
 
 def test_최상위_stageMs가_detail의_단계_시간보다_우선한다(tmp_path, transfer):

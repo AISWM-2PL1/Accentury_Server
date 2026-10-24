@@ -245,9 +245,9 @@ class Track1Engine:
         # 워커 세대. 요청이 "내가 기다리는 동안 적재가 실제로 있었는가"를 가르는 수단이다
         # (KAN-204) - 경과 시간으로 어림하면 lock을 막 놓은 요청과 구분되지 않는다
         self._generation = 0
-        # 지금 워커가 채점을 한 번이라도 했는가. 첫 채점에는 전달본 안쪽의 지연 초기화가
-        # 붙어 뒤이은 요청과 시간이 다르다 (staging 첫 호출 22.9초 대 10초대)
-        self._worker_scored = False
+        # 지금 워커에서 MFA가 한 번이라도 실제로 돌았는가 (KAN-293). 첫 실행에는 전달본 안쪽의
+        # 지연 초기화가 붙어 뒤이은 요청과 시간이 다르다 (staging 첫 MFA 17.5초 대 4~6초)
+        self._worker_aligned = False
 
     @property
     def model_version(self) -> str:
@@ -370,8 +370,15 @@ class Track1Engine:
 
         콜드 표시는 **물어보기 전에** 한다. 그래야 상한에 걸려 끊긴 첫 채점도 콜드로 남는다 -
         첫 호출 오버헤드가 시간 초과의 원인인지가 바로 그때 필요한 값이다.
+
+        콜드가 풀리는 조건은 "그 워커에서 MFA가 처음 실제로 돈 요청"이다 (KAN-293). 첫 호출
+        오버헤드의 실체가 MFA 첫 실행(staging 실측 ``align`` 17.5초, 그 뒤 4~6초)인데, 게이트
+        탈락처럼 MFA 전에 끝난 요청이 첫 채점이면 그 요청이 콜드를 소비하고 진짜 첫 MFA 실행이
+        웜으로 올라갔다. 그래서 전달본이 돌려준 단계 시간에 ``align``이 있을 때만 웜으로
+        넘어간다. 전달본이 단계 시간을 아예 돌려주지 않으면(``stageMs`` 없음) 판단할 근거가
+        없으므로 예전처럼 첫 채점에서 넘어간다 - 그렇지 않으면 그 워커는 영영 콜드다.
         """
-        if not self._worker_scored:
+        if not self._worker_aligned:
             stages.mark_cold()
         started = time.monotonic()
         reply = await self._exchange(payload)
@@ -386,8 +393,10 @@ class Track1Engine:
         # 예외로 빠져나간 경로에서는 둘 다 하지 않는다 - 워커가 사라진 경우(_WorkerGone)에는
         # 다음 워커가 다시 콜드이고, 끊긴 추론의 경과는 곧 상한값이라 분포만 오염시킨다
         stages.put("model", (time.monotonic() - started) * 1000)
-        self._worker_scored = True
-        stages.merge(reply.get("stageMs"))
+        stage_ms = reply.get("stageMs")
+        if not isinstance(stage_ms, Mapping) or "align" in stage_ms:
+            self._worker_aligned = True
+        stages.merge(stage_ms)
         return reply
 
     # ── 워커 수명 ────────────────────────────────────────────────────────────
@@ -465,9 +474,9 @@ class Track1Engine:
         self._process = process
         self._model_version = str(message["modelVersion"])
         # 새 워커다 - 세대를 올려 이 적재를 기다린 요청이 workerLoad를 적을 수 있게 하고,
-        # 첫 채점 표시를 되돌린다 (KAN-204)
+        # 첫 MFA 실행 표시를 되돌린다 (KAN-204, KAN-293)
         self._generation += 1
-        self._worker_scored = False
+        self._worker_aligned = False
         log.info("트랙 1 워커 준비 완료 modelVersion=%s", self._model_version)
 
     def _terminate_worker(self, reason: str) -> None:
