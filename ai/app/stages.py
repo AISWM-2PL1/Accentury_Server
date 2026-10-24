@@ -120,11 +120,13 @@ class StageRecord:
             self.put(stage, ms)
 
     def mark_cold(self) -> None:
-        """이 요청이 그 워커의 첫 채점이라고 적는다.
+        """이 요청이 그 워커의 첫 호출 오버헤드를 안고 있다고 적는다.
 
         가중치는 워밍업에서 이미 올라와 있어도 전달본 안쪽의 지연 초기화(torch 컴파일, MFA 첫
         실행)가 첫 채점에서 한 번 일어난다. staging 첫 호출 22.9초와 그 뒤 10초대의 차이가
-        그것이고(KAN-172 실측), 그 차이를 지표에서 가르는 것이 ``warm`` 차원이다.
+        그것이고(KAN-172 실측), 그 차이를 지표에서 가르는 것이 ``warm`` 차원이다. 그 실체는
+        MFA 첫 실행(KAN-293 실측 17.5초, 그 뒤 4~6초)이라 어댑터는 그 워커에서 ``align``이
+        처음 돈 요청까지를 콜드로 둔다 (:meth:`app.track1.Track1Engine._score`).
         """
         self._cold = True
 
