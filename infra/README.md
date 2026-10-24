@@ -1361,10 +1361,12 @@ Terraform이 만드는 것은 셋이다.
    `AUTH_REFRESH_INVALID`가 오는지로 Redis 연결을 본다 - 503 `AUTH_STORE_UNAVAILABLE`이면 Redis에 닿지 못한
    것이다 (SG, TLS, AUTH 토큰 순으로 본다).
 
-**IdP 값 셋은 콘솔에서 받기 전까지 자리 표시 값이다** (`unset-put-parameter-after-apply`, 변수 기본값). 그동안
+**IdP 값은 콘솔에서 받기 전까지 자리 표시 값이다** (`unset-put-parameter-after-apply`, 변수 기본값). 그동안
 그 IdP 로그인만 401 `AUTH_IDP_TOKEN_INVALID`이고 기동과 다른 IdP, 익명 응시는 영향이 없다. 값을 받으면 환경의
 `terraform.tfvars`에 적고 apply한 뒤 backend 태스크를 새로 띄운다 (secrets는 태스크 시작 때 한 번 읽힌다).
-셋 다 시크릿이 아니라 tfvars에 그대로 적어도 된다.
+넷 다 시크릿이 아니라 tfvars에 그대로 적어도 된다. 2026-10-22 기준 두 환경 모두 넷이 다 들어가 있다 - 애플과
+네이버는 KAN-241, KAN-243에서, 구글과 카카오는 로그인을 켠 빌드 10(App PR #43)에 맞춰 KAN-289에서 넣었다.
+구글은 웹 애플리케이션 유형 클라이언트의 ID이고 iOS, Android 유형 클라이언트 ID로는 aud가 맞지 않는다.
 
 ```
 auth_google_client_id = "<서버용(웹) OAuth 클라이언트 ID>.apps.googleusercontent.com"

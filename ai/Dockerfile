@@ -19,7 +19,10 @@
 # 형제 워커가 지금 처리 중인 오디오를 지운다. 워커를 늘려야 하면 반드시 워커마다 다른
 # ACCENTURY_AI_TEMP_DIR를 준다. 어차피 모델이 RSS 7GB대라 프로세스 1개가 전제다(KAN-36).
 ARG MODEL_REGISTRY=325771561913.dkr.ecr.ap-northeast-2.amazonaws.com
-ARG MODEL_TAG=26ac67a
+# f77011c = 26ac67a 위에 KAN-293 단계 시간 패치(serve.py, bench_server.py)만 얹은 얇은 층이다. 가중치, 참조
+# 분포, 패키지는 26ac67a와 같다. 태그는 모델 레포 커밋이 아니라 sha256("base=26ac67a" + 두 파일)[:7]이고,
+# 같은 패치가 모델 레포에 들어가 정식 해시로 올라오면 그 태그로 바꾼다 (README.md "추론 단계별 소요 시간").
+ARG MODEL_TAG=f77011c
 FROM ${MODEL_REGISTRY}/accentury/ai-model:${MODEL_TAG} AS runtime
 
 # PYTHONDONTWRITEBYTECODE - 비루트 사용자가 소스 디렉터리에 .pyc를 못 써서 나는 잡음을 없앤다.
