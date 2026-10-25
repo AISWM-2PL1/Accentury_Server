@@ -144,15 +144,27 @@ AI 서버는 backend와 다른 EC2에서 돕니다 (KAN-36 A단계). 같은 comp
 | `transcribe` `gate` `align` `f0` `scoring` | 전사, 내용 게이트, 정렬, F0 추출, 거리와 채점 | 전달본 |
 | `total` | 엔진 호출 전체 (합계) | 라우트 |
 
-**전달본 몫의 다섯은 아직 비어 있습니다.** `score()` 안쪽은 어댑터에서 잴 수 없어, 워커 결과
-JSON의 `stageMs`(단계 이름 -> ms)로 받기로 인터페이스만 정해 두었습니다. 전달본이 봉투에
-`{"stageMs": {"transcribe": 8123.4, ...}}`를 실으면 워커가 그것을 봉투에서 덜어 내 부모에게
-넘기고(`_stage_ms`), 어댑터와 지표는 고칠 것이 없습니다. 목록에 없는 이름은 버립니다 - 이름이
-곧 CloudWatch 차원 값이고 조합 하나가 월 0.30달러입니다.
+**전달본 몫은 봉투의 `detail.stageMs`에서 받습니다** (KAN-293). `score()` 안쪽은 어댑터에서 잴 수
+없어 워커 결과 JSON의 `stageMs`(단계 이름 -> ms)로 받기로 했는데(KAN-204), 2026-10-24 ECR
+`ai-model:26ac67a`의 `serve.py`를 꺼내 보니 전달본은 이미 `detail.stageMs = {"stt", "mfa", "score"}`를
+싣고 있었고 어댑터는 최상위 `stageMs`만 보고 있어 그 값을 전부 버리고 있었습니다. 그래서 워커
+(`_stage_ms`)가 최상위가 없으면 `detail.stageMs`를 읽고, 옛 이름을 `stt` -> `transcribe`,
+`mfa` -> `align`, `score` -> `scoring`으로 옮겨 부모에게 넘깁니다. 둘 다 있으면 최상위가 우선입니다.
+옛 `score`는 F0 추출(`extract_utterance`)까지 합친 값이라 `scoring`에 F0가 섞여 있고, `gate`와 `f0`는
+비어 있습니다. 목록에 없는 이름은 버립니다 - 이름이 곧 CloudWatch 차원 값이고 조합 하나가 월 0.30달러입니다.
 
-콜드/웜은 **그 워커의 첫 채점인가**입니다. 가중치는 워밍업에서 이미 올라와 있어도 전달본 안쪽의
-지연 초기화가 첫 채점에서 한 번 일어납니다 - staging 첫 호출 22.9초와 그 뒤 10초대의 차이가
-그것입니다 (KAN-172 실측).
+모델 태그 `f77011c`(KAN-293, `ai/Dockerfile`의 `MODEL_TAG`)부터는 전달본이 다섯 이름으로 직접 싣습니다.
+이 태그는 `26ac67a` 위에 `src/scoring/serve.py`와 `bench_server.py`만 바꿔 얹은 얇은 층이고(`transcribe`는
+Whisper, `gate`는 `align_transcript`, `align`은 MFA, `f0`는 `extract_utterance`, `scoring`은 `score_extracted`),
+가중치와 참조 분포와 패키지는 `26ac67a`와 같습니다. 모델 레포의 커밋 해시가 아니라
+`sha256("base=26ac67a" + 두 파일)[:7]`이라, 같은 패치가 모델 레포에 들어가 정식 해시로 올라오면 그 태그로
+바꿉니다. `modelVersion`은 `track1-v3.4-2026-08-31b+f77011c+whisper-large-v3+bfloat16`으로 나옵니다.
+
+콜드/웜은 **그 워커에서 MFA가 처음 실제로 돈 요청까지인가**입니다 (KAN-293). 가중치는 워밍업에서
+이미 올라와 있어도 전달본 안쪽의 지연 초기화가 첫 채점에서 한 번 일어납니다 - staging 첫 호출 22.9초와
+그 뒤 10초대의 차이가 그것입니다 (KAN-172 실측). 그 실체는 MFA 첫 실행이라(KAN-293 실측 `align` 17.5초,
+그 뒤 4~6초) 게이트 탈락처럼 MFA 전에 끝난 요청은 콜드를 소비하지 않고, 전달본이 돌려준 단계 시간에
+`align`이 처음 있는 요청까지 콜드입니다. 전달본이 단계 시간을 돌려주지 않으면 첫 채점에서 웜이 됩니다.
 
 값은 두 곳으로 나갑니다.
 

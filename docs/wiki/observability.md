@@ -182,9 +182,9 @@ unset token
 
 KAN-272가 `accentury.analysis.judged`로 3개를 더한다 (`reason`이 unscorable, misread, other).
 
-KAN-204가 `accentury/ai` `StageDuration`으로 7개를 더한다 (`stage` x `warm` 조합 - 지금 올라오는
-것은 `lockWait`, `model`, `total` 각각의 콜드와 웜, 그리고 콜드에만 생기는 `workerLoad`다).
-전달본이 안쪽 다섯 단계를 싣기 시작하면 최대 17개, 환경당 월 약 5.1달러가 된다. 단계 이름을
+KAN-204가 `accentury/ai` `StageDuration`으로 7개를 더한다 (`stage` x `warm` 조합 - `lockWait`,
+`model`, `total` 각각의 콜드와 웜, 그리고 콜드에만 생기는 `workerLoad`다). KAN-293이 전달본 몫
+다섯(`transcribe`, `gate`, `align`, `f0`, `scoring`)의 콜드와 웜 10개를 더해 17개, 환경당 월 약 5.1달러다. 단계 이름을
 닫힌 목록으로 좁혀 둔 이유가 이것이다 - 전달본이 모르는 이름을 하나 보낼 때마다 조합이 늘어
 요금이 상한 없이 자란다 (`ai/app/stages.py`가 목록에 없는 이름을 버린다).
 
@@ -280,14 +280,20 @@ AI 쪽 값의 출처는 `GET /internal/v0/metrics`이고 **토큰이 필요하�
 | `transcribe` `gate` `align` `f0` `scoring` | 전사, 내용 게이트, 정렬, F0 추출, 거리와 채점 | 전달본 |
 | `total` | 엔진 호출 전체 (합계) | 라우트 (`ai/app/analyze.py`) |
 
-`warm`은 `cold`와 `warm` 둘이고, 콜드는 **그 워커의 첫 채점**이라는 뜻이다. 가중치는 워밍업에서
-이미 올라와 있어도 전달본 안쪽의 지연 초기화가 첫 채점에서 한 번 일어난다 - staging 첫 호출
-22.9초와 그 뒤 10초대의 차이(KAN-172 실측)가 그것이고, 그 오버헤드를 지표에서 가르는 것이 이
-차원이다.
+`warm`은 `cold`와 `warm` 둘이고, 콜드는 **그 워커에서 MFA가 처음 실제로 돈 요청까지**라는 뜻이다
+(KAN-293). 가중치는 워밍업에서 이미 올라와 있어도 전달본 안쪽의 지연 초기화가 첫 채점에서 한 번
+일어난다 - staging 첫 호출 22.9초와 그 뒤 10초대의 차이(KAN-172 실측)가 그것이고, 그 오버헤드를
+지표에서 가르는 것이 이 차원이다. KAN-293 실측에서 그 실체가 MFA 첫 실행(`align` 17.5초, 그 뒤
+4~6초)으로 드러났고, 게이트 탈락처럼 MFA 전에 끝난 첫 요청이 콜드를 소비해 진짜 첫 MFA 실행이 웜으로
+올라가는 일이 있어 기준을 "첫 채점"에서 "`align`이 처음 있는 요청"으로 바꿨다.
 
-**전달본 몫의 다섯은 아직 비어 있다.** `score()` 안쪽은 어댑터에서 잴 수 없어 워커 결과 JSON의
-`stageMs`(단계 이름 -> ms)로 받기로 인터페이스만 정해 두었다. 전달본이 그 값을 싣기 시작하면
-어댑터도 대시보드도 고칠 것이 없다.
+**전달본 몫은 봉투의 `detail.stageMs`에서 받는다** (KAN-293). 인터페이스는 워커 결과 JSON의
+`stageMs`(단계 이름 -> ms)로 정해 두었는데(KAN-204), 전달본(`ai-model:26ac67a`의 `serve.py`)은
+이미 `detail.stageMs = {"stt", "mfa", "score"}`를 싣고 있었고 어댑터가 최상위만 봐서 2026-10-24까지
+prod에 안쪽 단계 계열이 0개였다. 워커가 `detail.stageMs`를 읽어 `stt` -> `transcribe`,
+`mfa` -> `align`, `score` -> `scoring`으로 옮긴다. 옛 `score`는 F0 추출까지 합친 값이라 `scoring`에
+F0가 섞여 있고, `gate`와 `f0`는 비어 있다. 모델 태그 `f77011c`(26ac67a 위에 `serve.py` 패치만 얹은 층,
+`ai/README.md`)부터는 전달본이 다섯 이름으로 직접 실어 다섯 단계가 모두 채워진다.
 
 **백분위가 여기서는 진짜 백분위다.** 호스트 타이머가 관측값을 낱개로 올리므로(`Values`)
 CloudWatch가 전체 표본에서 p50과 p95를 계산한다 - backend 쪽이 "가장 나쁜 태스크의 P95"로

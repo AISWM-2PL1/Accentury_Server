@@ -75,6 +75,12 @@ waf_admin_rate_limit = 50
 # prod가 뒤따른다 (2026-10-02 결정).
 waf_ip_reputation_enforce = false
 
+# 구글 서버용(웹 애플리케이션) OAuth 클라이언트 ID와 카카오 앱 ID (KAN-289, 2026-10-22). 둘 다 시크릿이 아니다. 구글 값은
+# ID 토큰의 aud 검증이고 앱의 GOOGLE_SERVER_CLIENT_ID와 같은 값이다(iOS, Android 클라이언트 ID가 아니다). 카카오 값은
+# access_token_info의 app_id 검증이고 네이티브 앱 키가 아니라 숫자 앱 ID다. 두 환경이 같은 IdP 앱을 쓴다.
+auth_google_client_id = "690672680700-9ev1947u7hlise6uoko88merkmmhp40c.apps.googleusercontent.com"
+auth_kakao_app_id     = "1558545"
+
 # 네이버 로그인 Client ID (KAN-243). 시크릿이 아니고 앱의 NAVER_CLIENT_ID와 같은 값이다. 두 환경이 같은 네이버
 # 앱을 쓴다. 짝인 Client Secret은 시크릿이라 여기 두지 않고 apply 뒤 put-parameter로 넣는다 (README "소셜 로그인" 절).
 auth_naver_client_id = "2nlTdPK4RqeqQcLtb6xH"
