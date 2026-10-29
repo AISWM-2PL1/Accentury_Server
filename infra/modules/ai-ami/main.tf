@@ -1,7 +1,7 @@
 # AI 호스트 AMI 사전 적재 파이프라인 (KAN-285). EC2 Image Builder가 최신 AL2023 위에 docker, compose 플러그인,
 # 그 순간의 활성 accentury/ai 이미지를 깔아 AMI로 남긴다. ai 호스트의 첫 부팅(2026-10-14 prod 실측 3분 22초)에서
-# docker 설치 40초와 이미지 pull 1분 53초가 매번 같은 일이라 미리 해 두는 것이다. 구운 AMI는 두 환경 tfvars
-# ai_ami_id에 적어 쓴다 (docs/ops/ai-host.md "사전 적재 AMI는 쓰지 않는다 (KAN-285)") - 파이프라인은 AMI ID를 Terraform에 돌려주지 않는다.
+# docker 설치 40초와 이미지 pull 1분 53초가 매번 같은 일이라 미리 해 두는 것이다. 구운 AMI는 지금 쓰지 않는다(KAN-285 실측에서
+# 미채택, docs/ops/ai-host.md "사전 적재 AMI는 쓰지 않는다 (KAN-285)"). 다시 쓰게 되면 두 환경 tfvars ai_ami_id에 적는다 - 파이프라인은 AMI ID를 Terraform에 돌려주지 않는다.
 # 돌려받아 자동으로 쓰면 빌드가 끝날 때마다 손대지 않은 plan에 인스턴스 교체가 끼어들기 때문이다 (KAN-246과 같은 이유).
 #
 # 파이프라인은 prod 스택이 가진다 (tfvars ai_ami_pipeline_enabled). 계정에 기본 VPC가 없어 빌드 인스턴스를 띄울
