@@ -622,3 +622,18 @@ RDS SG는 backend-sg만 받고, ECS Exec은 켜지 않기로 했으며(KAN-165),
 
 #### 단계 시간을 남기는 이유 (KAN-204)
 GPU 전환(KAN-57)은 Whisper만 줄이고 MFA는 CPU 작업이라 그대로인데, 두 단계의 비율을 모르면 그 판단이 추정으로 남는다. 그래서 라우트가 수첩을 쥐고 어댑터가 채운다 (ai/README "추론 단계별 소요 시간"에 결론을 남겼다).
+
+#### AI의 correlationId 멱등 캐시는 범위 밖 (2026-09-01 정정)
+`correlationId` 기반 멱등 캐시는 AI의 범위 밖이다. BE가 일시 장애 뒤 같은 `correlationId`로 재전송하는 설계이고(KAN-24, KAN-28), AI는 무상태이며 오디오를 남기지 않으므로 자체 멱등 저장소를 두지 않는다 (KAN-297에서 ai README에서 옮김).
+
+#### scriptKey가 없거나 서비스 문장이 아니면 비재전송 판정 실패 (KAN-182, 2026-09-05)
+값이 없거나 서비스 문장이 아닌 `scriptKey`는 422 `ANALYSIS_MISREAD`, `retryable=false`로 끊는다. 무시하고 분석하면 대본 없이 채점한 점수가 정상값처럼 나가고, 재전송 가능으로 내면 정의가 바뀌지 않는 한 결과가 같은 요청을 BE가 예산이 마를 때까지 반복한다 (KAN-297에서 ai README에서 옮김).
+
+#### V15는 gn-2026.10.2를 새 버전 없이 제자리 UPDATE (KAN-282, 2026-10-13)
+테스트 정의는 발행 후 불변이라는 규칙(KAN-26, §5.4)의 유일한 예외다. V15는 세션, 채점, 세트 구성이 바뀌지 않는 화면용 필드(`emotion`) 하나만 더하는 일이라 새 testVersion 없이 gn-2026.10.2를 제자리에서 UPDATE하기로 했다. 활성 전환 없이 배포만으로 반영된다 (KAN-297에서 backend README에서 옮김).
+
+#### 개인정보처리방침 고지는 동의 화면과 별개로 유지 (KAN-2, FR-DP-06)
+KAN-2에서 "동의 화면은 범위 제외하되 이 고지는 별도 유지"로 남겨 둔 항목이 FR-DP-06 개인정보처리방침 URL이고, `infra/privacy/`가 그 문서가 사는 자리다 (KAN-297에서 infra/privacy README에서 옮김).
+
+#### 개인정보처리방침은 `/privacy.html`, 확장자 없는 URL은 함수 예외로 (KAN-133, 2026-09-01)
+확장자 없는 `/privacy`는 SPA 재작성 함수가 index.html로 돌리므로 `/privacy.html`을 쓴다. 확장자 없는 URL이 꼭 필요해지면 `/.well-known/`처럼 `spa-rewrite.js`에 예외 한 줄을 넣는 대안이 있다 (KAN-133 코멘트, 2026-09-01. KAN-297에서 infra/privacy README에서 옮김).

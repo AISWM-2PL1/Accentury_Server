@@ -193,6 +193,9 @@ KAN-38이 대시보드 `accentury-{env}-ops` 1개, 경보 3종(`ai-temp-residue`
 ### 2026-09-05 KAN-22 스텁 엔진 제거와 fake 엔진 도입
 스텁 엔진은 2026-09-05에 제거했다 (KAN-22). 실모델은 개발 기계(arm64)와 CI 러너에서 돌릴 수 없어 로컬 풀스택과 E2E가 함께 사라졌는데, 그러자 앱과 웹의 완주 확인이 돌릴 스택을 통째로 잃었다 (PR #87 리뷰). 그래서 `fake` 엔진(`ai/app/fake.py`)을 두었다 (루트 docker-compose.yml 주석은 2026-09-06 반영으로 적는다).
 
+### 2026-09-05 KAN-22 실모델 어댑터 연결과 계약 스위트 정리
+실모델 어댑터(`ai/app/track1.py`)를 붙이면서 라우트(`ai/app/analyze.py`)는 한 줄도 고치지 않았다. KAN-135가 그은 엔진 경계가 지켜졌다는 증거로 ai README에 적어 두었던 사실이다. 같은 때 스텁이 사라지면서 계약 적합성 스위트의 엔진 프로파일 표(`ENGINE_PROFILES`)와 `--contract-engine` 옵션을 접었다. 고를 엔진이 하나면 표는 목적을 잃기 때문이다 (KAN-297에서 ai README에서 옮김).
+
 ### 2026-09-05 KAN-36 옛 infra README 구성도 아래 문단 (KAN-297에서 옮김)
 
 에픽 KAN-118(프로토타입 스텁 배포)이 정한 구조에 AI 전용 호스트 분리(KAN-36 A단계)와
@@ -203,6 +206,9 @@ backend는 KAN-165부터 ECS Fargate다 (온디맨드만, Spot 없음 - 2026-09-
 KAN-168(오토스케일링)이 풀었다. AI는 KAN-36 A단계로 전용 EC2에 분리됐고, 2026-09-05에 실모델로 바뀌었다 (KAN-22 -
 `ai/Dockerfile`의 FROM이 모델 전달본 `accentury/ai-model:<모델 해시>`다). 메모리 상한과 GPU 여부는 KAN-57 실측
 뒤에 정한다고 적혀 있었고, 이후 c7i.xlarge 유지와 `mem_limit` 7g(KAN-36 B단계, 2026-09-10)로 정해졌다.
+
+### 2026-09-07 KAN-176 개인정보처리방침 확정 본문
+KAN-176이 `infra/privacy/privacy.html`에 14개 절의 확정 본문을 넣고 검색 노출을 막던 `<meta name="robots" content="noindex">`를 지웠다. KAN-133(2026-09-04)이 마련한 게시 경로는 그대로 두고 그 경로로 올라가는 내용만 바꿨다 (KAN-297에서 infra/privacy README에서 옮김).
 
 ### 2026-09-08 KAN-172 분석 시간 예산 확정
 
@@ -355,6 +361,9 @@ aws rds wait db-snapshot-available --db-snapshot-identifier "kan220-before-rebas
 ### 2026-09-22 KAN-220 staging, prod 재베이스라인 전환 완료
 운영자가 이력 표의 이름을 바꾸고 구 정의 행을 지운 뒤 배포했고, 당시 켜 둔 `baseline-on-migrate`가 V1을 실행하지 않고 baseline 행만 기록했다 (이력에 `1 / BASELINE` 한 행). 설정은 전환 뒤 제거했다. 절차와 복구 경로는 [`docs/ops/rds-flyway.md`](../ops/rds-flyway.md).
 
+### 2026-09-22 KAN-221 모노레포 분리
+모노레포 `Accentury`를 Accentury_Server와 Accentury_App 둘로 나눴다. 옛 레포는 Accentury_Prototype(읽기 전용)으로 남았다. 브랜치 모델(`Dev` 병합이 staging, `Release` 병합이 prod)은 바꾸지 않았다. 서로 읽던 파일은 복사본으로 풀었다. 분리 전에는 한 레포라 `scripts/publish-share-assets.sh`가 `assets/share`를 직접 읽었고, 분리하면서 `infra/share-assets/`에 복사본을 두었다. 매니페스트 `android:path`의 복사본 `infra/modules/edge/app-link-paths.json`도 이때 생겼다 (KAN-297에서 루트, infra/share-assets, infra/well-known README에서 옮김).
+
 ### 2026-10-01 KAN-242 write-only 시크릿 전환 staging 실측
 
 staging 전환 뒤 state pull로 `admin_token`, `ai_token_*`, `jwt_secret`의 `value`가 `""`이고 `has_value_wo`가 `true`임을 확인했다. 같은 날 aws provider 6.61.0 바이너리에서 `aws_elasticache_replication_group`에 write-only 인자가 없음을 확인했다. state 버킷을 읽을 수 있는 주체가 전부 SSM도 직접 읽는 관리자임을 확인했다 (KAN-242 노출 범위 표). 전환 전에는 `random_password` + `value`라 값이 state(버전 관리 버킷)에 평문으로 남아, 버킷을 읽을 수 있는 주체는 누구나 임의 사용자의 Access JWT를 만들 수 있었다.
@@ -377,6 +386,9 @@ bootstrap은 state 버킷을 만드는 스택이라 처음에는 로컬 state로
 ### 2026-10-04 KAN-269 방침 버전 2026-10-04
 KAN-269(음성 저장 선택 동의) 개정으로 방침 버전과 시행일이 `2026-10-04`가 됐다.
 
+### 2026-10-04 KAN-269 개인정보처리방침 staging 전용 블록 비움
+음성 저장이 두 환경 공통의 선택 동의가 되면서 `privacy.html`의 `<!-- staging-only:begin -->`와 `<!-- staging-only:end -->` 사이에 있던 staging 전용 학습 수집 고지(KAN-239가 넣은 것)를 지웠다. 그 뒤로 두 환경의 게시 본문은 같고, 자르는 경로는 다음 환경별 문구를 위해 남겼다. `privacy.test.mjs`가 음성 저장 선택 동의 절을 붙들기 시작한 것도 이 개정부터다 (KAN-297에서 infra/privacy README에서 옮김).
+
 ### 2026-10-05 KAN-246 AI 호스트 AMI 교체 staging 실증
 
 `al2023-ami-2023.12.20260831.0`에서 `20260930.0`으로 바꿨다(커널 계열은 6.18로 같다). plan은 변경 2건, apply는 10초 만에 끝나고 교체는 그 뒤에 ASG가 진행했다.
@@ -394,6 +406,9 @@ KAN-269(음성 저장 선택 동의) 개정으로 방침 버전과 시행일이 
 ### 2026-10-06 KAN-272 prod에서 AI 2대째가 일을 받지 못함
 
 prod는 backend 태스크가 1개로 유지되므로(backend 오토스케일링은 요청 수 기준이라 분석이 밀려도 늘지 않는다) 동시 호출이 늘 1건이었고, AI가 2대로 늘어도 2번째는 일을 받지 못했다. 응시가 몰린 14:52부터 진행 중 분석이 19건까지 쌓이는 동안 AI의 lock 대기는 0초였고 분당 완료는 7건을 넘지 못했다. 같은 날 2번째가 이미 일하는데 워밍업 600초가 3번째를 약 7분 막아 물결 최고치 14건을 2대로 받았다 (KAN-281의 근거).
+
+### 2026-10-06 KAN-272 판정 코드 ANALYSIS_UNSCORABLE 추가
+AI의 §2.4 판정 코드 허용 목록에 `ANALYSIS_UNSCORABLE`을 더했다(채점 불가 NaN 음성). 배포가 AI 먼저라 이 코드를 모르는 옛 backend가 부르는 구간이 있어, 실모델 어댑터는 요청 meta의 `acceptsVerdicts`에 이 코드가 있을 때만 낸다. AI 요청 종료 로그에 `quality=<품질 코드>`가 찍히기 시작한 것도 이 티켓부터다. 전달본 단계 이름(`transcribe` 등)이 같은 줄에 찍히기 시작한 것은 KAN-293(2026-10-24)부터다 (KAN-297에서 ai README에서 옮김).
 
 ### 2026-10-08 KAN-266 번역 키 넣기 (날짜 추정)
 
