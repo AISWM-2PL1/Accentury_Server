@@ -349,7 +349,7 @@ resource "aws_launch_template" "ai" {
   name_prefix = "${local.name}-"
   # AMI는 tfvars에 명시한다 (KAN-246). SSM의 "최신 AMI" 파라미터를 직접 읽으면 값이 시간에 따라 바뀌어
   # 손대지 않은 plan에 교체가 끼어든다. 그걸 막으려고 ignore_changes로 묶어 뒀더니(KAN-36) 이번에는 최초
-  # 생성 시점의 AMI에 영구히 고정돼 OS 보안 업데이트가 들어오지 않았다. 갱신 절차는 README "AI 호스트 AMI 갱신".
+  # 생성 시점의 AMI에 영구히 고정돼 OS 보안 업데이트가 들어오지 않았다. 갱신 절차는 docs/ops/ai-host.md "AMI 갱신과 무중단 교체 (KAN-246)".
   image_id      = var.ami_id
   instance_type = var.instance_type
 
@@ -413,7 +413,7 @@ resource "aws_launch_template" "ai" {
 
     precondition {
       condition     = local.user_data_bytes <= local.user_data_max_bytes
-      error_message = "ai 호스트 user_data가 EC2 상한 ${local.user_data_max_bytes} 바이트를 넘습니다 (약 ${local.user_data_bytes} 바이트). compose와 스크립트는 이미 부팅 자산 버킷에 있으므로(KAN-38), 남은 것은 user_data.sh.tftpl 본문입니다 - 주석을 main.tf나 infra/README.md로 옮기거나 systemd 유닛 정의도 부팅 자산으로 내리세요."
+      error_message = "ai 호스트 user_data가 EC2 상한 ${local.user_data_max_bytes} 바이트를 넘습니다 (약 ${local.user_data_bytes} 바이트). compose와 스크립트는 이미 부팅 자산 버킷에 있으므로(KAN-38), 남은 것은 user_data.sh.tftpl 본문입니다 - 주석을 main.tf나 docs/ops/ai-host.md로 옮기거나 systemd 유닛 정의도 부팅 자산으로 내리세요."
     }
   }
 

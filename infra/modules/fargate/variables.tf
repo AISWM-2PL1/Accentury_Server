@@ -137,7 +137,7 @@ variable "autoscaling_target_requests_per_minute" {
 
 variable "autoscaling_scale_out_cooldown" {
   type        = number
-  description = "스케일아웃 뒤 다음 스케일아웃까지의 초 (KAN-168). 60 - 태스크 기동이 30초에서 2분이라(README 실측 2분 1초) 그보다 짧게 두어 큰 스파이크에는 연달아 늘린다. 목표 추적은 쿨다운 중이라도 더 큰 증가는 허용한다."
+  description = "스케일아웃 뒤 다음 스케일아웃까지의 초 (KAN-168). 60 - 태스크 기동이 30초에서 2분이라(docs/wiki/infra-history.md의 KAN-165 항목, 실측 2분 1초) 그보다 짧게 두어 큰 스파이크에는 연달아 늘린다. 목표 추적은 쿨다운 중이라도 더 큰 증가는 허용한다."
   default     = 60
 }
 
@@ -160,7 +160,7 @@ variable "stop_timeout" {
 
 variable "health_check_grace_period_seconds" {
   type        = number
-  description = "태스크 시작 뒤 ALB와 컨테이너 헬스체크 실패를 무시하는 초. JVM 기동(Flyway + 컨텍스트)이 끝나기 전에 ECS가 태스크를 죽이지 않게 한다. 2026-09-02 staging 실측(README 'backend Fargate 서비스'): 0.5 vCPU에서 Spring 기동 71초, 컨테이너 시작부터 ALB healthy까지 약 76초. 그 2배 안팎인 150초 - 이보다 짧으면 기동 중 태스크가 교체를 반복하고, 길면 죽은 이미지의 회로 차단기 판정(3회)이 그만큼 늦어진다."
+  description = "태스크 시작 뒤 ALB와 컨테이너 헬스체크 실패를 무시하는 초. JVM 기동(Flyway + 컨텍스트)이 끝나기 전에 ECS가 태스크를 죽이지 않게 한다. 2026-09-02 staging 실측(docs/ops/backend.md '헬스체크 유예와 회로 차단기'): 0.5 vCPU에서 Spring 기동 71초, 컨테이너 시작부터 ALB healthy까지 약 76초. 그 2배 안팎인 150초 - 이보다 짧으면 기동 중 태스크가 교체를 반복하고, 길면 죽은 이미지의 회로 차단기 판정(3회)이 그만큼 늦어진다."
   default     = 150
 }
 

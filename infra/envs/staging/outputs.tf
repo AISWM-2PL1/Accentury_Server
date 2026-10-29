@@ -89,17 +89,17 @@ output "rds_master_user_secret_arn" {
 
 output "github_deploy_role_arn" {
   value       = module.deploy.github_deploy_role_arn
-  description = "GitHub environment 변수 AWS_DEPLOY_ROLE_ARN에 넣는다 (KAN-127, README 'GitHub 설정')"
+  description = "GitHub environment 변수 AWS_DEPLOY_ROLE_ARN에 넣는다 (KAN-127, docs/ops/github.md 'environment 변수')"
 }
 
 output "waf_log_group" {
   value       = module.waf.log_group_name
-  description = "us-east-1의 WAF 로그 그룹 (KAN-149). Count 관찰과 차단 확인 쿼리는 README 'WAF 웹 ACL'."
+  description = "us-east-1의 WAF 로그 그룹 (KAN-149). Count 관찰과 차단 확인 쿼리는 docs/ops/waf-edge.md 'Count 관찰 후 Block 전환'."
 }
 
 output "alerts_topic_arn" {
   value       = module.monitoring.alerts_topic_arn
-  description = "경보 알림 SNS 토픽 (KAN-134). 이메일 구독은 수신자가 확인 링크를 눌러야 활성화된다 - README '경보와 알림'."
+  description = "경보 알림 SNS 토픽 (KAN-134). 이메일 구독은 수신자가 확인 링크를 눌러야 활성화된다 - docs/ops/alarms.md '수신 주소와 구독 확인'."
 }
 
 output "alarm_names" {
@@ -114,7 +114,7 @@ output "dashboard_name" {
 
 output "dashboard_url" {
   value       = module.monitoring.dashboard_url
-  description = "운영 대시보드 바로가기 (KAN-38) - README '관측성 지표와 대시보드'의 확인 절차가 이 출력을 쓴다."
+  description = "운영 대시보드 바로가기 (KAN-38) - docs/ops/observability.md '배포 뒤 확인 절차'가 이 출력을 쓴다."
 }
 
 output "training_bucket" {

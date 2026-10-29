@@ -20,7 +20,7 @@ variable "security_group_id" {
 
 variable "ami_id" {
   type        = string
-  description = "AI 호스트의 AMI ID (KAN-246, KAN-285). AL2023 x86_64여야 한다 - user_data가 dnf와 AL2023 루트 디바이스(/dev/xvda)를 전제한다. 값을 바꾸면 시작 템플릿이 새 버전이 되어 인스턴스가 교체된다. 맨 AL2023(SSM 퍼블릭 파라미터 /aws/service/ami-amazon-linux-latest/al2023-ami-kernel-default-x86_64)을 넣는다 (README \"AI 호스트 AMI 갱신\"). ai-ami 파이프라인이 구운 사전 적재 AMI도 user_data가 받아들이지만(docker, compose, 이미지가 있으면 건너뛴다) EBS 지연 로딩 때문에 부팅이 더 느리고 불규칙해 쓰지 않는다 (2026-10-14 실측). GPU(g4dn)로 가면 NVIDIA 드라이버 AMI와 docker runtime 설정이 함께 바뀐다 (KAN-57 판정 후)."
+  description = "AI 호스트의 AMI ID (KAN-246, KAN-285). AL2023 x86_64여야 한다 - user_data가 dnf와 AL2023 루트 디바이스(/dev/xvda)를 전제한다. 값을 바꾸면 시작 템플릿이 새 버전이 되어 인스턴스가 교체된다. 맨 AL2023(SSM 퍼블릭 파라미터 /aws/service/ami-amazon-linux-latest/al2023-ami-kernel-default-x86_64)을 넣는다 (docs/ops/ai-host.md \"AMI 갱신과 무중단 교체 (KAN-246)\"). ai-ami 파이프라인이 구운 사전 적재 AMI도 user_data가 받아들이지만(docker, compose, 이미지가 있으면 건너뛴다) EBS 지연 로딩 때문에 부팅이 더 느리고 불규칙해 쓰지 않는다 (2026-10-14 실측). GPU(g4dn)로 가면 NVIDIA 드라이버 AMI와 docker runtime 설정이 함께 바뀐다 (KAN-57 판정 후)."
 
   validation {
     condition     = can(regex("^ami-[0-9a-f]{8,17}$", var.ami_id))
@@ -115,7 +115,7 @@ variable "max_size" {
 
 variable "health_check_grace_period" {
   type        = number
-  description = "ASG가 새 인스턴스의 대상 그룹 상태 검사 결과를 무시하는 시간(초, KAN-201). 첫 부팅(docker 설치 + 이미지 7GB pull + 모델 적재, 실측 3분 22초. 사전 적재 AMI를 넣으면 EBS 지연 로딩으로 최대 5분 34초)을 덮어야 한다 - 짧으면 워밍업 중인 새 인스턴스를 종료해 교체가 무한히 돈다. 파이프라인의 원격 healthy 대기(600초)와 pull 시간을 더한 값이고, staging 실측(2026-09-11, 아래 README)으로 확정한다."
+  description = "ASG가 새 인스턴스의 대상 그룹 상태 검사 결과를 무시하는 시간(초, KAN-201). 첫 부팅(docker 설치 + 이미지 7GB pull + 모델 적재, 실측 3분 22초. 사전 적재 AMI를 넣으면 EBS 지연 로딩으로 최대 5분 34초)을 덮어야 한다 - 짧으면 워밍업 중인 새 인스턴스를 종료해 교체가 무한히 돈다. 파이프라인의 원격 healthy 대기(600초)와 pull 시간을 더한 값이고, staging 실측(2026-09-11, docs/wiki/infra-history.md의 KAN-201 항목)으로 확정한다."
   default     = 900
 }
 

@@ -90,5 +90,5 @@ resource "aws_ecr_lifecycle_policy" "this" {
 
 output "ecr_repository_urls" {
   value       = { for k, r in aws_ecr_repository.this : k => r.repository_url }
-  description = "scripts/push-images.sh와 EC2 compose가 가리키는 이미지 주소. accentury/ai-model은 ai/Dockerfile의 FROM과 모델 push 절차(infra/README.md)가 쓴다"
+  description = "scripts/push-images.sh와 EC2 compose가 가리키는 이미지 주소. accentury/ai-model은 ai/Dockerfile의 FROM과 docs/ops/deploy.md \"실모델 베이스 이미지 push (KAN-173)\"의 모델 push 절차가 쓴다"
 }

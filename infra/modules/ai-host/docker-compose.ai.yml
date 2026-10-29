@@ -40,7 +40,7 @@
 #
 # 이중 로깅에는 한계가 하나 있다 - 원격 전송이 실패하면 그 줄은 사본에도 안 쌓이고 재시도하지 않는다.
 # CloudWatch가 막힌 구간은 `docker logs`로도 안 보인다는 뜻이다 (그 구간의 줄은 드라이버 버퍼에 남아
-# 있다가 복구 뒤 CloudWatch로 늦게 간다 - infra/README.md "로그 전송 차단 실증").
+# 있다가 복구 뒤 CloudWatch로 늦게 간다 - docs/wiki/infra-history.md의 KAN-203 항목).
 x-logging: &log
   driver: awslogs
   options:

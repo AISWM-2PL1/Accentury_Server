@@ -5,7 +5,7 @@ output "alerts_topic_arn" {
 
 output "email_subscription_arn" {
   value       = aws_sns_topic_subscription.email.arn
-  description = "이메일 구독. 수신자가 확인 링크를 누르기 전에는 값이 \"pending confirmation\"이다 (README '경보와 알림')."
+  description = "이메일 구독. 수신자가 확인 링크를 누르기 전에는 값이 \"pending confirmation\"이다 (docs/ops/alarms.md '수신 주소와 구독 확인')."
 }
 
 output "alarm_names" {
