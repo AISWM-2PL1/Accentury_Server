@@ -4,7 +4,7 @@
 # 묶인다. staging 워크플로가 받은 토큰으로는 prod 역할을 맡을 수 없다 (KAN-35 자격 증명 분리
 # AC의 CI 쪽 경계). 어느 브랜치가 그 environment로 배포할 수 있는지는 GitHub 저장소의
 # environment deployment branch policy가 정한다 (staging = Dev, prod = Release,
-# infra/README.md "GitHub 설정").
+# docs/ops/github.md "deployment branch policy").
 #
 # sub 형식은 repo:OWNER/REPO:environment:NAME이다. 워크플로 job이 `environment:`를 지정하면
 # 토큰의 sub가 ref(브랜치) 형식이 아니라 environment 형식으로 나온다. 브랜치 형식(ref:refs/heads/Dev)

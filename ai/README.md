@@ -16,6 +16,18 @@ BE(Spring Boot)만 호출하는 **사설망 전용** 분석 서버입니다 (API
   프레임워크가 큰 업로드를 디스크로 스풀해도 공용 임시 디렉터리로 새지 않습니다.
 - 추론에 상한(기본 75초)을 걸어 멈춘 요청이 임시파일을 무한정 붙들지 못하게 합니다. 초과하면 503입니다.
 - 본문 상한(2MB)을 multipart 파싱 전에 끊고, 오디오 파트 상한(1MB)을 다시 확인합니다. 초과하면 413입니다.
+- 분석 응답 코드는 아래가 전부입니다 (`app/analyze.py`, 401만 `app/auth.py`).
+
+  | 코드 | 언제 |
+  | --- | --- |
+  | 200 | 채점 성공 |
+  | 400 | meta 형식 오류 (BE 버그라 재전송하지 않습니다) |
+  | 401 | 내부 호출 토큰이 없거나 다릅니다 (아래 KAN-36). |
+  | 413 | 본문 또는 오디오 파트 상한 초과 |
+  | 422 | 판정 실패. §2.4 품질 코드와 불리언 `retryable`을 싣습니다. |
+  | 429 | 추론 전 거절. 차례를 기다리다 상한까지 남은 시간이 추론 1건에 모자랐습니다 (KAN-272, 아래 `ACCENTURY_AI_INFERENCE_RESERVE_SECONDS`). |
+  | 500 | 엔진 예외. 워커 재적재 뒤에도 시간이 모자란 경우와, 호출자가 `acceptsVerdicts`에 `ANALYSIS_UNSCORABLE`을 싣지 않았는데 채점 불가가 난 경우도 여기입니다. |
+  | 503 | 추론 상한 초과, 또는 health의 워밍업 전 `STARTING` |
 - **디렉터리 하나는 프로세스 하나가 전용으로 씁니다.** 기동 정리가 남아 있던 파일을 전부 지우므로,
   `uvicorn --workers`로 여러 프로세스를 띄우려면 워커마다 다른 `ACCENTURY_AI_TEMP_DIR`를 줘야 합니다.
 - 기동 시 디렉터리에 남아 있던 파일은 나이와 무관하게 전부 지웁니다(앞선 프로세스의 잔여물뿐입니다).
@@ -89,9 +101,8 @@ AI 서버는 backend와 다른 EC2에서 돕니다 (KAN-36 A단계). 같은 comp
     `numpy.float32`, `numpy.int64`면 거절됩니다 - 파이썬 `float`/`int`의 하위 타입이
     아니라서, 막지 않으면 응답 조립 시점에 500이 되고 BE가 재전송 예산을 태웁니다.
     엔진은 파이썬 기본 타입으로 변환해서 냅니다.
-- 스텁 엔진은 2026-09-05에 제거했습니다 (KAN-22). 실모델은 개발 기계(arm64)와 CI 러너에서
-  돌릴 수 없어 로컬 풀스택과 E2E가 함께 사라졌는데, 그러자 앱과 웹의 완주 확인이 돌릴 스택을
-  통째로 잃었습니다 (PR #87 리뷰). 그래서 `fake` 엔진(`app/fake.py`)을 두었습니다 -
+- 스텁 엔진은 없습니다 (KAN-22). 실모델은 개발 기계(arm64)와 CI 러너에서 돌릴 수 없어서, 앱과 웹의
+  완주 확인이 돌릴 스택으로 `fake` 엔진(`app/fake.py`)을 둡니다 (경위는 `docs/wiki/infra-decisions.md`) -
   `ACCENTURY_AI_ANALYSIS_ENGINE=fake`로 명시해야 켜지고, 점수는 `correlationId`의 해시라
   추론이 아니며(`modelVersion`이 `fake-0.1`로 나가 정체가 드러납니다), 배포 compose가 켜는
   `ACCENTURY_AI_INTERNAL_TOKEN_REQUIRED=true`와는 양립하지 않아 운영에서는 기동이 거부됩니다.
@@ -106,13 +117,15 @@ AI 서버는 backend와 다른 EC2에서 돕니다 (KAN-36 A단계). 같은 comp
 
 **어댑터는 워커 프로세스를 하나 띄웁니다.**
 
-- 전달본의 `Track1Scorer.score()`는 동기이고 14~30초입니다 (08-30 실측). 스레드로 넘기면
+- 전달본의 `Track1Scorer.score()`는 동기이고 c7i.xlarge에서 1건 P95 11.1초입니다 (KAN-57, KAN-172). 스레드로 넘기면
   엔진 계약 2번("취소가 실제로 닿아야 한다")을 지킬 수 없습니다 - 파이썬에는 스레드를
   밖에서 멈추는 수단이 없어서, 라우트가 503을 내고 임시파일을 지운 뒤에도 그 스레드는
   계속 돕니다. 그래서 워커를 별도 세션으로 띄우고 취소 때 **프로세스 그룹째** 죽입니다
   (MFA가 워커의 자식이라 그룹째가 아니면 정렬만 살아남습니다).
 - 워커는 기동 시 한 번 뜨고 모델을 한 번만 적재합니다. 요청은 stdin/stdout 파이프로 한 줄씩
-  오갑니다. 워커가 밖에서 죽으면(OOM 킬러 등) 다음 요청이 새 워커로 한 번 다시 시도합니다.
+  오갑니다. 워커가 밖에서 죽으면(OOM 킬러 등) 같은 요청 안에서 워커를 다시 적재하고 한 번만 다시
+  시도합니다. 재적재 뒤 남은 시간이 추론에 모자라면 시작하지 않고 500으로 끊고(429가 아닌 것은 추론이
+  이미 돌았을 수 있어서입니다), 두 번째도 워커가 죽으면 그대로 500입니다 (`app/track1.py`).
 - **취소의 대가는 재적재입니다.** 죽인 뒤 다음 분석은 가중치를 다시 올릴 때까지 기다립니다.
   그래서 `ACCENTURY_AI_ANALYSIS_TIMEOUT_SECONDS`는 정상 추론보다 넉넉해야 합니다 - 상한을
   P95 근처로 조이면 정상 요청이 서로의 재적재를 기다리는 형태로 무너집니다 (KAN-172).
@@ -128,9 +141,8 @@ AI 서버는 backend와 다른 EC2에서 돕니다 (KAN-36 A단계). 같은 comp
 
 ### 추론 단계별 소요 시간 (KAN-204)
 
-문항 하나가 10초대(TTS 발화 실측 9.9\~11.1초)인데 그 시간이 어느 단계에 쓰였는지가 로그에도
-지표에도 없었습니다. GPU 전환(KAN-57)은 Whisper만 줄이고 MFA는 CPU 작업이라 그대로인데 두
-단계의 비율을 모르면 그 판단이 추정으로 남습니다.
+문항 하나의 추론 시간이 어느 단계에 쓰였는지를 로그와 지표로 남깁니다. GPU 전환(KAN-57)은 Whisper만
+줄이고 MFA는 CPU 작업이라 그대로라서, 두 단계의 비율을 알아야 그 판단이 추정으로 남지 않습니다.
 
 라우트가 수첩(`app/stages.py`의 `StageRecord`)을 하나 만들어 `AnalysisRequest`에 실어 보내고
 어댑터가 채웁니다. 추적 ID와 같은 성격입니다 - **라우트가 쥐고 있어야** 시간 초과처럼 결과가
@@ -145,10 +157,8 @@ AI 서버는 backend와 다른 EC2에서 돕니다 (KAN-36 A단계). 같은 comp
 | `total` | 엔진 호출 전체 (합계) | 라우트 |
 
 **전달본 몫은 봉투의 `detail.stageMs`에서 받습니다** (KAN-293). `score()` 안쪽은 어댑터에서 잴 수
-없어 워커 결과 JSON의 `stageMs`(단계 이름 -> ms)로 받기로 했는데(KAN-204), 2026-10-24 ECR
-`ai-model:26ac67a`의 `serve.py`를 꺼내 보니 전달본은 이미 `detail.stageMs = {"stt", "mfa", "score"}`를
-싣고 있었고 어댑터는 최상위 `stageMs`만 보고 있어 그 값을 전부 버리고 있었습니다. 그래서 워커
-(`_stage_ms`)가 최상위가 없으면 `detail.stageMs`를 읽고, 옛 이름을 `stt` -> `transcribe`,
+없어 워커 결과 JSON의 단계 시간(단계 이름 -> ms)으로 받습니다. 워커(`_stage_ms`)는 최상위 `stageMs`가
+없으면 `detail.stageMs`를 읽고, 옛 이름을 `stt` -> `transcribe`,
 `mfa` -> `align`, `score` -> `scoring`으로 옮겨 부모에게 넘깁니다. 둘 다 있으면 최상위가 우선입니다.
 옛 `score`는 F0 추출(`extract_utterance`)까지 합친 값이라 `scoring`에 F0가 섞여 있고, `gate`와 `f0`는
 비어 있습니다. 목록에 없는 이름은 버립니다 - 이름이 곧 CloudWatch 차원 값이고 조합 하나가 월 0.30달러입니다.
@@ -161,14 +171,14 @@ Whisper, `gate`는 `align_transcript`, `align`은 MFA, `f0`는 `extract_utteranc
 바꿉니다. `modelVersion`은 `track1-v3.4-2026-08-31b+f77011c+whisper-large-v3+bfloat16`으로 나옵니다.
 
 콜드/웜은 **그 워커에서 MFA가 처음 실제로 돈 요청까지인가**입니다 (KAN-293). 가중치는 워밍업에서
-이미 올라와 있어도 전달본 안쪽의 지연 초기화가 첫 채점에서 한 번 일어납니다 - staging 첫 호출 22.9초와
-그 뒤 10초대의 차이가 그것입니다 (KAN-172 실측). 그 실체는 MFA 첫 실행이라(KAN-293 실측 `align` 17.5초,
-그 뒤 4~6초) 게이트 탈락처럼 MFA 전에 끝난 요청은 콜드를 소비하지 않고, 전달본이 돌려준 단계 시간에
+이미 올라와 있어도 전달본 안쪽의 지연 초기화가 첫 채점에서 한 번 일어나고, 그 실체는 MFA 첫 실행입니다
+(측정치는 `docs/wiki/infra-history.md`의 KAN-172, KAN-293 항목). 그래서 게이트 탈락처럼 MFA 전에 끝난 요청은 콜드를 소비하지 않고, 전달본이 돌려준 단계 시간에
 `align`이 처음 있는 요청까지 콜드입니다. 전달본이 단계 시간을 돌려주지 않으면 첫 채점에서 웜이 됩니다.
 
 값은 두 곳으로 나갑니다.
 
-- 요청 종료 로그 한 줄 - `... warm=cold stages=lockWait:3,model:22901,total:22904`
+- 요청 종료 로그 한 줄 - `분석 종료 ... status=... quality=<품질 코드> ... warm=cold stages=lockWait:3,model:22901,transcribe:...,align:...,total:22904`
+  (품질 코드는 KAN-272, 전달본 단계 이름은 KAN-293부터 찍힙니다)
 - `GET /internal/v0/metrics/stages` - 호스트 타이머가 1분마다 훑어 CloudWatch
   `accentury/ai` `StageDuration`으로 올립니다 (차원 `env`, `stage`, `warm`).
   **읽으면 비워집니다** - 소비자가 그 타이머 하나라는 전제이고, 그 회차의 발행이 실패하면 그
@@ -214,16 +224,19 @@ Whisper, `gate`는 `align_transcript`, `align`은 MFA, `f0`는 `extract_utteranc
 사유와 함께 건너뜁니다 - 조용히 통과시키지 않습니다.
 
 ```bash
-# 레포 루트에서. 베이스가 모델 이미지라 ECR 로그인이 먼저 필요합니다 (infra/README.md "모델 교체").
+# 레포 루트에서. 베이스가 모델 이미지라 ECR 로그인이 먼저 필요합니다 (docs/ops/deploy.md "모델 교체 (KAN-22)").
 docker build --platform linux/amd64 -t accentury-ai:dev ai
 docker run --rm --platform linux/amd64 -v "$PWD/ai:/src" -w /src \
     -e ACCENTURY_AI_ANALYSIS_TIMEOUT_SECONDS=600 accentury-ai:dev \
-    sh -c "pip install -q --user pytest httpx && \
+    sh -c "pip install -q --user pytest httpx2 && \
            python -m pytest tests/contract --contract-audio=/src/samples/1-5.wav"
 ```
 
 운영 이미지에는 pytest가 없어서 컨테이너 안에서 `--user`로 한 번 깔고 돕니다 (비루트라 시스템
-site-packages에는 못 씁니다). 마운트한 체크아웃의 `app/`이 임포트되므로 지금 고치고 있는 코드가
+site-packages에는 못 씁니다). `TestClient`의 HTTP 클라이언트는 `httpx2`입니다 - 잠금 파일의 starlette 1.7.0은
+`httpx2`를 먼저 찾고, 없으면 `httpx`로 돌되 폐기 경고를 냅니다 (`requirements-dev.txt`가 둘 다 두는 이유).
+`ai/samples/`는 레포에 없습니다 - 아래 조건에 맞는 WAV를 직접 `ai/samples/1-5.wav`로 넣고 돌립니다
+(`.gitignore`가 막지 않으니 커밋하지 않도록 주의합니다). 마운트한 체크아웃의 `app/`이 임포트되므로 지금 고치고 있는 코드가
 검사 대상이고, 모델과 참조는 이미지의 `/app/src`에서 옵니다. 상한을 600초로 올린 것은 x86
 에뮬레이션(애플 실리콘)에서 추론 1건이 40초대이기 때문입니다 - 실제 x86 호스트에서는 기본값이면 됩니다.
 
@@ -233,7 +246,7 @@ site-packages에는 못 씁니다). 마운트한 체크아웃의 `app/`이 임�
   판정 실패로 끊고, 그러면 성공 경로 항목이 통째로 오탐합니다. 녹음은 스위트가 쓰는
   `scriptKey`("1|5")의 대본을 읽은 것이어야 합니다.
 - `ACCENTURY_AI_ANALYSIS_TIMEOUT_SECONDS`가 정상 추론과 워커 재적재보다 넉넉해야
-  합니다. 기본값 75초는 c7i.xlarge 기준(KAN-172, 배포 중 backend 태스크 6개분과 워커 재적재를 덮는 값)이라 느린 기계(에뮬레이션 등)에서는 올립니다. 스위트는 나머지 설정도
+  합니다. 기본값 75초는 c7i.xlarge 기준(KAN-172, 한 호스트에 겹친 호출 6건(전달 워커 3 x 롤링 배포 중 태스크 2)과 워커 재적재를 덮는 값)이라 느린 기계(에뮬레이션 등)에서는 올립니다. 스위트는 나머지 설정도
   `Settings.from_env()`로 읽습니다 (내부 토큰만 끕니다 - 인증은 KAN-36의 전용 테스트가 봅니다).
 
 503 항목은 서버를 하나 더 띄우지 않고 그 항목 동안만 `app.state.settings`의 상한을 바꿉니다
@@ -246,7 +259,6 @@ site-packages에는 못 씁니다). 마운트한 체크아웃의 `app/`이 임�
 | 항목 | 담당 |
 | --- | --- |
 | `GET /internal/v0/models` (모델 버전) | 미정 - 지금은 응답의 `modelVersion`이 같은 값을 싣습니다 |
-| 지연 예산 재확정 (P95) | KAN-57 판정, KAN-172 재조정. 08-30 실측은 1건 14~30초입니다 |
 | GPU 전환 | KAN-57 판정 후 |
 
 `correlationId` 기반 멱등 캐시는 **범위 밖입니다** (2026-09-01 정정). BE가 일시 장애 뒤 같은
@@ -269,7 +281,7 @@ pytest                               # 계약 스위트는 전달본이 없으�
 
 ```bash
 ACCENTURY_AI_ANALYSIS_ENGINE=fake .venv/bin/uvicorn app.main:app --port 8000
-# 또는 루트에서 docker compose up -d --build  (DB + 가짜 AI + BE)
+# 또는 루트에서 docker compose up -d --build  (DB + Redis + 가짜 AI + BE)
 ```
 
 ## 의존성 잠금 (KAN-246)
@@ -293,7 +305,7 @@ ACCENTURY_AI_ANALYSIS_ENGINE=fake .venv/bin/uvicorn app.main:app --port 8000
 ```bash
 cd ai
 
-# 1. 모델 태그를 바꿨을 때만 - 전달본의 패키지 목록을 다시 받습니다 (ECR 로그인 필요, infra/README.md "모델 교체")
+# 1. 모델 태그를 바꿨을 때만 - 전달본의 패키지 목록을 다시 받습니다 (ECR 로그인 필요, docs/ops/deploy.md "모델 교체 (KAN-22)")
 docker run --rm --platform linux/amd64 --entrypoint pip \
   325771561913.dkr.ecr.ap-northeast-2.amazonaws.com/accentury/ai-model:<MODEL_TAG> freeze \
   | grep -v ' @ ' > model-base.constraints     # 머리말 주석은 다시 붙입니다

@@ -11,7 +11,7 @@ data "aws_route53_zone" "this" {
 # SAN 목록을 내보내지도 않는다. 그래서 나중에 apex 전용 인증서가 하나 더 발급되면
 # most_recent가 그것을 잡아 staging.accentury.app이 인증서 불일치로 502가 난다.
 # 와일드카드 인증서 2장(us-east-1, 서울)에 accentury-role = wildcard 태그를 붙여 두고
-# (KAN-119, README 사전 요건) 그 태그로만 고른다. 태그가 없으면 plan이 empty result로
+# (KAN-119, docs/ops/teardown.md "사전 요건") 그 태그로만 고른다. 태그가 없으면 plan이 empty result로
 # 시끄럽게 실패한다 - 조용한 502보다 낫다 (PR 리뷰 반영, 2026-08-25).
 locals {
   wildcard_certificate_tags = { accentury-role = "wildcard" }
@@ -201,7 +201,7 @@ module "edge" {
 
 # backend - ECS Fargate 서비스 (KAN-165). 0.5 vCPU / 2 GB 온디맨드, 목표 추적 오토스케일링 min 1 max 3 (KAN-168).
 # min/max와 목표값은 두 환경이 같아야 하므로 tfvars가 아니라 모듈 기본값이다.
-# 이미지 태그는 SSM IMAGE_TAG(파이프라인 소유)를 읽으므로 첫 apply 전에 그 파라미터가 있어야 한다 (README).
+# 이미지 태그는 SSM IMAGE_TAG(파이프라인 소유)를 읽으므로 첫 apply 전에 그 파라미터가 있어야 한다 (docs/ops/teardown.md "사전 요건").
 module "fargate" {
   source = "../../modules/fargate"
 
@@ -253,7 +253,7 @@ module "ai_host" {
 # AI 호스트 AMI 사전 적재 파이프라인 (KAN-285). EC2 Image Builder가 최신 AL2023에 docker, compose, 활성 accentury/ai
 # 이미지를 구워 AMI로 남긴다 - 첫 부팅 3분 22초 중 docker 설치와 pull 2분 33초를 없앤다. AMI는 두 환경이 함께 쓰므로
 # 파이프라인은 한 환경(prod, tfvars ai_ami_pipeline_enabled)만 갖는다. 구운 AMI ID는 두 환경 tfvars ai_ami_id에 손으로
-# 적는다 (README "AI 호스트 AMI 갱신"). 빌드 인스턴스는 이 환경의 퍼블릭 서브넷에 뜬다 - 기본 VPC가 없다.
+# 적는다 (docs/ops/ai-host.md "사전 적재 AMI는 쓰지 않는다 (KAN-285)"). 빌드 인스턴스는 이 환경의 퍼블릭 서브넷에 뜬다 - 기본 VPC가 없다.
 module "ai_ami" {
   source = "../../modules/ai-ami"
   count  = var.ai_ami_pipeline_enabled ? 1 : 0

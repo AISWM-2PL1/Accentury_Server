@@ -66,7 +66,7 @@ public class KakaoWebhookAuth {
         String stripped = requireKey(key);
         if (PLACEHOLDER.equals(stripped)) {
             log.warn("카카오 웹훅 검증 키가 자리 표시 값이다 - Admin 키를 넣기 전까지 모든 웹훅을 거부한다 "
-                    + "(infra README \"카카오 공유 웹훅 검증 키\" 절)");
+                    + "(docs/ops/secrets-ssm.md \"카카오 공유 웹훅 검증 키 (KAN-164)\" 절)");
             this.expectedKey = null;
         } else {
             this.expectedKey = stripped.getBytes(StandardCharsets.UTF_8);

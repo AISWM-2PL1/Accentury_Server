@@ -152,7 +152,7 @@ jobs:
             # SSM 토큰은 그 환경의 도메인 밖으로 나가지 않는다 (머리말, Codex 리뷰 P1).
             if [ -z "${APP_DOMAIN:-}" ]; then
               echo "environment 변수 APP_DOMAIN이 없습니다. 환경이 철거됐거나 변수를" >&2
-              echo "채우지 않은 상태입니다 (infra/README.md \"GitHub 설정\")." >&2
+              echo "채우지 않은 상태입니다 (docs/ops/github.md \"environment 변수\")." >&2
               exit 1
             fi
             base_url="https://$APP_DOMAIN"

@@ -136,7 +136,7 @@ resource "aws_vpc_security_group_ingress_rule" "backend_from_alb" {
 #   5432 -> rds-sg, 6379 -> redis-sg, 8000 -> ai-alb-sg
 # VPC DNS, ECS 태스크 메타데이터, Time Sync는 SG가 거르지 않는다 (AWS VPC 문서) - 규칙이 필요 없다.
 # 퍼블릭 IP를 받지만 인바운드는 alb-sg 참조 하나뿐이라 인터넷에서 닿을 길이 없다.
-# 살아 있는 SG에서 넓은 규칙을 지우는 apply는 좁은 규칙이 먼저 생긴 뒤여야 한다 - README "backend 아웃바운드".
+# 살아 있는 SG에서 넓은 규칙을 지우는 apply는 좁은 규칙이 먼저 생긴 뒤여야 한다 - docs/ops/waf-edge.md "backend 아웃바운드 규칙의 적용 순서".
 resource "aws_vpc_security_group_egress_rule" "backend_https_ipv4" {
   security_group_id = aws_security_group.backend.id
   description       = "HTTPS to AWS APIs, IdPs, Slack, Kakao"

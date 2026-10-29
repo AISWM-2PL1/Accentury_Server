@@ -62,7 +62,7 @@ variable "training_bucket_enabled" {
 
 variable "ai_ami_id" {
   type        = string
-  description = "AI 호스트의 AMI ID (KAN-246, KAN-285). ai-ami 파이프라인이 구운 사전 적재 AMI(accentury-ai-host-<빌드 날짜>, AL2023 x86_64 + docker + compose + 활성 ai 이미지)다. 월 1회 파이프라인을 돌려 staging, prod 순으로 새 값으로 바꾼다 (README \"AI 호스트 AMI 갱신\"). 맨 AL2023 AMI를 넣어도 user_data가 같은 호스트를 만들지만 첫 부팅이 약 2분 30초 길다."
+  description = "AI 호스트의 AMI ID (KAN-246, KAN-285). ai-ami 파이프라인이 구운 사전 적재 AMI(accentury-ai-host-<빌드 날짜>, AL2023 x86_64 + docker + compose + 활성 ai 이미지)다. 월 1회 파이프라인을 돌려 staging, prod 순으로 새 값으로 바꾼다 (docs/ops/ai-host.md \"AMI 갱신과 무중단 교체 (KAN-246)\"). 맨 AL2023 AMI를 넣어도 user_data가 같은 호스트를 만들지만 첫 부팅이 약 2분 30초 길다."
 }
 
 variable "ai_ami_pipeline_enabled" {
@@ -106,17 +106,17 @@ variable "waf_enforce" {
 
 variable "waf_rate_limit" {
   type        = number
-  description = "WAF rate-based rule: IP당 5분 창의 세션 생성 + 음성 업로드 허용 수 (KAN-149). 산정 근거는 README 'WAF 웹 ACL'."
+  description = "WAF rate-based rule: IP당 5분 창의 세션 생성 + 음성 업로드 허용 수 (KAN-149). 산정 근거는 docs/ops/waf-edge.md 'rate limit 임계값 300의 근거'."
 }
 
 variable "waf_auth_rate_limit" {
   type        = number
-  description = "WAF rate-based rule: IP당 5분 창의 로그인 + refresh 허용 수 (KAN-244). 근거는 README 'WAF 웹 ACL'."
+  description = "WAF rate-based rule: IP당 5분 창의 로그인 + refresh 허용 수 (KAN-244). 근거는 docs/ops/waf-edge.md '인증 경로 rate 규칙 (KAN-244)'."
 }
 
 variable "waf_admin_rate_limit" {
   type        = number
-  description = "WAF rate-based rule: IP당 5분 창의 관리자 경로 요청 허용 수 (KAN-244). 근거는 README 'WAF 웹 ACL'."
+  description = "WAF rate-based rule: IP당 5분 창의 관리자 경로 요청 허용 수 (KAN-244). 근거는 docs/ops/waf-edge.md '관리자 경로 rate 규칙 (KAN-244)'."
 }
 
 variable "waf_ip_reputation_enforce" {

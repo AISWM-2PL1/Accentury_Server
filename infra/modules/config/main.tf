@@ -6,7 +6,7 @@
 # 점은 밑줄로, 대시는 제거, 대문자다 (accentury.trusted-proxies -> ACCENTURY_TRUSTEDPROXIES).
 #
 # 같은 이름의 파라미터가 계정에 이미 있으면(재구축 전 수동 생성분) apply가 ParameterAlreadyExists로
-# 실패한다 - aws_ssm_parameter는 남의 값을 덮어쓰지 않는다. 그때는 README "이미 있는 SSM 파라미터"
+# 실패한다 - aws_ssm_parameter는 남의 값을 덮어쓰지 않는다. 그때는 docs/ops/secrets-ssm.md "이미 있는 SSM 파라미터 (재구축)"
 # 절대로 import한다.
 #
 # 여기 없는 것:
@@ -56,7 +56,7 @@ resource "aws_ssm_parameter" "ai_base_url" {
 # 들어 있다 (backend/Dockerfile의 /app/certs/rds-global-bundle.pem). 이 두 쿼리 파라미터는 wrapper가 자기
 # 것이 아니라서 그대로 pgJDBC에 넘긴다. 서버 쪽 rds.force_ssl은 PG16 기본 파라미터 그룹에서 이미 1이다.
 # 순서 주의: 이 값이 CA 번들 없는 옛 이미지에 닿으면 기동이 실패한다 - 새 이미지 배포가 먼저, 이 apply가
-# 나중이다. 이 apply 뒤로는 KAN-245 이전 이미지로 롤백하지 않는다 (README "JDBC 서버 인증서 검증").
+# 나중이다. 이 apply 뒤로는 KAN-245 이전 이미지로 롤백하지 않는다 (docs/ops/waf-edge.md "JDBC 서버 인증서 검증의 적용 순서").
 resource "aws_ssm_parameter" "datasource_url" {
   name  = "${var.ssm_prefix}/SPRING_DATASOURCE_URL"
   type  = "String"
@@ -100,7 +100,7 @@ resource "aws_ssm_parameter" "asset_base_url" {
 #
 # ephemeral 값은 plan과 apply마다 새로 뽑히지만, provider는 value_wo_version이 바뀔 때만 그 값을 쓴다.
 # 그래서 아래 버전 숫자를 올리는 것이 곧 회전이다 - 올린 뒤 apply, ai 호스트 reload, backend 새 배포,
-# E2E 스모크 순서다 (README "시크릿 회전" 절). 두 환경이 같은 모듈을 쓰므로 숫자 하나가 두 환경의 회전이고,
+# E2E 스모크 순서다 (docs/ops/secrets-ssm.md "시크릿 회전 (KAN-242)" 절). 두 환경이 같은 모듈을 쓰므로 숫자 하나가 두 환경의 회전이고,
 # 한 환경만 apply한 동안 다른 환경 plan에는 파라미터 갱신이 남는다 - 그 환경도 회전해야 한다는 표시다.
 #
 # 이 파라미터의 다른 인자(description, type 등)를 바꿀 때도 버전을 함께 올린다. provider는 다른 인자가
@@ -139,7 +139,7 @@ resource "aws_ssm_parameter" "admin_token" {
 # 값을 받지만, 한쪽 버전만 올리면 그쪽만 새 값이 되어 backend와 ai가 서로 다른 토큰을 갖는다.
 # 같은 어긋남이 apply 도중 실패로도 생긴다 (Codex 리뷰 P2) - 한쪽만 쓰인 뒤 재시도하면 재시도의 ephemeral은
 # 새 값이고 버전이 이미 맞는 쪽은 다시 쓰이지 않는다. 값이 state에 없으니 plan도 이것을 못 본다. 그래서
-# 회전 뒤 두 값을 대조하고, 다르면 버전을 한 번 더 올려 둘을 같은 apply에서 다시 쓴다 (README "시크릿 회전").
+# 회전 뒤 두 값을 대조하고, 다르면 버전을 한 번 더 올려 둘을 같은 apply에서 다시 쓴다 (docs/ops/secrets-ssm.md "시크릿 회전 (KAN-242)").
 # 한 파라미터만 -replace하는 것도 같은 이유로 하지 않는다.
 ephemeral "random_password" "ai_internal_token" {
   length  = 48
@@ -227,7 +227,7 @@ resource "aws_ssm_parameter" "ai_analysis_timeout_seconds" {
 # 카카오디벨로퍼스 콘솔([앱 설정] > [앱 키] > Admin 키)에서 읽어 오는 것이라 Terraform이 만들 수 없다.
 # 그래서 자리만 만들고 값은 밖에서 넣는다 - 첫 apply 뒤에 한 번:
 #   aws ssm put-parameter --overwrite --type SecureString --name /accentury/{env}/ACCENTURY_SHARE_KAKAOADMINKEY --value '<Admin 키>'
-# 그 다음 backend 태스크를 새로 띄운다 (secrets는 태스크 시작 시 한 번 읽힌다, README "카카오 공유 웹훅" 절).
+# 그 다음 backend 태스크를 새로 띄운다 (secrets는 태스크 시작 시 한 번 읽힌다, docs/ops/secrets-ssm.md "카카오 공유 웹훅 검증 키 (KAN-164)" 절).
 # 자리 표시 값으로 뜬 backend는 웹훅을 전부 401로 거부한다 - backend가 이 리터럴을 키로 인정하지 않기 때문이고
 # (KakaoWebhookAuth.PLACEHOLDER, SsmEnvironmentBindingTest가 대조), 그래서 카운트가 새지도 부풀지도 않는다.
 # 두 환경이 같은 카카오 앱을 쓰므로 값도 같다.
@@ -246,7 +246,7 @@ resource "aws_ssm_parameter" "kakao_admin_key" {
 # 이용 후기 알림이 나가는 슬랙 채널(#feedback)의 Incoming Webhook URL (KAN-211). 개발팀이 후기를
 # 읽는 곳이 이 채널 하나이고, 무료 플랜이라 수단도 Incoming Webhook 하나다. 값은 슬랙 콘솔이
 # 발급하는 것이라 Terraform이 만들 수 없다 - 카카오 Admin 키와 같은 사정이라 자리만 만들고
-# apply 뒤에 한 번 넣는다 (README "이용 후기 슬랙 알림" 절). write-only(value_wo)를 쓰는 이유도
+# apply 뒤에 한 번 넣는다 (docs/ops/secrets-ssm.md "이용 후기 슬랙 알림 (KAN-211)" 절). write-only(value_wo)를 쓰는 이유도
 # 위 kakao_admin_key 주석과 같다 - value로 두면 refresh가 손으로 넣은 값을 state에 평문으로 읽어 온다.
 #
 # 카카오 키와 다른 점은 하나다: 이 파라미터는 backend의 필수 설정이 아니다(DeploymentConfigGuard
@@ -320,7 +320,7 @@ resource "aws_ssm_parameter" "kakao_app_id" {
 # SDK refresh token을 이 두 값으로 교환해 성공해야 우리 앱의 토큰으로 본다 (NaverIdpVerifier). 네이버 개발자 센터의
 # 앱 설정에 있는 값이고 앱(Android, iOS)의 NAVER_CLIENT_ID, NAVER_CLIENT_SECRET과 같다.
 # Client ID는 위 셋과 같이 tfvars로 넣는 String이다. Secret은 시크릿이라 tfvars에 두지 않고 카카오 Admin 키처럼
-# 자리만 만든 뒤 apply 뒤에 한 번 넣는다 (README "소셜 로그인" 절):
+# 자리만 만든 뒤 apply 뒤에 한 번 넣는다 (docs/ops/secrets-ssm.md "재구축 뒤 넣는 시크릿 5종" 절):
 #   aws ssm put-parameter --overwrite --type SecureString --name /accentury/{env}/ACCENTURY_AUTH_NAVERCLIENTSECRET --value '<Client Secret>'
 # 그 다음 backend 태스크를 새로 띄운다. 둘 중 하나라도 자리 표시 값인 동안 네이버 로그인만 401이다.
 # write-only인 이유는 kakao_admin_key 주석과 같다.
@@ -339,7 +339,7 @@ resource "aws_ssm_parameter" "naver_client_secret" {
 
 # 탈퇴한 애플 계정의 토큰 revoke (KAN-241, 애플 심사 지침 5.1.1(v)). backend가 애플 키(.p8)로 client_secret JWT를
 # 서명해 앱이 보낸 authorization code를 교환하고 revoke한다 (AppleTokenRevoker). 팀 ID와 키 ID는 시크릿이 아니라
-# tfvars로 넣는 String이고, 키 원문은 네이버 Secret처럼 자리만 만든 뒤 apply 뒤에 한 번 넣는다 (README "소셜 로그인" 절):
+# tfvars로 넣는 String이고, 키 원문은 네이버 Secret처럼 자리만 만든 뒤 apply 뒤에 한 번 넣는다 (docs/ops/secrets-ssm.md "재구축 뒤 넣는 시크릿 5종" 절):
 #   aws ssm put-parameter --overwrite --type SecureString --name /accentury/{env}/ACCENTURY_AUTH_APPLEPRIVATEKEY --value file://AuthKey_XXXXXXXXXX.p8
 # 그 다음 backend 태스크를 새로 띄운다.
 #
@@ -368,7 +368,7 @@ resource "aws_ssm_parameter" "apple_private_key" {
 # ---- 사투리 텍스트 번역 (KAN-266) ----
 
 # Gemini API 키. Google AI Studio가 발급하는 값이라 Terraform이 만들 수 없다 - 카카오 Admin 키와 같은 사정이라 자리만
-# 만들고 apply 뒤에 한 번 넣는다 (README "사투리 텍스트 번역" 절):
+# 만들고 apply 뒤에 한 번 넣는다 (docs/ops/secrets-ssm.md "사투리 텍스트 번역 (KAN-266)" 절):
 #   aws ssm put-parameter --overwrite --type SecureString --name /accentury/{env}/ACCENTURY_TRANSLATION_APIKEY --value '<API 키>'
 # 그 다음 backend 태스크를 새로 띄운다. 환경마다 AI Studio 프로젝트와 키가 따로다 (2026-10-08 결정 - staging 실증이
 # prod 무료 한도를 쓰지 않게). write-only인 이유는 kakao_admin_key 주석과 같다.
