@@ -43,32 +43,32 @@ AI 서버로 보내므로 `accentury.analysis.ai-base-url`과 `accentury.analysi
 
 스키마 정본은 `src/main/resources/db/migration`이다. Hibernate는 `ddl-auto: validate`로만 돌아 엔티티와
 스키마가 어긋나면 기동을 막고, validate가 안 보는 길이, nullable, 인덱스 집합은 `SchemaBaselineTest`가
-대조한다 (KAN-123).
+대조한다.
 
-`V1__baseline.sql`은 옛 V1~V12를 하나로 합친 재베이스라인 파일이다 (KAN-220). 합친 출처 표는 그 파일 머리
+`V1__baseline.sql`은 옛 V1~V12를 하나로 합친 재베이스라인 파일이다. 합친 출처 표는 그 파일 머리
 주석에 있고, staging과 prod의 이력에서 V1은 `1 / BASELINE` 한 행이다 (V1을 실행하지 않고 기록만 했다). 전환
-경위는 `docs/wiki/infra-history.md`의 KAN-220 항목, 절차와 복구 경로는 [`docs/ops/rds-flyway.md`](../docs/ops/rds-flyway.md) "RDS 운영자 접속과 Flyway
-재베이스라인 (KAN-220)" 절에 있다.
+경위는 `docs/wiki/infra-history.md`의 Flyway 재베이스라인 항목, 절차와 복구 경로는
+[`docs/ops/rds-flyway.md`](../docs/ops/rds-flyway.md)에 있다.
 
 | 파일 | 내용 |
 | --- | --- |
-| `V1__baseline.sql` | 재베이스라인 스키마와 정의 gn-2026.09.4, 그 활성 포인터 (KAN-220) |
-| `V2__app_user.sql` | 앱 계정 `app_user`와 세션의 계정 귀속 (KAN-223) |
-| `V3__test_session_user_set_null.sql` | 탈퇴 때 세션의 계정 FK를 `on delete set null`로 (KAN-241) |
-| `V4__active_version_audit_caller_ip.sql` | 활성 버전 전환 감사에 호출 IP (KAN-244) |
-| `V5__gn_2026_10_1_seven_items.sql` | 정의 gn-2026.10.1 발행, 7문항 세트 VVWVWWW (KAN-260) |
-| `V6__voice_consent.sql` | 음성 저장 선택 동의와 계정과 음성의 대응표 (KAN-269) |
-| `V7__word_learning.sql` | 단어 학습 발행본, 시도, 답안, 오답 테이블 (KAN-265) |
-| `V8__wd_gn_2026_10_1_word_learning.sql` | 단어 학습 발행본 wd-gn-2026.10.1 (KAN-265) |
-| `V9__intonation_learning.sql` | 억양 학습 발행본 테이블 (KAN-264) |
-| `V10__in_gn_2026_10_1_intonation_learning.sql` | 억양 학습 발행본 in-gn-2026.10.1 (KAN-264) |
-| `V11__gn_2026_10_2_curated.sql` | 정의 gn-2026.10.2 발행, 사람 검수본 (KAN-276) |
-| `V12__translation_subject.sql` | 번역 기록의 계정별 대체 ID 대응표 (KAN-266) |
-| `V13__intonation_learning_attempt.sql` | 억양 학습 채점 시도 (KAN-267) |
-| `V14__level_test_record.sql` | 계정의 레벨테스트 최근 등급 기록 (KAN-268) |
-| `V15__gn_2026_10_2_voice_emotion.sql` | gn-2026.10.2 음성 문항에 감정 톤을 제자리 UPDATE (KAN-282, 아래 불변 예외) |
-| `V16__learning_attendance.sql` | 계정의 출석일 기록 (KAN-286) |
-| `V17__test_session_complete_requested_at.sql` | 세션의 첫 `/complete` 호출 시각 (KAN-284) |
+| `V1__baseline.sql` | 재베이스라인 스키마와 정의 gn-2026.09.4, 그 활성 포인터 |
+| `V2__app_user.sql` | 앱 계정 `app_user`와 세션의 계정 귀속 |
+| `V3__test_session_user_set_null.sql` | 탈퇴 때 세션의 계정 FK를 `on delete set null`로 |
+| `V4__active_version_audit_caller_ip.sql` | 활성 버전 전환 감사에 호출 IP |
+| `V5__gn_2026_10_1_seven_items.sql` | 정의 gn-2026.10.1 발행, 7문항 세트 VVWVWWW |
+| `V6__voice_consent.sql` | 음성 저장 선택 동의와 계정과 음성의 대응표 |
+| `V7__word_learning.sql` | 단어 학습 발행본, 시도, 답안, 오답 테이블 |
+| `V8__wd_gn_2026_10_1_word_learning.sql` | 단어 학습 발행본 wd-gn-2026.10.1 |
+| `V9__intonation_learning.sql` | 억양 학습 발행본 테이블 |
+| `V10__in_gn_2026_10_1_intonation_learning.sql` | 억양 학습 발행본 in-gn-2026.10.1 |
+| `V11__gn_2026_10_2_curated.sql` | 정의 gn-2026.10.2 발행, 사람 검수본 |
+| `V12__translation_subject.sql` | 번역 기록의 계정별 대체 ID 대응표 |
+| `V13__intonation_learning_attempt.sql` | 억양 학습 채점 시도 |
+| `V14__level_test_record.sql` | 계정의 레벨테스트 최근 등급 기록 |
+| `V15__gn_2026_10_2_voice_emotion.sql` | gn-2026.10.2 음성 문항에 감정 톤을 제자리 UPDATE (아래 불변 예외) |
+| `V16__learning_attendance.sql` | 계정의 출석일 기록 |
+| `V17__test_session_complete_requested_at.sql` | 세션의 첫 `/complete` 호출 시각 |
 
 | 상황 | 하는 일 |
 | --- | --- |
@@ -78,11 +78,10 @@ AI 서버로 보내므로 `accentury.analysis.ai-base-url`과 `accentury.analysi
 규칙:
 
 - 적용된 마이그레이션 파일은 고치지 않는다 (checksum 검증). 스키마 변경도 정의 변경도 새 파일이다.
-- 테스트 정의는 발행 후 불변이다 (KAN-26, §5.4). 대본 한 글자를 고쳐도 새 testVersion을 새 마이그레이션으로
+- 테스트 정의는 발행 후 불변이다 (§5.4). 대본 한 글자를 고쳐도 새 testVersion을 새 마이그레이션으로
   발행하고, 활성 전환은 배포 뒤 `PUT /admin/v0/active-version`이 따로 한다 (2단계 롤아웃).
   예외는 하나다. V15는 세션, 채점, 세트 구성이 바뀌지 않는 화면용 필드(`emotion`) 하나만 더하는 일이라
-  gn-2026.10.2를 새 버전 없이 제자리에서 UPDATE했다 (2026-10-13 결정, KAN-282). 활성 전환 없이 배포만으로
-  반영된다.
+  gn-2026.10.2를 새 버전 없이 제자리에서 UPDATE한다. 활성 전환 없이 배포만으로 반영된다.
 - 발행 마이그레이션은 손으로 쓰지 않는다. 레벨테스트 정의는 `tools/content/build_definition.py`, 단어 학습
   발행본은 `tools/content/build_word_learning.py`, 억양 학습 발행본은 `tools/content/build_intonation_learning.py`가
   만든다. 학습 발행본도 발행 후 불변이고 활성 포인터가 없다. 서버가 발행 시각이 가장 늦은 행을 쓴다.

@@ -1,6 +1,6 @@
 # Accentury_Server
 
-Accentury(경남 사투리 레벨 테스트)의 서버 쪽 레포다. 2026-09-22에 모노레포 `Accentury`를 둘로 나눴다 (KAN-221).
+Accentury(경남 사투리 레벨 테스트)의 서버 쪽 레포다.
 
 | 레포 | 내용 |
 | --- | --- |
@@ -8,7 +8,7 @@ Accentury(경남 사투리 레벨 테스트)의 서버 쪽 레포다. 2026-09-22
 | [Accentury_App](https://github.com/AISWM-2PL1/Accentury_App) | Android 앱, iOS 앱, 웹(Vite), 자산 |
 | [Accentury_Prototype](https://github.com/AISWM-2PL1/Accentury_Prototype) | 분리 전 모노레포. 읽기 전용 아카이브. 커밋 메시지의 `#NNN`은 이 레포의 PR 번호다. |
 
-브랜치 모델은 그대로다: `Dev` 병합이 staging 배포, `Release` 병합이 prod 배포 (`.github/workflows/deploy.yml`).
+브랜치 모델: `Dev` 병합이 staging 배포, `Release` 병합이 prod 배포다 (`.github/workflows/deploy.yml`).
 
 ## 시작
 

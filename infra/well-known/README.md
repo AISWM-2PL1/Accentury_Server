@@ -1,4 +1,4 @@
-# App Link 검증 파일 (KAN-32 4단계)
+# App Link 검증 파일
 
 `https://accentury.app/t?c=...` 링크를 브라우저가 아니라 앱이 받게 하려면, 그 도메인이
 "이 앱을 인정한다"고 공개적으로 선언해야 한다. 그 선언이 여기 있는 두 파일이고, 각 환경의
@@ -56,7 +56,7 @@ Accentury_App `ios/Accentury/Config/Local.xcconfig`의 팀 ID는 gitignore돼 �
 | 무엇 | 어디 | 붙들고 있는 테스트 |
 |---|---|---|
 | 안드로이드 host, path, autoVerify | Accentury_App `app/src/main/AndroidManifest.xml` | `AppLinkTest` (매니페스트를 직접 읽어 `APP_LINK_ORIGINS`와 대조) |
-| 매니페스트 `android:path` 복사본 | `infra/modules/edge/app-link-paths.json` (KAN-221, 매니페스트를 바꾸면 같이 고친다) | `spa-rewrite.test.mjs` (AASA와 대조) |
+| 매니페스트 `android:path` 복사본 | `infra/modules/edge/app-link-paths.json` (매니페스트를 바꾸면 같이 고친다) | `spa-rewrite.test.mjs` (AASA와 대조) |
 | 안드로이드 진입 origin | Accentury_App `app/.../web/AppLink.kt`의 `APP_LINK_ORIGINS` | 위와 같음 |
 | iOS host | Accentury_App `ios/Accentury/Accentury.entitlements` | `AppLinkTests` (entitlements를 직접 읽어 `appLinkOrigins`와 대조) |
 | iOS 진입 origin | Accentury_App `ios/AccenturyCore/.../Web/AppLink.swift`의 `appLinkOrigins` | 위와 같음 |
@@ -74,7 +74,7 @@ CloudFront Function이 "마지막 경로 조각에 점이 없으면 `/index.html
 
 ### 릴리스 지문 (prod, staging 공통)
 
-`~/keys/accentury-release.jks`의 인증서 SHA-256이다 (KAN-163).
+`~/keys/accentury-release.jks`의 인증서 SHA-256이다.
 정본은 Accentury_App `docs/wiki/android-release-signing.md` §1의 표다.
 
 CI가 실제로 서명한 APK에서 다시 뽑는 쪽이 더 확실하다 -
@@ -90,7 +90,7 @@ Accentury_App `.github/workflows/app-release.yml`의 서명 스텝이 `apksigner
 "$ANDROID_HOME/build-tools/<버전>/apksigner" verify --print-certs app-release.apk
 ```
 
-> **Play App Signing 함정 (KAN-174).** 구글이 앱 서명 키를 새로 생성하는 쪽을 고르면, 스토어가
+> **Play App Signing 함정.** 구글이 앱 서명 키를 새로 생성하는 쪽을 고르면, 스토어가
 > 배포하는 APK는 **구글의 키**로 다시 서명된다. 그러면 여기 적을 지문은 이 키스토어의 것이 아니라
 > Play Console › 설정 › 앱 서명(App integrity)에 표시된 **앱 서명 인증서**의 SHA-256이다.
 > 갈아 두지 않으면 스토어에서 받은 앱만 딥링크 검증에 실패한다 - 로컬 릴리스 빌드로는 재현되지
