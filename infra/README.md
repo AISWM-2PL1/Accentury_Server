@@ -214,6 +214,7 @@ KAN-297 전에는 이 파일 한 곳에 모든 절이 있었다. 코드 주석�
 | App Link 검증 파일 (KAN-32), 등급 공유 이미지 (KAN-132), 이미지 배포 파이프라인과 롤백 (KAN-128), 실모델 베이스 이미지 push (KAN-173) | [`docs/ops/deploy.md`](../docs/ops/deploy.md) |
 | backend Fargate 서비스 (KAN-165), backend 오토스케일링 (KAN-168) | [`docs/ops/backend.md`](../docs/ops/backend.md) |
 | 종료 내결함성 실증 (KAN-169) | [`docs/wiki/infra-history.md`](../docs/wiki/infra-history.md) |
+| 로그 전송 차단 실증 (KAN-203, `modules/ai-host/docker-compose.ai.yml` 주석이 가리킨다) | [`docs/wiki/infra-history.md`](../docs/wiki/infra-history.md)의 2026-09-09 KAN-203 항목, 재현 절차는 [`docs/ops/observability.md`](../docs/ops/observability.md) "로그 전송 차단 재현 절차" |
 | ai 호스트 컨테이너 기동 (KAN-124, KAN-36, KAN-201) | [`docs/ops/ai-host.md`](../docs/ops/ai-host.md), SSM과 시크릿 부분은 [`docs/ops/secrets-ssm.md`](../docs/ops/secrets-ssm.md) |
 | WAF 웹 ACL (KAN-149), 전송 구간과 엣지 보안 (KAN-245) | [`docs/ops/waf-edge.md`](../docs/ops/waf-edge.md) |
 | 경보와 알림 (KAN-134) | [`docs/ops/alarms.md`](../docs/ops/alarms.md) |
