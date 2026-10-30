@@ -293,7 +293,7 @@ IdP의 String 값(구글, 애플 번들, 카카오 앱 ID, 네이버 Client ID, 
 
 키를 재발급하면(콘솔에서 Admin 키 재발급) 2번을 다시 한다. 웹훅은 앱이 `serverCallbackArgs`에 `campaign=kko_share`를 실어야
 온다 - 그 인자가 없는 앱 빌드(KAN-164 이전)에서는 카카오가 콜백을 보내지 않으므로, 실제 전송이 0으로 보이면 앱 버전부터
-본다. 앱이 맞는데도 0이면 엣지에서 막혔는지 본다 - WAF의 AWS 관리 규칙은 `/recording`만 제외하고 이 경로에도 Block으로
+본다. 앱이 맞는데도 0이면 엣지에서 막혔는지 본다 - WAF의 AWS 관리 규칙은 음성 업로드 경로(`/recording`, `/recordings`)만 제외하고 이 경로에도 Block으로
 걸려 있어, 카카오의 요청이 봇 UA나 UA 없음으로 분류되면 backend 로그에 아무 흔적 없이 CloudFront가 403을 낸다. us-east-1의
 WAF 로그 그룹에서 `/v0/share/kakao/webhook`의 BLOCK을 찾고, 있으면 그 규칙에 `rule_action_override`(Count)나 scope-down
 제외를 더한다.

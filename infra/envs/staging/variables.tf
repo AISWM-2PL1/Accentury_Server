@@ -106,7 +106,7 @@ variable "waf_enforce" {
 
 variable "waf_rate_limit" {
   type        = number
-  description = "WAF rate-based rule: IP당 5분 창의 세션 생성 + 음성 업로드 허용 수 (KAN-149). 산정 근거는 docs/ops/waf-edge.md 'rate limit 임계값 300의 근거'."
+  description = "WAF rate-based rule: IP당 5분 창의 세션 생성 + 음성 업로드(레벨테스트와 억양 학습) + 후기 허용 수 (KAN-149). 산정 근거는 docs/ops/waf-edge.md 'rate limit 임계값 300의 근거'."
 }
 
 variable "waf_auth_rate_limit" {
