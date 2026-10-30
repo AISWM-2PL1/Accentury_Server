@@ -65,7 +65,7 @@ db_skip_final_snapshot = true
 # 2026-09-03 KAN-169에서 Block으로 전환해 실증했다. 두 환경 같은 값이다 - staging에서 본 결과가
 # prod에 그대로 적용되어야 관찰의 의미가 있다 (2026-08-28 확정).
 waf_enforce    = true
-waf_rate_limit = 300
+waf_rate_limit = 400 # 2026-10-30 KAN-299에서 300 -> 400. 억양 학습 업로드가 집계에 더해져 그 몫을 올렸다. 근거는 docs/ops/waf-edge.md "rate limit 임계값의 근거".
 
 # 로그인과 refresh, 관리자 경로 rate 규칙 (KAN-244, 2026-10-02 확정). waf_enforce를 따른다. 근거는 docs/ops/waf-edge.md "인증 경로 rate 규칙 (KAN-244)", "관리자 경로 rate 규칙 (KAN-244)".
 waf_auth_rate_limit  = 100

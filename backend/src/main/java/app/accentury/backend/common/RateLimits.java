@@ -81,7 +81,13 @@ public class RateLimits {
          */
         WORD_LEARNING("user"),
         /** 억양 학습 녹음 업로드 - 계정당 (§2.5, §3.19, KAN-267). AI 추론을 쓰는 경로라 단어 학습과 따로 센다. */
-        INTONATION_LEARNING("user");
+        INTONATION_LEARNING("user"),
+        /**
+         * 억양 학습 녹음 업로드 - IP당 (§2.5, KAN-299). 레벨테스트의 {@link #VOICE_UPLOAD_IP}와 같은 자리(multipart
+         * 해석 전, {@code UploadRateLimitFilter})에서 집행하되 통은 따로다 - 같은 IP에서 학습 홍수가 레벨테스트
+         * 업로드까지 막지 않게 한다.
+         */
+        INTONATION_UPLOAD_IP("ip");
 
         private final String axis;
 
@@ -142,7 +148,8 @@ public class RateLimits {
                 Scope.FEEDBACK, properties.feedback().rateLimitPerMinute(),
                 Scope.AUTH, properties.auth().rateLimitPerMinute(),
                 Scope.WORD_LEARNING, properties.learning().rateLimitPerMinute(),
-                Scope.INTONATION_LEARNING, properties.learning().intonationRateLimitPerMinute());
+                Scope.INTONATION_LEARNING, properties.learning().intonationRateLimitPerMinute(),
+                Scope.INTONATION_UPLOAD_IP, properties.learning().intonationIpRateLimitPerMinute());
     }
 
     /**

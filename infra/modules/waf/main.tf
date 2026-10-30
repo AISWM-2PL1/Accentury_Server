@@ -5,11 +5,12 @@
 # 배포의 WAF 선택 목록에 나타나지도 않고 오류도 없다 (ACM 인증서와 같은 함정). 로그 그룹도 같은
 # 리전이어야 WAF가 쓸 수 있다.
 #
-# 규칙은 여섯이다. 우선순위 숫자가 작을수록 먼저 평가된다.
+# 규칙은 일곱이다. 우선순위 숫자가 작을수록 먼저 평가된다.
 #   10  rate-limit-costly-posts   IP당 5분 창 요청 수 제한. 세션 생성, 음성 업로드(레벨테스트와 억양 학습), 후기만 센다.
 #   15  rate-limit-auth           IP당 5분 창 로그인과 refresh 수 제한 (KAN-244).
 #   16  rate-limit-admin          IP당 5분 창 관리자 경로 요청 수 제한 (KAN-244).
-#   20  aws-common                AWSManagedRulesCommonRuleSet. 음성 업로드 경로(둘 다)는 검사에서 뺀다.
+#   20  aws-common                AWSManagedRulesCommonRuleSet. 본문 규칙 5개만 Count로 바꿔 라벨만 남긴다 (KAN-299).
+#   21  aws-common-body           20번이 남긴 본문 규칙 라벨이 붙었고 음성 업로드 경로가 아니면 차단한다 (KAN-299).
 #   30  aws-known-bad-inputs      AWSManagedRulesKnownBadInputsRuleSet (Log4j, Java 역직렬화 등).
 #   40  aws-ip-reputation         AWSManagedRulesAmazonIpReputationList (KAN-244).
 #
@@ -21,8 +22,9 @@
 locals {
   name = "accentury-${var.env}"
 
-  # 세션 생성, 음성 업로드, 이용 후기 경로. UploadClient.kt의 PATH_* 상수와 SessionClient.kt,
-  # 앱의 억양 학습 화면, 그리고 웹의 후기 바텀시트가 만드는 경로다.
+  # 세션 생성, 음성 업로드, 이용 후기 경로. 앱의 UploadClient.kt(PATH_VOICE_ITEMS)와 SessionClient.kt,
+  # IntonationUploadClient.kt(PATH_INTONATION_CARDS, iOS는 IntonationUploadClient.swift), 그리고 웹의
+  # 후기 바텀시트가 만드는 경로다. 경로를 바꾸면 그 상수와 아래 정규식을 같이 고친다 (waf-regex.test.mjs가 잡는다).
   #   POST /v0/sessions                                             (KAN-9, 재응시 KAN-107)
   #   POST /v0/sessions/{sessionId}/voice-items/{itemId}/recording  (KAN-10, multipart 음성)
   #   POST /v0/learning/intonation-cards/{cardId}/recordings        (KAN-267, multipart 음성, 계정 필수)
@@ -40,19 +42,29 @@ locals {
   #   - 정규식의 (;[^/]*)?: Spring PathPatternParser가 세그먼트별 matrix 파라미터(;x=1)를 떼고
   #     매칭하므로 각 세그먼트 뒤에 그것을 허용한다
   # (Codex 1차 P1, 3차 P2, 2026-08-28)
-  # recording_path_regex: 레벨테스트 업로드는 /recording, 억양 학습 업로드(IntonationScoringController)는 /recordings로 끝난다.
-  # 끝 세그먼트만 보고 둘을 한 정규식으로 받는다 - 둘 다 multipart 음성이고 건마다 AI 추론을 쓰는 같은
-  # 비용 모양이라 CommonRuleSet 예외와 10번 규칙 집계를 같이 받는 것이 맞다 (KAN-299, 2026-10-30 확정).
-  # 억양 학습은 계정 토큰이 필수지만 토큰 검사는 컨트롤러 인자 해석 단계라 multipart 파싱 뒤에 돈다 -
-  # 미인증 홍수도 backend가 본문을 받아 버리므로 IP 단위 집계는 엣지에서 하는 것이 맞다.
+  # recording_path_regex는 음성 업로드 두 경로(레벨테스트 …/recording, 억양 학습 …/recordings)를 앞뒤 앵커로
+  # 고정한다. 끝 세그먼트만 보면 끝이 경로 변수인 GET 경로에 값 recordings를 넣는 것만으로 CommonRuleSet 예외를
+  # 받는다 (PR #55 리뷰). 경로 변수 자리의 [^/]+는 세그먼트 안의 matrix 파라미터까지 포함한다.
+  # 둘을 한 정규식에 두는 이유와 10번 규칙에 같이 세는 이유는 docs/ops/waf-edge.md "음성 업로드 경로 예외".
   session_create_path_regex = "^/v0(;[^/]*)?/sessions(;[^/]*)?$"
-  recording_path_regex      = "/recordings?(;[^/]*)?$"
+  recording_path_regex      = "^/v0(;[^/]*)?/(sessions(;[^/]*)?/[^/]+/voice-items(;[^/]*)?/[^/]+/recording|learning(;[^/]*)?/intonation-cards(;[^/]*)?/[^/]+/recordings)(;[^/]*)?$"
   feedback_path_regex       = "^/v0(;[^/]*)?/sessions(;[^/]*)?/[^/]+(;[^/]*)?/feedback(;[^/]*)?$"
 
   # 로그인과 refresh (KAN-223, AuthController의 /v0/auth/login, /v0/auth/refresh). 같은 정규화를 쓴다.
   auth_path_regex = "^/v0(;[^/]*)?/auth(;[^/]*)?/(login|refresh)(;[^/]*)?$"
   # 관리자 API 전체 (명세서 §6, /admin/v0/...). 접두 세그먼트만 본다 - 하위 경로가 늘어도 빠지지 않는다.
   admin_path_regex = "^/admin(;[^/]*)?/"
+
+  # CommonRuleSet의 본문 검사 5개. 20번 규칙이 이 규칙들만 Count로 바꿔 라벨을 남기고, 21번 규칙이 그 라벨을
+  # 보고 음성 업로드 경로가 아닐 때만 차단한다 (KAN-299). 이름(키)은 rule_action_override가 쓰는 규칙 이름이고
+  # 값은 그 규칙이 붙이는 라벨 이름이다 - 대소문자가 다르다 (describe-managed-rule-group AvailableLabels 2026-10-30).
+  common_body_rule_labels = {
+    SizeRestrictions_BODY   = "awswaf:managed:aws:core-rule-set:SizeRestrictions_Body"
+    CrossSiteScripting_BODY = "awswaf:managed:aws:core-rule-set:CrossSiteScripting_Body"
+    GenericLFI_BODY         = "awswaf:managed:aws:core-rule-set:GenericLFI_Body"
+    GenericRFI_BODY         = "awswaf:managed:aws:core-rule-set:GenericRFI_Body"
+    EC2MetaDataSSRF_BODY    = "awswaf:managed:aws:core-rule-set:EC2MetaDataSSRF_Body"
+  }
 
   # 차단 응답 본문. backend GlobalExceptionHandler가 내는 429 봉투(ErrorCode.RATE_LIMITED)와 같은
   # 모양이라 앱(UploadClient.toResult, SessionClient.toResult)과 웹(errorEnvelope.ts)이 backend
@@ -88,7 +100,7 @@ resource "aws_wafv2_web_acl" "this" {
 
   # ---- 10. rate-based rule ----
   #
-  # 세는 대상을 POST 세 경로로 좁힌 이유: 웹이 분석 대기 화면에서 /complete를
+  # 세는 대상을 POST 네 경로(세션 생성, 업로드 둘, 후기)로 좁힌 이유: 웹이 분석 대기 화면에서 /complete를
   # pollAfterMs(800ms)마다 POST로 폴링한다 (useAnalysisPolling.ts). POST /v0/* 전체를 세면 정상
   # 사용자 1명이 5분에 POST 375건을 내 임계값 산정이 불가능하다. 반면 세션 생성과 업로드는
   # 실모델이 붙는 순간 요청 1건이 GPU 비용이 되는 유일한 경로다.
@@ -99,13 +111,11 @@ resource "aws_wafv2_web_acl" "this" {
   # 달리 흔적이 오래 남는다. backend의 세션당 분당 10건 제한은 세션마다 새 카운터라 이 모양을
   # 막지 못하므로 IP 홍수는 엣지에서 끊는다. 정상 사용은 세션당 1건이라 임계값 근처에도 가지 않는다.
   #
-  # 임계값(var.rate_limit)은 backend의 IP당 제한(세션 생성, 업로드 각각 분당 30 = 5분 150,
-  # application.yml)보다 위에 둔다. 보통의 초과는 backend가 먼저 잡아 정식 429 봉투를 내고,
+  # 임계값(var.rate_limit)은 backend의 IP당 제한(세션 생성과 업로드는 각각 분당 30, 억양 학습 업로드는
+  # 분당 60, application.yml)보다 위에 둔다. 보통의 초과는 backend가 먼저 잡아 정식 429 봉투를 내고,
   # WAF는 backend가 multipart를 받느라 지치기 전에 홍수만 엣지에서 자른다. 공유 Wi-Fi(학교,
-  # 시연장)는 IP가 하나로 잡히므로 "동시 응시자 x 업로드 10건"이 임계값 안에 들어야 한다.
-  # 억양 학습 업로드(KAN-299)도 여기에 더해진다. backend 쪽은 계정당 분당 20(Redis)이라 IP 제한이
-  # 없고, 정상 학습은 카드 1장에 듣기 + 녹음 + 채점 대기로 1분 안팎이라 사용자당 5분에 5건 안쪽이다.
-  # 산정은 docs/ops/waf-edge.md "rate limit 임계값 300의 근거".
+  # 시연장)는 IP가 하나로 잡히므로 "동시 사용자 x (레벨테스트 업로드 + 학습 업로드)"가 임계값 안에
+  # 들어야 한다. 산정은 docs/ops/waf-edge.md "rate limit 임계값의 근거".
   rule {
     name     = "rate-limit-costly-posts"
     priority = 10
@@ -398,11 +408,11 @@ resource "aws_wafv2_web_acl" "this" {
   # 형태라 원인을 찾기 어렵다 (티켓 본문). SQLi 규칙은 이 그룹에 없다 - 별도 그룹
   # AWSManagedRulesSQLiRuleSet이고 이 웹 ACL은 그것을 넣지 않았다 (2026-08-28 AWS 문서 확인).
   #
-  # 대응은 스코프 다운이다: 업로드 경로(…/recording, …/recordings)는 이 그룹 전체를 건너뛴다. 대안인
-  # rule_action_override(본문 규칙 5개를 Count로)는 모든 경로에서 본문 검사가 꺼진다 - 어휘 답안,
-  # 세션 생성 같은 JSON 본문 경로의 XSS/LFI/RFI 검사는 남기고 싶어 스코프 다운을 골랐다
-  # (2026-08-28, KAN-149 코멘트). 대가는 업로드 경로가 이 그룹의 다른 검사(경로 조작, 나쁜 UA 등)도 함께
-  # 빠지는 것인데, 그 경로는 rate-based rule과 backend 검증(멱등 키, meta 필수, 크기 상한)이 받친다.
+  # 대응은 라벨 매칭이다 (KAN-299, PR #55 리뷰로 바꿈): 본문 규칙 5개만 rule_action_override로 Count로
+  # 돌려 라벨만 남기고, 바로 뒤 21번 규칙이 그 라벨이 붙은 요청 중 음성 업로드 경로가 아닌 것만 차단한다.
+  # 그래서 업로드 경로도 이 그룹의 나머지 검사(UA 없음, 나쁜 봇 UA, 쿼리와 URI의 XSS/LFI/RFI, 경로 조작,
+  # 쿠키 크기)는 그대로 받고 본문 검사만 빠진다. 전의 방식(업로드 경로를 scope_down으로 그룹 전체에서 제외)은
+  # 경로가 늘 때마다 그 경로의 비본문 검사까지 함께 꺼졌다.
   rule {
     name     = "aws-common"
     priority = 20
@@ -424,7 +434,66 @@ resource "aws_wafv2_web_acl" "this" {
         name        = "AWSManagedRulesCommonRuleSet"
         vendor_name = "AWS"
 
-        scope_down_statement {
+        dynamic "rule_action_override" {
+          for_each = local.common_body_rule_labels
+          content {
+            name = rule_action_override.key
+
+            action_to_use {
+              count {}
+            }
+          }
+        }
+      }
+    }
+
+    visibility_config {
+      cloudwatch_metrics_enabled = true
+      metric_name                = "${local.name}-aws-common"
+      sampled_requests_enabled   = false
+    }
+  }
+
+  # ---- 21. CommonRuleSet 본문 규칙의 차단 (KAN-299) ----
+  #
+  # 20번이 Count로 돌린 본문 규칙 5개의 라벨 중 하나라도 붙었고, 경로가 음성 업로드 두 경로가 아니면
+  # 차단한다. 업로드 경로는 본문이 음성이라 이 라벨이 늘 붙지만 여기서 빠진다 - 업로드 본문의 안전은
+  # rate 규칙과 backend 검증(멱등 키, meta 필수, 크기 상한 2MB, WAV 헤더 검사)이 받친다.
+  # 응답은 관리형 규칙의 차단과 같은 기본 403(본문 없음)이다. 라벨은 같은 웹 ACL 안에서 앞 규칙이 붙인 것을
+  # 뒤 규칙이 읽는 구조라 우선순위가 20번 바로 뒤여야 한다.
+  rule {
+    name     = "aws-common-body"
+    priority = 21
+
+    action {
+      dynamic "block" {
+        for_each = var.enforce ? [1] : []
+        content {}
+      }
+
+      dynamic "count" {
+        for_each = var.enforce ? [] : [1]
+        content {}
+      }
+    }
+
+    statement {
+      and_statement {
+        statement {
+          or_statement {
+            dynamic "statement" {
+              for_each = local.common_body_rule_labels
+              content {
+                label_match_statement {
+                  scope = "LABEL"
+                  key   = statement.value
+                }
+              }
+            }
+          }
+        }
+
+        statement {
           not_statement {
             statement {
               regex_match_statement {
@@ -452,14 +521,15 @@ resource "aws_wafv2_web_acl" "this" {
 
     visibility_config {
       cloudwatch_metrics_enabled = true
-      metric_name                = "${local.name}-aws-common"
+      metric_name                = "${local.name}-aws-common-body"
       sampled_requests_enabled   = false
     }
   }
 
   # ---- 30. AWSManagedRulesKnownBadInputsRuleSet ----
   # Log4j JNDI, Java 역직렬화 페이로드, 잘못된 Host 헤더 같은 알려진 악성 입력. backend가 Java라
-  # 이 그룹은 실제로 유효하다. 본문 크기 규칙이 없어 업로드 경로 예외가 필요 없다.
+  # 이 그룹은 실제로 유효하다. 본문 크기 규칙이 없어 업로드 경로 예외가 필요 없다. 로깅의 "매치된 요청만
+  # 남긴다" 필터에는 20번의 Count 매치도 들어가므로, 음성 업로드는 건마다 COUNT 한 줄이 남는다 (아래 로깅).
   rule {
     name     = "aws-known-bad-inputs"
     priority = 30

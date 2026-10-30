@@ -418,6 +418,10 @@ public record AccenturyProperties(Session session,
      *                                     AI 추론을 쓰고 레벨테스트와 같은 큐를 나눠 쓰므로 단어 학습보다 낮다 - 녹음과
      *                                     대기만으로 한 건에 10초 이상 걸려 정상 사용은 분당 수 건이다. 결과 조회는
      *                                     제한하지 않는다.
+     * @param intonationIpRateLimitPerMinute 억양 학습 녹음 업로드의 IP당 분당 허용 횟수 (§2.5, KAN-299). 계정 토큰 검사가
+     *                                       multipart 해석 뒤라 미인증 홍수도 본문을 받아 버리므로, 레벨테스트 업로드처럼
+     *                                       {@code UploadRateLimitFilter}가 해석 전에 IP로 먼저 끊는다. 학습은 계정이 키인
+     *                                       경로라 공유 Wi-Fi의 여러 계정이 한 IP로 뭉친다 - 레벨테스트의 30보다 높다.
      * @param intonationScoreVersion       억양 학습 점수 변환에 쓰는 점수 버전 (§3.19, 2026-10-10 결정) - 레벨테스트와
      *                                     같은 억양 전처리(구간 계수)를 이 버전의 seed에서 읽는다. AI 요청의
      *                                     {@code scoreVersion}과 시도 기록에도 이 값이 실린다. 발행된 버전이 아니면
@@ -428,6 +432,7 @@ public record AccenturyProperties(Session session,
      */
     public record Learning(@DefaultValue("60") int rateLimitPerMinute,
                            @DefaultValue("20") int intonationRateLimitPerMinute,
+                           @DefaultValue("60") int intonationIpRateLimitPerMinute,
                            @DefaultValue("sv-0.5") String intonationScoreVersion,
                            @DefaultValue("90") int perfectScoreThreshold) {
     }

@@ -10,7 +10,7 @@ variable "enforce" {
 
 variable "rate_limit" {
   type        = number
-  description = "IP당 5분 창에서 허용하는 세션 생성 + 음성 업로드(레벨테스트와 억양 학습) + 후기 요청 수. 초과분은 429(enforce) 또는 Count."
+  description = "IP당 5분 창에서 허용하는 세션 생성 + 음성 업로드(레벨테스트와 억양 학습) + 후기 POST 수. 초과분은 429(enforce) 또는 Count. 산정은 docs/ops/waf-edge.md 'rate limit 임계값의 근거'."
 
   validation {
     condition     = var.rate_limit >= 10
