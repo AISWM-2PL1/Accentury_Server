@@ -1054,6 +1054,39 @@ def verify_traffic_separation(
            real_started, real_completed))
 
 
+LEARNING_UPLOAD_PROBE_PATH = "/v0/learning/intonation-cards/smoke/recordings"
+
+
+def verify_learning_upload_edge(client: Client) -> None:
+    """억양 학습 녹음 업로드 경로가 엣지의 본문 8KB 규칙 예외를 받는지 (KAN-299).
+
+    CloudFront 앞 WAF의 CommonRuleSet은 본문 8KB 초과를 막고, 음성 업로드 두 경로만 그 본문
+    규칙에서 빠진다 (infra/modules/waf/main.tf의 recording_path_regex). 레벨테스트 업로드는 본
+    시나리오가 올리므로 여기서는 학습 경로만 본다. 토큰 없이 8KB를 넘는 multipart를 보내면 엣지가
+    통과시켰을 때 backend가 401 AUTH_TOKEN_INVALID를 내고, WAF가 막았을 때는 봉투 없는 403이다.
+    정규식과 경로가 어긋난 채 배포되면 앱의 억양 학습이 전부 실패하는데 화면은 멀쩡해 여기서만
+    드러난다. 로컬(WAF 없음)에서도 401이라 기대값이 같다.
+    """
+    audio = wav_bytes()
+    expect(len(audio) > 8 * 1024, "탐침 본문이 8KB를 넘지 않는다 - 본문 규칙 예외를 검증하지 못한다")
+    content_type, body = multipart_body(audio, upload_meta(), "probe.wav")
+    response = client.request(
+        "POST", LEARNING_UPLOAD_PROBE_PATH,
+        headers={"Idempotency-Key": new_correlation_id()},
+        body=body, content_type=content_type,
+    )
+    expect(
+        response.status != 403,
+        "억양 학습 업로드 경로가 엣지에서 403으로 막혔다 - WAF 녹음 예외 정규식(recording_path_regex)과 "
+        "경로가 어긋났는지 본다: " + response.describe(),
+    )
+    expect(
+        response.status == 401 and response.error_code() == "AUTH_TOKEN_INVALID",
+        "토큰 없는 억양 학습 업로드는 backend의 401 AUTH_TOKEN_INVALID여야 한다: " + response.describe(),
+    )
+    log("  억양 학습 업로드 경로 엣지 통과 (401 AUTH_TOKEN_INVALID)")
+
+
 def is_local(base_url: str) -> bool:
     return (urllib.parse.urlparse(base_url).hostname or "") in LOCAL_HOSTS
 
@@ -1240,6 +1273,9 @@ def main(argv: Sequence[str]) -> int:
         log("경고: 합성 트래픽 표시 없이 돈다 - 이 실행은 대상 환경의 익명 집계에 그대로 남는다.")
 
     try:
+        # 학습 업로드 경로의 엣지 예외 (KAN-299) - 시나리오와 무관한 한 건이라 먼저 본다.
+        verify_learning_upload_edge(client)
+
         # 분리가 실제로 듣는지는 집계를 앞뒤로 읽어 확인한다 (KAN-138) - 표시가 조용히
         # 무시되면 여기서만 드러난다.
         window = analytics_window(client, args.synthetic_key) if args.synthetic_key else None
