@@ -6,10 +6,10 @@
 # 리전이어야 WAF가 쓸 수 있다.
 #
 # 규칙은 여섯이다. 우선순위 숫자가 작을수록 먼저 평가된다.
-#   10  rate-limit-costly-posts   IP당 5분 창 요청 수 제한. 세션 생성, 음성 업로드, 후기만 센다.
+#   10  rate-limit-costly-posts   IP당 5분 창 요청 수 제한. 세션 생성, 음성 업로드(레벨테스트와 억양 학습), 후기만 센다.
 #   15  rate-limit-auth           IP당 5분 창 로그인과 refresh 수 제한 (KAN-244).
 #   16  rate-limit-admin          IP당 5분 창 관리자 경로 요청 수 제한 (KAN-244).
-#   20  aws-common                AWSManagedRulesCommonRuleSet. 음성 업로드 경로는 검사에서 뺀다.
+#   20  aws-common                AWSManagedRulesCommonRuleSet. 음성 업로드 경로(둘 다)는 검사에서 뺀다.
 #   30  aws-known-bad-inputs      AWSManagedRulesKnownBadInputsRuleSet (Log4j, Java 역직렬화 등).
 #   40  aws-ip-reputation         AWSManagedRulesAmazonIpReputationList (KAN-244).
 #
@@ -22,9 +22,10 @@ locals {
   name = "accentury-${var.env}"
 
   # 세션 생성, 음성 업로드, 이용 후기 경로. UploadClient.kt의 PATH_* 상수와 SessionClient.kt,
-  # 그리고 웹의 후기 바텀시트가 만드는 경로다.
+  # 앱의 억양 학습 화면, 그리고 웹의 후기 바텀시트가 만드는 경로다.
   #   POST /v0/sessions                                             (KAN-9, 재응시 KAN-107)
   #   POST /v0/sessions/{sessionId}/voice-items/{itemId}/recording  (KAN-10, multipart 음성)
+  #   POST /v0/learning/intonation-cards/{cardId}/recordings        (KAN-267, multipart 음성, 계정 필수)
   #   POST /v0/sessions/{sessionId}/feedback                        (KAN-211, 결과 화면 이용 후기)
   # rate 집계는 POST만 센다. GET, HEAD, OPTIONS는 backend가 405로 싸게 끝내는데 집계에 들어가면
   # 같은 공유 IP의 정상 세션 생성과 업로드까지 밀어낸다 (Codex 2차 P2, 2026-08-28). CommonRuleSet
@@ -39,8 +40,13 @@ locals {
   #   - 정규식의 (;[^/]*)?: Spring PathPatternParser가 세그먼트별 matrix 파라미터(;x=1)를 떼고
   #     매칭하므로 각 세그먼트 뒤에 그것을 허용한다
   # (Codex 1차 P1, 3차 P2, 2026-08-28)
+  # recording_path_regex: 레벨테스트 업로드는 /recording, 억양 학습 업로드(IntonationScoringController)는 /recordings로 끝난다.
+  # 끝 세그먼트만 보고 둘을 한 정규식으로 받는다 - 둘 다 multipart 음성이고 건마다 AI 추론을 쓰는 같은
+  # 비용 모양이라 CommonRuleSet 예외와 10번 규칙 집계를 같이 받는 것이 맞다 (KAN-299, 2026-10-30 확정).
+  # 억양 학습은 계정 토큰이 필수지만 토큰 검사는 컨트롤러 인자 해석 단계라 multipart 파싱 뒤에 돈다 -
+  # 미인증 홍수도 backend가 본문을 받아 버리므로 IP 단위 집계는 엣지에서 하는 것이 맞다.
   session_create_path_regex = "^/v0(;[^/]*)?/sessions(;[^/]*)?$"
-  recording_path_regex      = "/recording(;[^/]*)?$"
+  recording_path_regex      = "/recordings?(;[^/]*)?$"
   feedback_path_regex       = "^/v0(;[^/]*)?/sessions(;[^/]*)?/[^/]+(;[^/]*)?/feedback(;[^/]*)?$"
 
   # 로그인과 refresh (KAN-223, AuthController의 /v0/auth/login, /v0/auth/refresh). 같은 정규화를 쓴다.
@@ -97,6 +103,9 @@ resource "aws_wafv2_web_acl" "this" {
   # application.yml)보다 위에 둔다. 보통의 초과는 backend가 먼저 잡아 정식 429 봉투를 내고,
   # WAF는 backend가 multipart를 받느라 지치기 전에 홍수만 엣지에서 자른다. 공유 Wi-Fi(학교,
   # 시연장)는 IP가 하나로 잡히므로 "동시 응시자 x 업로드 10건"이 임계값 안에 들어야 한다.
+  # 억양 학습 업로드(KAN-299)도 여기에 더해진다. backend 쪽은 계정당 분당 20(Redis)이라 IP 제한이
+  # 없고, 정상 학습은 카드 1장에 듣기 + 녹음 + 채점 대기로 1분 안팎이라 사용자당 5분에 5건 안쪽이다.
+  # 산정은 docs/ops/waf-edge.md "rate limit 임계값 300의 근거".
   rule {
     name     = "rate-limit-costly-posts"
     priority = 10
@@ -389,7 +398,7 @@ resource "aws_wafv2_web_acl" "this" {
   # 형태라 원인을 찾기 어렵다 (티켓 본문). SQLi 규칙은 이 그룹에 없다 - 별도 그룹
   # AWSManagedRulesSQLiRuleSet이고 이 웹 ACL은 그것을 넣지 않았다 (2026-08-28 AWS 문서 확인).
   #
-  # 대응은 스코프 다운이다: 업로드 경로(…/recording)는 이 그룹 전체를 건너뛴다. 대안인
+  # 대응은 스코프 다운이다: 업로드 경로(…/recording, …/recordings)는 이 그룹 전체를 건너뛴다. 대안인
   # rule_action_override(본문 규칙 5개를 Count로)는 모든 경로에서 본문 검사가 꺼진다 - 어휘 답안,
   # 세션 생성 같은 JSON 본문 경로의 XSS/LFI/RFI 검사는 남기고 싶어 스코프 다운을 골랐다
   # (2026-08-28, KAN-149 코멘트). 대가는 업로드 경로가 이 그룹의 다른 검사(경로 조작, 나쁜 UA 등)도 함께
