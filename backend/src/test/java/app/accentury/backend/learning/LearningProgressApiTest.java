@@ -260,8 +260,9 @@ class LearningProgressApiTest extends IntegrationTest {
     @Test
     void 월별_출석은_그_달의_일_목록과_개수와_홈과_같은_연속_출석과_오늘_날짜를_준다() throws Exception {
         Account account = signUp();
+        LocalDate today = today();
         // 지난달과 그 전달에 걸쳐 심는다 - 요청한 달만 나와야 한다. 날짜는 전부 과거라 오늘 판정과 무관하다.
-        YearMonth target = YearMonth.from(today()).minusMonths(1);
+        YearMonth target = YearMonth.from(today).minusMonths(1);
         YearMonth before = target.minusMonths(1);
         seedAttendance(account.userId(), target.atDay(1), target.atDay(2), target.atDay(3), target.atDay(5),
                 target.atDay(8), before.atDay(20), before.atEndOfMonth());
@@ -270,10 +271,10 @@ class LearningProgressApiTest extends IntegrationTest {
         assertEquals(target.getMonthValue(), month.get("month").asInt());
         assertEquals(List.of(1, 2, 3, 5, 8), ints(month.get("attendedDays")));
         assertEquals(5, month.get("monthCount").asInt());
-        assertEquals(today().toString(), month.get("today").asString());
+        assumeSameDay(today);
+        assertEquals(today.toString(), month.get("today").asString());
 
         // 연속 출석은 홈과 같은 값이다.
-        LocalDate today = today();
         seedAttendance(account.userId(), today, today.minusDays(1));
         JsonNode streak = attendanceMonth(account, YearMonth.from(today)).get("streak");
         JsonNode homeStreak = home(account).get("streak");
@@ -326,6 +327,11 @@ class LearningProgressApiTest extends IntegrationTest {
                     .andExpect(status().isBadRequest())
                     .andExpect(jsonPath("$.code").value("VALIDATION_FAILED"));
         }
+        // 누락과 형식 오류는 어느 파라미터인지 메시지에 담는다 (PR #61 리뷰).
+        authed(get("/v0/learning/attendance?year=2026"), account.access())
+                .andExpect(jsonPath("$.message").value("month: 필수 값이 없습니다."));
+        authed(get("/v0/learning/attendance?year=2026&month=abc"), account.access())
+                .andExpect(jsonPath("$.message").value("month: 값의 형식이 올바르지 않습니다."));
         mockMvc.perform(get("/v0/learning/attendance?year=2026&month=11")).andExpect(status().isUnauthorized())
                 .andExpect(jsonPath("$.code").value("AUTH_TOKEN_INVALID"));
     }
