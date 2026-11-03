@@ -145,6 +145,14 @@ class GlobalExceptionHandlerTest {
     }
 
     @Test
+    void 필수_쿼리_파라미터_누락은_400이고_어느_파라미터인지_담는다() throws Exception {
+        mockMvc.perform(get("/test/rate-limited"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("VALIDATION_FAILED"))
+                .andExpect(jsonPath("$.message").value("ms: 필수 값이 없습니다."));
+    }
+
+    @Test
     void 검증_실패는_400과_첫_번째_필드_오류_메시지다() throws Exception {
         mockMvc.perform(post("/test/echo")
                         .contentType(MediaType.APPLICATION_JSON)

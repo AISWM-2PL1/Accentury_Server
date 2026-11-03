@@ -2,6 +2,7 @@ package app.accentury.backend.learning;
 
 import org.jspecify.annotations.Nullable;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Isolation;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.Instant;
@@ -83,10 +84,11 @@ public class LearningProgress {
      * 항목은 시도 기록에서 읽는다 - 출석 표에는 날짜만 남기기 때문이다 (V16 결정). 날짜는 각 완료 시각을 KST로 바꾼 날이라
      * 출석을 남길 때와 같은 기준이다. 단어 세트는 완료한 시도마다 1건(정답 수 / 문항 수), 억양 코스는 그날 채점을 마친
      * 카드를 코스로 묶어 1건(그날 카드 수 / 코스 카드 수), 레벨테스트는 최근 완주 1건만 남아 있어 그날에만 1건이다. 제목은
-     * 시도가 고정한 발행본에서 찾고, 발행본이나 세트와 카드가 없으면(데이터 오염) 그 항목은 건너뛴다. 읽기 트랜잭션
-     * 하나로 묶어 출석과 시도가 같은 스냅샷이다.
+     * 시도가 고정한 발행본에서 찾고, 발행본이나 세트와 카드가 없으면(데이터 오염) 그 항목은 건너뛴다. 네 문장을 REPEATABLE
+     * READ 읽기 트랜잭션 하나로 묶는다 - PostgreSQL은 이 격리에서 첫 문장의 스냅샷을 끝까지 쓰므로 출석과 시도가 같은
+     * 시점을 본다 (기본 READ COMMITTED는 문장마다 새 스냅샷이다, PR #61 리뷰).
      */
-    @Transactional(readOnly = true)
+    @Transactional(readOnly = true, isolation = Isolation.REPEATABLE_READ)
     MonthlyAttendanceResponse attendance(UUID userId, YearMonth month) {
         LearningAttendance.Calendar calendar = attendance.calendar(userId, month);
         Instant from = month.atDay(1).atStartOfDay(LearningAttendance.ZONE).toInstant();
@@ -106,7 +108,7 @@ public class LearningProgress {
             wordRegistry.find(attempt.contentVersion())
                     .map(published -> published.sets().get(attempt.setId()))
                     .ifPresent(set -> items.add(new TimedItem(completedAt, new MonthlyAttendanceResponse.Item(
-                            MonthlyAttendanceResponse.Kind.SET, set.setId(), set.title(),
+                            MonthlyAttendanceResponse.Kind.SET, attempt.id(), set.setId(), set.title(),
                             Objects.requireNonNullElse(attempt.correctCount(), 0), attempt.itemCount()))));
         }
         // 코스 - 그날 채점을 마친 카드를 (발행본, 코스)로 묶는다. 코스와 카드 id는 발행본마다 매기므로 발행본이 다르면 다른
@@ -125,16 +127,18 @@ public class LearningProgress {
                                     key -> new CourseProgress(course))
                             .add(attempt.cardId(), finishedAt));
         }
-        coursesByDay.forEach((day, byCourse) -> byCourse.values().forEach(progress -> itemsByDay.get(day)
+        coursesByDay.forEach((day, byCourse) -> byCourse.forEach((key, progress) -> itemsByDay.get(day)
                 .add(new TimedItem(progress.lastFinishedAt, new MonthlyAttendanceResponse.Item(
-                        MonthlyAttendanceResponse.Kind.COURSE, progress.course.courseId(), progress.course.title(),
-                        progress.cards.size(), progress.course.cards().size())))));
+                        MonthlyAttendanceResponse.Kind.COURSE, key.contentVersion() + ":" + key.courseId(),
+                        progress.course.courseId(), progress.course.title(), progress.cards.size(),
+                        progress.course.cards().size())))));
         // 레벨테스트 - 최근 완주 1건만 남는다 (§3.20). 그날이 이 달이면 붙인다.
         levelTestRecords.find(userId).ifPresent(entry -> {
             List<TimedItem> items = itemsByDay.get(LearningAttendance.attendanceDate(entry.completedAt()));
             if (items != null) {
                 items.add(new TimedItem(entry.completedAt(), new MonthlyAttendanceResponse.Item(
-                        MonthlyAttendanceResponse.Kind.LEVEL_TEST, entry.testVersion(), entry.tierName(), 1, 1)));
+                        MonthlyAttendanceResponse.Kind.LEVEL_TEST, entry.testVersion(), entry.testVersion(),
+                        entry.tierName(), 1, 1)));
             }
         });
 
