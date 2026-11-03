@@ -79,7 +79,7 @@ backend 몫은 staging 28개, prod 29개다 (`modules/config/outputs.tf`의 `par
 | --- | --- |
 | backend 실행 역할 | 자기 환경 `parameter_names`(staging 28, prod 29)의 `ssm:GetParameters`만. `/ai` 하위 경로는 못 읽는다 |
 | backend 태스크 역할 | 자기 환경 RDS 마스터 시크릿 1개의 `GetSecretValue` (SSM 없음) |
-| ai 호스트 역할 | 인라인 정책은 `/accentury/{env}/ai/*`와 `IMAGE_TAG`만. 다만 `AmazonSSMManagedInstanceCore`가 `ssm:GetParameter`, `ssm:GetParameters`를 `*`에 허용하므로 이름을 아는 다른 파라미터도 단건으로 읽힌다. 경계를 세우려면 ai-ami 빌드 역할처럼 명시 Deny를 더해야 한다 (별도 티켓) |
+| ai 호스트 역할 | 자기 환경 `/accentury/{env}/ai`, `/ai/*`, `IMAGE_TAG`만. 같은 역할의 `AmazonSSMManagedInstanceCore`가 `ssm:GetParameter`, `ssm:GetParameters`를 `*`에 허용하지만, 인라인 정책의 `DenyOtherParameters`가 이 세 경로 밖의 읽기(GetParameter, GetParameters, GetParametersByPath, GetParameterHistory)를 명시 Deny로 막는다. ai-ami 빌드 역할과 같은 꼴이다 |
 
 SecureString은 AWS 관리 키(`aws/ssm`)라 별도 kms 권한이 필요 없다.
 
