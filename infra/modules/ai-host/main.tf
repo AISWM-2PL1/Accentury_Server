@@ -81,6 +81,9 @@ locals {
   # 자기 환경 경로 안에서도 하위 경로 /ai와 IMAGE_TAG만 읽는다 (KAN-36) - DB URL, 관리자 토큰 같은 backend
   # 시크릿이 신뢰하지 않는 오디오를 받는 호스트에 내려가지 않는다. backend 쪽은 반대로 /ai 하위 경로를 못 읽는다
   # (fargate 모듈 실행 역할이 config 파라미터 목록만 허용) - 내부 호출 토큰은 어차피 양쪽이 같은 값이다.
+  # 이 목록은 accentury-up.sh가 읽는 이름(get-parameters-by-path /ai, get-parameter IMAGE_TAG)과 짝이다. 아래
+  # DenyOtherParameters가 이 목록 밖을 전부 막으므로, 스크립트가 새 이름을 읽게 되면 여기도 함께 늘려야 한다 - 빠뜨리면
+  # 기동이 AccessDenied로 실패하고 대상 그룹 unhealthy로 ASG 교체가 반복된다.
   readable_parameters = [
     "${local.parameter_arn_prefix}/ai",
     "${local.parameter_arn_prefix}/ai/*",
@@ -100,21 +103,25 @@ data "aws_iam_policy_document" "host" {
   }
 
   # 위 Allow만으로는 경계가 서지 않는다 - 같은 역할에 붙은 AmazonSSMManagedInstanceCore(ssm_core)가 ssm:GetParameter와
-  # GetParameters를 리소스 *에 허용해서, 이름을 아는 파라미터는 다른 환경의 JWT 시크릿까지 단건으로 읽혔다
-  # (KAN-305, 2026-11-03 simulate-principal-policy로 확인). IAM은 Allow의 합집합이라 Allow를 좁혀도 관리형 정책의 범위는
-  # 줄지 않고, Deny가 Allow를 이기므로 읽는 세 경로 밖을 전부 막는다. ai-ami 빌드 역할의 DenyOtherParameters(KAN-285)와
-  # 같은 꼴이다. 호스트가 SSM을 읽는 곳은 accentury-up.sh의 /ai 하위 경로와 IMAGE_TAG 둘뿐이라 기동에는 영향이 없고,
-  # SSM 에이전트는 파라미터를 읽지 않는다(GetManifest, GetDocument만). 관리형 정책을 고객 관리형으로 바꾸는 안은 에이전트
-  # 요구 권한이 바뀔 때 따라가야 해서 쓰지 않는다.
+  # GetParameters를 리소스 *에 허용해서, 이름을 아는 파라미터는 자기 환경의 backend 시크릿(DB URL, 관리자 토큰)과 다른 환경의
+  # JWT 시크릿까지 읽혔다 - GetParameters는 한 호출에 10개까지다 (KAN-305, 2026-11-03 simulate-principal-policy로 확인).
+  # IAM은 Allow의 합집합이라 Allow를 좁혀도 관리형 정책의 범위는 줄지 않고, Deny가 Allow를 이기므로 읽는 세 경로 밖을 전부
+  # 막는다. 액션은 ssm:GetParameter* 하나로 적는다 - 지금 매칭되는 것은 GetParameter, GetParameters, GetParametersByPath,
+  # GetParameterHistory 넷이고, 같은 접두사의 읽기 API가 늘어도 따라간다.
+  #
+  # 같이 고칠 것: modules/ai-ami/main.tf의 DenyOtherParameters(KAN-285)가 같은 문장이다 (not_resources만 다르다). 한쪽을
+  # 바꾸면 다른 쪽도 맞춘다.
+  #
+  # 기동에는 영향이 없다 - 호스트가 SSM을 읽는 곳은 accentury-up.sh의 /ai 하위 경로와 IMAGE_TAG 둘뿐이고(위 readable_parameters),
+  # 이 호스트에 보내는 SSM 문서(deploy.yml의 AWS-RunShellScript, Session Manager)는 {{ssm:...}}, {{ssm-secure:...}} 파라미터
+  # 참조를 쓰지 않는다. 그런 참조가 든 문서를 보내면 에이전트가 인스턴스 역할로 GetParameters를 불러 이 Deny에 걸린다.
+  # 퍼블릭 파라미터(arn:aws:ssm:<region>::parameter/aws/service/*)도 막힌다 - 호스트는 읽지 않고, AMI 갱신 런북의
+  # /aws/service/ami-amazon-linux-latest 조회는 운영자 PC에서 돈다 (docs/ops/ai-host.md). 관리형 정책을 고객 관리형으로 바꾸는
+  # 안은 에이전트 요구 권한이 바뀔 때 따라가야 해서 쓰지 않는다. 경계 재검증 명령은 docs/ops/secrets-ssm.md "읽기 권한".
   statement {
-    sid    = "DenyOtherParameters"
-    effect = "Deny"
-    actions = [
-      "ssm:GetParameter",
-      "ssm:GetParameters",
-      "ssm:GetParametersByPath",
-      "ssm:GetParameterHistory",
-    ]
+    sid           = "DenyOtherParameters"
+    effect        = "Deny"
+    actions       = ["ssm:GetParameter*"]
     not_resources = local.readable_parameters
   }
 

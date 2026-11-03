@@ -40,7 +40,7 @@ backend는 이 호스트에 없다. KAN-165 전의 backend 호스트(`accentury-
 | 컨테이너 메모리 상한 | `mem_limit: 7g`. 호스트 7.6GiB에서 OS와 에이전트 몫 0.6GiB를 뺀 값이다. 근거는 `docker-compose.ai.yml` 주석 |
 | 보안 그룹 | ai-sg (ai-alb-sg만 8000. ALB는 backend-sg만 8000) |
 | 컨테이너 | ai (호스트 8000, 내부 ALB만 닿는다) |
-| SSM 읽기 | 자기 환경 `/accentury/{env}/ai`, `/ai/*`, `IMAGE_TAG`만 읽는다. 같은 역할에 붙은 `AmazonSSMManagedInstanceCore`(`modules/ai-host/main.tf`의 `ssm_core`)가 `ssm:GetParameter`, `ssm:GetParameters`를 `*`에 허용하지만, 인라인 정책의 `DenyOtherParameters`가 그 세 경로 밖의 파라미터 읽기를 명시 Deny로 막는다. 기동 스크립트가 읽는 것은 `/ai` 하위와 `IMAGE_TAG` 둘뿐이다 |
+| SSM 읽기 | `/accentury/{env}/ai`, `/accentury/{env}/ai/*`, `/accentury/{env}/IMAGE_TAG` 셋만 읽는다. 같은 역할에 붙은 `AmazonSSMManagedInstanceCore`(`modules/ai-host/main.tf`의 `ssm_core`)가 `ssm:GetParameter`, `ssm:GetParameters`를 `*`에 허용하지만, 인라인 정책의 `DenyOtherParameters`가 그 세 경로 밖의 `ssm:GetParameter*`를 명시 Deny로 막는다. 기동 스크립트가 읽는 것은 `/ai` 하위와 `IMAGE_TAG` 둘뿐이다. 이 호스트에 보내는 Run Command 문서에 `{{ssm:...}}`, `{{ssm-secure:...}}` 참조를 넣으면 에이전트가 인스턴스 역할로 읽으려다 AccessDenied가 난다. 퍼블릭 파라미터(`/aws/service/*`) 조회도 호스트 안에서는 막히므로 아래 AMI 갱신 절의 조회는 운영자 PC에서 한다 |
 | IMDSv2 hop limit | 1 (컨테이너는 IMDS를 못 본다) |
 | 추가 | iptables egress 가드, health 타이머 |
 

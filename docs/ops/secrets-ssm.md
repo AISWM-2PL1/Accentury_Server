@@ -79,9 +79,30 @@ backend 몫은 staging 28개, prod 29개다 (`modules/config/outputs.tf`의 `par
 | --- | --- |
 | backend 실행 역할 | 자기 환경 `parameter_names`(staging 28, prod 29)의 `ssm:GetParameters`만. `/ai` 하위 경로는 못 읽는다 |
 | backend 태스크 역할 | 자기 환경 RDS 마스터 시크릿 1개의 `GetSecretValue` (SSM 없음) |
-| ai 호스트 역할 | 자기 환경 `/accentury/{env}/ai`, `/ai/*`, `IMAGE_TAG`만. 같은 역할의 `AmazonSSMManagedInstanceCore`가 `ssm:GetParameter`, `ssm:GetParameters`를 `*`에 허용하지만, 인라인 정책의 `DenyOtherParameters`가 이 세 경로 밖의 읽기(GetParameter, GetParameters, GetParametersByPath, GetParameterHistory)를 명시 Deny로 막는다. ai-ami 빌드 역할과 같은 꼴이다 |
+| ai 호스트 역할 | `/accentury/{env}/ai`, `/accentury/{env}/ai/*`, `/accentury/{env}/IMAGE_TAG` 셋만. 같은 역할의 `AmazonSSMManagedInstanceCore`가 `ssm:GetParameter`, `ssm:GetParameters`를 `*`에 허용하지만, 인라인 정책의 `DenyOtherParameters`가 이 세 경로 밖의 `ssm:GetParameter*`(GetParameter, GetParameters, GetParametersByPath, GetParameterHistory)를 명시 Deny로 막는다. AWS 퍼블릭 파라미터(`/aws/service/*`)도 호스트에서는 막힌다. ai-ami 빌드 역할과 같은 꼴이다 |
 
 SecureString은 AWS 관리 키(`aws/ssm`)라 별도 kms 권한이 필요 없다.
+
+ai 호스트 역할의 경계는 정책 리팩터에서 Deny 문장이 빠져도 plan에는 인라인 정책 1건 변경으로만 보여 놓치기 쉽다. 역할 정책을
+건드린 뒤에는 아래로 다시 확인한다 (KAN-305). 다른 환경 시크릿은 `explicitDeny`, 자기 환경 `/ai`는 `allowed`가 나와야 한다.
+
+```
+acct=$(aws sts get-caller-identity --query Account --output text)
+for env in staging prod; do
+  other=$([ "$env" = staging ] && echo prod || echo staging)
+  aws iam simulate-principal-policy \
+    --policy-source-arn "arn:aws:iam::${acct}:role/accentury-${env}-ai-ec2" \
+    --action-names ssm:GetParameter ssm:GetParametersByPath \
+    --resource-arns "arn:aws:ssm:ap-northeast-2:${acct}:parameter/accentury/${other}/ACCENTURY_AUTH_JWTSECRET" \
+                    "arn:aws:ssm:ap-northeast-2:${acct}:parameter/accentury/${env}/ACCENTURY_ADMIN_TOKEN" \
+    --query 'EvaluationResults[].[EvalActionName,EvalDecision]' --output text
+  aws iam simulate-principal-policy \
+    --policy-source-arn "arn:aws:iam::${acct}:role/accentury-${env}-ai-ec2" \
+    --action-names ssm:GetParametersByPath \
+    --resource-arns "arn:aws:ssm:ap-northeast-2:${acct}:parameter/accentury/${env}/ai" \
+    --query 'EvaluationResults[].EvalDecision' --output text
+done
+```
 
 ## 값 형식 제약
 
