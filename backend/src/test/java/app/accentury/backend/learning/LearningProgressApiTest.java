@@ -258,10 +258,10 @@ class LearningProgressApiTest extends IntegrationTest {
     // === 월별 출석 - 홈 달력 시트 (KAN-314) ===
 
     @Test
-    void 월별_출석은_그_달의_일_목록과_개수와_홈과_같은_연속_출석과_오늘_날짜를_준다() throws Exception {
+    void 월별_출석은_그_달의_출석_날짜와_이번달과_지난달_수와_홈과_같은_연속_출석과_오늘을_준다() throws Exception {
         Account account = signUp();
         LocalDate today = today();
-        // 지난달과 그 전달에 걸쳐 심는다 - 요청한 달만 나와야 한다. 날짜는 전부 과거라 오늘 판정과 무관하다.
+        // 지난달과 그 전달에 걸쳐 심는다 - 요청한 달만 나오고 지난달은 수로만 나온다. 날짜는 전부 과거라 오늘 판정과 무관하다.
         YearMonth target = YearMonth.from(today).minusMonths(1);
         YearMonth before = target.minusMonths(1);
         seedAttendance(account.userId(), target.atDay(1), target.atDay(2), target.atDay(3), target.atDay(5),
@@ -269,8 +269,13 @@ class LearningProgressApiTest extends IntegrationTest {
         JsonNode month = attendanceMonth(account, target);
         assertEquals(target.getYear(), month.get("year").asInt());
         assertEquals(target.getMonthValue(), month.get("month").asInt());
-        assertEquals(List.of(1, 2, 3, 5, 8), ints(month.get("attendedDays")));
+        assertEquals(List.of(target.atDay(1), target.atDay(2), target.atDay(3), target.atDay(5), target.atDay(8)),
+                dates(month.get("days")));
         assertEquals(5, month.get("monthCount").asInt());
+        assertEquals(2, month.get("lastMonthCount").asInt());
+        for (JsonNode day : month.get("days")) {
+            assertEquals(0, day.get("items").size(), "심은 출석에는 시도 기록이 없다");
+        }
         assumeSameDay(today);
         assertEquals(today.toString(), month.get("today").asString());
 
@@ -286,13 +291,61 @@ class LearningProgressApiTest extends IntegrationTest {
     }
 
     @Test
+    void 출석한_날에는_그날_마친_세트와_코스와_레벨테스트가_붙는다() throws Exception {
+        Account account = signUp();
+        LocalDate today = today();
+        // 레벨테스트 완주, 세트 하나를 1문항 틀리고 완료, 첫 코스의 카드 두 장 채점 완료(한 장은 두 번, 실패 한 건은 제외)
+        // 순서로 만든다 - 응답은 종류가 아니라 마친 시각 순이어야 한다 (Codex 리뷰).
+        completeLevelTest(account);
+        WordLearningDefinition.Set set = wordRegistry.current().definition().sets().get(0);
+        solve(account, set, 1);
+        IntonationLearningRegistry.Published current = intonationRegistry.current();
+        IntonationLearningDefinition.Course course = current.definition().courses().get(0);
+        String version = current.definition().contentVersion();
+        seedAttempt(account.userId(), version, course.cards().get(0).cardId(), "COMPLETED");
+        seedAttempt(account.userId(), version, course.cards().get(0).cardId(), "COMPLETED");
+        seedAttempt(account.userId(), version, course.cards().get(1).cardId(), "COMPLETED");
+        seedAttempt(account.userId(), version, course.cards().get(1).cardId(), "FAILED");
+
+        JsonNode month = attendanceMonth(account, YearMonth.from(today));
+        assumeSameDay(today);
+        assertEquals(List.of(today), dates(month.get("days")));
+        JsonNode items = month.get("days").get(0).get("items");
+        Map<String, JsonNode> byKind = new LinkedHashMap<>();
+        for (JsonNode item : items) {
+            byKind.put(item.get("kind").asString(), item);
+        }
+        assertEquals(3, items.size(), items.toString());
+        assertEquals(List.of("LEVEL_TEST", "SET", "COURSE"), new ArrayList<>(byKind.keySet()), "마친 시각 순이다");
+        JsonNode setItem = byKind.get("SET");
+        assertEquals(set.setId(), setItem.get("id").asString());
+        assertEquals(set.title(), setItem.get("title").asString());
+        assertEquals(set.items().size() - 1, setItem.get("done").asInt());
+        assertEquals(set.items().size(), setItem.get("total").asInt());
+        JsonNode courseItem = byKind.get("COURSE");
+        assertEquals(course.courseId(), courseItem.get("id").asString());
+        assertEquals(course.title(), courseItem.get("title").asString());
+        assertEquals(2, courseItem.get("done").asInt(), "같은 카드 두 번은 한 장, 실패는 세지 않는다");
+        assertEquals(course.cards().size(), courseItem.get("total").asInt());
+        JsonNode levelTest = byKind.get("LEVEL_TEST");
+        JsonNode home = home(account).get("levelTest");
+        assertEquals(home.get("testVersion").asString(), levelTest.get("id").asString());
+        assertEquals(home.get("tier").get("name").asString(), levelTest.get("title").asString());
+        assertEquals(1, levelTest.get("done").asInt());
+        assertEquals(1, levelTest.get("total").asInt());
+    }
+
+    @Test
     void 월_경계는_KST_자정이다() throws Exception {
         Account account = signUp();
         // 2026-09-30 23:59 KST와 2026-10-01 00:00 KST - UTC로는 둘 다 9월 30일이다.
         assertTrue(attendance.record(account.userId(), Instant.parse("2026-09-30T14:59:00Z")));
         assertTrue(attendance.record(account.userId(), Instant.parse("2026-09-30T15:00:00Z")));
-        assertEquals(List.of(30), ints(attendanceMonth(account, YearMonth.of(2026, 9)).get("attendedDays")));
-        assertEquals(List.of(1), ints(attendanceMonth(account, YearMonth.of(2026, 10)).get("attendedDays")));
+        JsonNode september = attendanceMonth(account, YearMonth.of(2026, 9));
+        JsonNode october = attendanceMonth(account, YearMonth.of(2026, 10));
+        assertEquals(List.of(LocalDate.of(2026, 9, 30)), dates(september.get("days")));
+        assertEquals(List.of(LocalDate.of(2026, 10, 1)), dates(october.get("days")));
+        assertEquals(1, october.get("lastMonthCount").asInt());
     }
 
     @Test
@@ -302,24 +355,27 @@ class LearningProgressApiTest extends IntegrationTest {
         YearMonth target = YearMonth.from(today()).minusMonths(1);
         seedAttendance(account.userId(), target.atDay(4));
         seedAttendance(other.userId(), target.atDay(4), target.atDay(9), target.atDay(10));
-        assertEquals(List.of(4), ints(attendanceMonth(account, target).get("attendedDays")));
-        assertEquals(List.of(4, 9, 10), ints(attendanceMonth(other, target).get("attendedDays")));
+        assertEquals(List.of(target.atDay(4)), dates(attendanceMonth(account, target).get("days")));
+        assertEquals(List.of(target.atDay(4), target.atDay(9), target.atDay(10)),
+                dates(attendanceMonth(other, target).get("days")));
     }
 
     @Test
     void 기록_없는_계정과_미래_달은_빈_목록_200이고_범위_밖_달과_형식_오류는_400이다() throws Exception {
         Account account = signUp();
         JsonNode empty = attendanceMonth(account, YearMonth.from(today()));
-        assertEquals(List.of(), ints(empty.get("attendedDays")));
+        assertEquals(List.of(), dates(empty.get("days")));
         assertEquals(0, empty.get("monthCount").asInt());
+        assertEquals(0, empty.get("lastMonthCount").asInt());
         assertEquals(0, empty.get("streak").get("currentDays").asInt());
 
         seedAttendance(account.userId(), today());
         YearMonth future = YearMonth.from(today()).plusMonths(1);
         JsonNode next = attendanceMonth(account, future);
-        assertEquals(List.of(), ints(next.get("attendedDays")));
+        assertEquals(List.of(), dates(next.get("days")));
         assertEquals(future.getYear(), next.get("year").asInt());
         assertEquals(future.getMonthValue(), next.get("month").asInt());
+        assertEquals(1, next.get("lastMonthCount").asInt(), "다음 달에서 보면 이번 달이 지난달이다");
 
         for (String query : List.of("year=2026&month=0", "year=2026&month=13", "year=0&month=1",
                 "year=2026&month=abc", "year=2026", "month=11")) {
@@ -579,10 +635,10 @@ class LearningProgressApiTest extends IntegrationTest {
                 .andExpect(header().string(HttpHeaders.CACHE_CONTROL, "no-store")));
     }
 
-    private static List<Integer> ints(JsonNode array) {
-        List<Integer> values = new ArrayList<>();
-        for (JsonNode item : array) {
-            values.add(item.asInt());
+    private static List<LocalDate> dates(JsonNode days) {
+        List<LocalDate> values = new ArrayList<>();
+        for (JsonNode day : days) {
+            values.add(LocalDate.parse(day.get("date").asString()));
         }
         return values;
     }

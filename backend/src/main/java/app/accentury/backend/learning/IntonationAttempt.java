@@ -133,6 +133,11 @@ public class IntonationAttempt implements Persistable<String> {
         return cardId;
     }
 
+    /** 채점이 끝난 시각 - 완료와 실패 모두. 출석 달력(KAN-314)이 완료 시도의 날짜로 쓴다. 아직이면 null. */
+    public @Nullable Instant finishedAt() {
+        return finishedAt;
+    }
+
     public AnalysisJobStatus status() {
         return status;
     }
