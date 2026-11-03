@@ -78,17 +78,16 @@ data "aws_iam_policy_document" "build" {
   # AmazonSSMManagedInstanceCore가 ssm:GetParameter와 GetParameters를 리소스 *에 허용한다 (2026-10-14 정책 문서 확인,
   # Codex 리뷰 P2). 위 Allow만으로는 경계가 서지 않는다 - 빌드 인스턴스에서 도는 코드가 두 환경의 내부 호출 토큰,
   # 관리자 토큰, JWT 시크릿 같은 /accentury/* 파라미터를 전부 읽을 수 있다. Deny는 Allow를 이기므로 IMAGE_TAG 하나를
-  # 뺀 모든 파라미터 읽기를 막는다. SSM 에이전트와 Image Builder 워크플로는 파라미터를 읽지 않으므로(에이전트는
-  # GetManifest, GetDocument만) 빌드에 영향이 없다 - 있다면 빌드가 AccessDenied로 시끄럽게 실패한다.
+  # 뺀 모든 파라미터 읽기를 막는다. 이 빌드에 쓰는 Image Builder 컴포넌트와 SSM 문서는 {{ssm:...}} 파라미터 참조를 쓰지
+  # 않아 빌드에 영향이 없다 - 있다면 빌드가 AccessDenied로 시끄럽게 실패한다. 액션은 ssm:GetParameter* 하나로 적는다
+  # (GetParameter, GetParameters, GetParametersByPath, GetParameterHistory, KAN-305).
+  #
+  # 같이 고칠 것: modules/ai-host/main.tf의 DenyOtherParameters(KAN-305)가 같은 문장이다 (not_resources만 다르다). 한쪽을
+  # 바꾸면 다른 쪽도 맞춘다.
   statement {
-    sid    = "DenyOtherParameters"
-    effect = "Deny"
-    actions = [
-      "ssm:GetParameter",
-      "ssm:GetParameters",
-      "ssm:GetParametersByPath",
-      "ssm:GetParameterHistory",
-    ]
+    sid           = "DenyOtherParameters"
+    effect        = "Deny"
+    actions       = ["ssm:GetParameter*"]
     not_resources = [local.image_tag_parameter_arn]
   }
 }
