@@ -26,13 +26,10 @@ class IntonationLearningController {
 
     private final IntonationLearningRegistry registry;
     private final LearningProgress progress;
-    private final LearningAttendance attendance;
 
-    IntonationLearningController(IntonationLearningRegistry registry, LearningProgress progress,
-                                 LearningAttendance attendance) {
+    IntonationLearningController(IntonationLearningRegistry registry, LearningProgress progress) {
         this.registry = registry;
         this.progress = progress;
-        this.attendance = attendance;
     }
 
     /** 코스 목록 (A-1) - 계정의 완료 표시와 추천 1개(KAN-268)를 채운다. 200 / 401. */
@@ -48,8 +45,8 @@ class IntonationLearningController {
     }
 
     /**
-     * 월별 출석 (KAN-314, §3.20) - 홈 앱바 달력 시트. 그 달(KST)에 출석한 일 목록과 홈과 같은 연속 출석, 서버의 오늘
-     * 날짜. 기록이 없는 계정과 미래 달은 빈 목록 200이다. 200 / 400 {@code VALIDATION_FAILED}({@code year}나
+     * 월별 출석 (KAN-314, §3.20) - 홈 앱바 달력 시트. 그 달(KST)에 출석한 날과 그날 마친 학습 항목, 이번 달과 지난달
+     * 출석 수, 홈과 같은 연속 출석, 서버의 오늘 날짜. 기록이 없는 계정과 미래 달은 빈 목록 200이다. 200 / 400 {@code VALIDATION_FAILED}({@code year}나
      * {@code month}가 없거나 정수가 아니거나 범위 밖) / 401.
      *
      * @param year  연도 (1부터 9999)
@@ -65,7 +62,7 @@ class IntonationLearningController {
         if (year < 1 || year > 9999) {
             throw new ApiException(ErrorCode.VALIDATION_FAILED, "year는 1 이상 9999 이하의 정수여야 합니다.");
         }
-        return noStore(attendance.month(user.id(), YearMonth.of(year, month)));
+        return noStore(progress.attendance(user.id(), YearMonth.of(year, month)));
     }
 
     /** 코스 상세 - 대사 카드 (A-2). 200 / 401 / 404 {@code LEARNING_COURSE_NOT_FOUND}. */

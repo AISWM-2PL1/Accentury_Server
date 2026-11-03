@@ -84,44 +84,52 @@ public class LearningAttendance {
         return streak(newestFirst, today);
     }
 
+    /** 달력 시트의 출석 부분 (KAN-314) - 그 달의 출석 날짜(오름차순), 지난달 출석 수, 홈과 같은 연속 출석, 오늘. */
+    record Calendar(List<LocalDate> days, int lastMonthCount, Streak streak, LocalDate today) {
+    }
+
     /**
-     * 홈 앱바 달력 시트 (KAN-314, §3.20) - 한 달(KST)의 출석 일 목록과 홈과 같은 연속 출석, 서버의 오늘 날짜.
+     * 홈 앱바 달력 시트 (KAN-314, §3.20) - 한 달(KST)의 출석 날짜와 지난달 출석 수, 홈과 같은 연속 출석, 서버의 오늘.
      * <p>
      * 달은 KST 날짜의 달이다 - 출석일 자체가 KST 날짜로 저장돼 있어 경계 변환이 없다. 미래 달이나 기록이 없는 계정은
-     * 빈 목록이다. <b>한 문장으로 읽고 오늘도 한 번만 정한다</b> (PR #61 리뷰) - 달 목록과 연속 출석이 같은 스냅샷과
-     * 같은 기준일을 보고, 자정 직전 요청에서 {@code today}와 {@code streak}가 갈리지 않는다. 연속 출석에 필요한
-     * 오늘 이전 행은 홈({@link #streak(UUID)})과 같은 범위라 계산도 같은 {@link #streak(List, LocalDate)}다. 기본 키
-     * (user_id, attended_on)가 두 조건을 그대로 받으므로 색인을 더 두지 않는다. 오늘 이전 전체를 읽는 것은 홈과 같다 -
-     * 계정당 하루 1행이라 양은 가입 일수에 묶이고, 하한을 두면 그 길이 넘는 연속 기록을 잘라먹는다.
+     * 빈 목록이다. <b>한 문장으로 읽고 오늘도 한 번만 정한다</b> (PR #61 리뷰) - 날짜 목록과 지난달 수, 연속 출석이 같은
+     * 스냅샷과 같은 기준일을 보고, 자정 직전 요청에서 {@code today}와 {@code streak}가 갈리지 않는다. 연속 출석에
+     * 필요한 오늘 이전 행은 홈({@link #streak(UUID)})과 같은 범위라 계산도 같은 {@link #streak(List, LocalDate)}다.
+     * 기본 키(user_id, attended_on)가 두 조건을 그대로 받으므로 색인을 더 두지 않는다. 오늘 이전 전체를 읽는 것은
+     * 홈과 같다 - 계정당 하루 1행이라 양은 가입 일수에 묶이고, 하한을 두면 그 길이 넘는 연속 기록을 잘라먹는다.
+     * 그날 무엇을 했는지는 이 표에 없다 - {@link LearningProgress}가 시도 기록에서 붙인다.
      */
-    MonthlyAttendanceResponse month(UUID userId, YearMonth month) {
+    Calendar calendar(UUID userId, YearMonth month) {
         LocalDate today = attendanceDate(Instant.now(clock));
         LocalDate first = month.atDay(1);
         LocalDate last = month.atEndOfMonth();
+        LocalDate previousFirst = month.minusMonths(1).atDay(1);
         List<LocalDate> newestFirst = jdbc.sql("""
                         select attended_on from learning_attendance
                          where user_id = :userId
-                           and (attended_on <= :today or attended_on between :first and :last)
+                           and (attended_on <= :today or attended_on between :previousFirst and :last)
                          order by attended_on desc
                         """)
                 .param("userId", userId)
                 .param("today", Date.valueOf(today))
-                .param("first", Date.valueOf(first))
+                .param("previousFirst", Date.valueOf(previousFirst))
                 .param("last", Date.valueOf(last))
                 .query((rs, rowNum) -> rs.getDate("attended_on").toLocalDate())
                 .list();
-        List<Integer> days = new ArrayList<>();
+        List<LocalDate> days = new ArrayList<>();
+        int lastMonthCount = 0;
         List<LocalDate> upToToday = new ArrayList<>();
         for (LocalDate date : newestFirst) {
             if (!date.isBefore(first) && !date.isAfter(last)) {
-                days.addFirst(date.getDayOfMonth());
+                days.addFirst(date);
+            } else if (!date.isBefore(previousFirst) && date.isBefore(first)) {
+                lastMonthCount++;
             }
             if (!date.isAfter(today)) {
                 upToToday.add(date);
             }
         }
-        return new MonthlyAttendanceResponse(month.getYear(), month.getMonthValue(), days, days.size(),
-                streak(upToToday, today), today);
+        return new Calendar(days, lastMonthCount, streak(upToToday, today), today);
     }
 
     /**

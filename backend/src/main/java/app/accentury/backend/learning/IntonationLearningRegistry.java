@@ -15,6 +15,7 @@ import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.Set;
 
 /**
@@ -68,6 +69,18 @@ public class IntonationLearningRegistry {
             }
             throw new ApiException(ErrorCode.LEARNING_CARD_NOT_FOUND);
         }
+
+        /** 카드가 속한 코스 - 출석 달력(KAN-314)이 그날 채점한 카드를 코스로 묶는다. 발행본에 없는 카드면 비어 있다. */
+        public Optional<IntonationLearningDefinition.Course> courseOf(String cardId) {
+            for (IntonationLearningDefinition.Course course : definition.courses()) {
+                for (IntonationLearningDefinition.Card card : course.cards()) {
+                    if (card.cardId().equals(cardId)) {
+                        return Optional.of(course);
+                    }
+                }
+            }
+            return Optional.empty();
+        }
     }
 
     private final Map<String, Published> published = new HashMap<>();
@@ -101,6 +114,11 @@ public class IntonationLearningRegistry {
     /** 목록과 상세가 쓰는 발행본 - 발행 시각이 가장 늦은 것. */
     public Published current() {
         return current;
+    }
+
+    /** 시도가 고정한 버전의 발행본 - 출석 달력(KAN-314)이 옛 발행본의 카드도 코스 제목으로 보이게 한다. */
+    public Optional<Published> find(String contentVersion) {
+        return Optional.ofNullable(published.get(contentVersion));
     }
 
     private static Published publish(IntonationLearningDefinition definition) {
