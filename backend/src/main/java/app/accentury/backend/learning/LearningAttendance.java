@@ -9,6 +9,7 @@ import java.sql.Date;
 import java.time.Clock;
 import java.time.Instant;
 import java.time.LocalDate;
+import java.time.YearMonth;
 import java.time.ZoneId;
 import java.util.List;
 import java.util.UUID;
@@ -80,6 +81,28 @@ public class LearningAttendance {
                 .query((rs, rowNum) -> rs.getDate("attended_on").toLocalDate())
                 .list();
         return streak(newestFirst, today);
+    }
+
+    /**
+     * 홈 앱바 달력 시트 (KAN-314, §3.20) - 한 달(KST)의 출석 일 목록과 홈과 같은 연속 출석, 서버의 오늘 날짜.
+     * <p>
+     * 달은 KST 날짜의 달이다 - 출석일 자체가 KST 날짜로 저장돼 있어 경계 변환이 없다. 미래 달이나 기록이 없는 계정은
+     * 빈 목록이다. 기본 키(user_id, attended_on)가 범위 조건을 그대로 받으므로 색인을 더 두지 않는다. 연속 출석은
+     * {@link #streak(UUID)}를 그대로 써서 홈과 같은 값이다 - 조회는 두 문장이다.
+     */
+    MonthlyAttendanceResponse month(UUID userId, YearMonth month) {
+        List<Integer> days = jdbc.sql("""
+                        select attended_on from learning_attendance
+                         where user_id = :userId and attended_on between :first and :last
+                         order by attended_on
+                        """)
+                .param("userId", userId)
+                .param("first", Date.valueOf(month.atDay(1)))
+                .param("last", Date.valueOf(month.atEndOfMonth()))
+                .query((rs, rowNum) -> rs.getDate("attended_on").toLocalDate().getDayOfMonth())
+                .list();
+        return new MonthlyAttendanceResponse(month.getYear(), month.getMonthValue(), days, days.size(),
+                streak(userId), attendanceDate(Instant.now(clock)));
     }
 
     /**
