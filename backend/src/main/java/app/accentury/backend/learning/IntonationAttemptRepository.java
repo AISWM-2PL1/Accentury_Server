@@ -111,14 +111,13 @@ public interface IntonationAttemptRepository extends JpaRepository<IntonationAtt
     List<String> findCompletedCardIds(@Param("userId") UUID userId, @Param("contentVersion") String contentVersion);
 
     /**
-     * 출석 달력 (KAN-314, §3.20) - 이 계정이 [from, to) 사이에 채점을 {@code COMPLETED}로 마친 시도, 완료 순. 한 달
-     * 범위로 부른다.
+     * 출석 달력 (KAN-314, §3.20) - 이 계정이 [from, to) 사이에 채점을 {@code COMPLETED}로 마친 시도. 한 달 범위로
+     * 부른다. 순서는 호출부가 하루 안에서 다시 정하므로 여기서 정렬하지 않는다.
      */
     @Query("""
             select a from IntonationAttempt a
              where a.userId = :userId and a.status = app.accentury.backend.analysis.AnalysisJobStatus.COMPLETED
                    and a.finishedAt >= :from and a.finishedAt < :to
-             order by a.finishedAt
             """)
     List<IntonationAttempt> findCompletedBetween(@Param("userId") UUID userId, @Param("from") Instant from,
                                                  @Param("to") Instant to);

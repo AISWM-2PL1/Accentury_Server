@@ -37,12 +37,12 @@ public interface WordSetAttemptRepository extends JpaRepository<WordSetAttempt, 
                                                   @Param("contentVersion") String contentVersion);
 
     /**
-     * 출석 달력 (KAN-314, §3.20) - 이 계정이 [from, to) 사이에 완료한 시도, 완료 순. 한 달 범위로 부른다.
+     * 출석 달력 (KAN-314, §3.20) - 이 계정이 [from, to) 사이에 완료한 시도. 한 달 범위로 부른다. 순서는 호출부가 하루
+     * 안에서 다시 정하므로 여기서 정렬하지 않는다.
      */
     @Query("""
             select a from WordSetAttempt a
              where a.userId = :userId and a.completedAt >= :from and a.completedAt < :to
-             order by a.completedAt
             """)
     List<WordSetAttempt> findCompletedBetween(@Param("userId") UUID userId, @Param("from") Instant from,
                                               @Param("to") Instant to);

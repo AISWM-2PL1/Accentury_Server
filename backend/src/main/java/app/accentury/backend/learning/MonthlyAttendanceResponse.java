@@ -27,14 +27,17 @@ public record MonthlyAttendanceResponse(int year, int month, List<Day> days, int
     /**
      * 그날 마친 학습 하나 (KAN-314, 2026-11-03 결정).
      *
-     * @param kind  {@code SET} 단어 세트 완료(시도마다 1건), {@code COURSE} 억양 코스(그날 채점을 마친 카드를 코스로 묶어
-     *              1건), {@code LEVEL_TEST} 레벨테스트 완주(최근 완주 1건만 남아 그날에만 붙는다)
+     * @param kind  {@code SET} 단어 세트 완료(시도마다 1건), {@code COURSE} 억양 코스(그날 채점을 마친 카드를 발행본과
+     *              코스로 묶어 1건), {@code LEVEL_TEST} 레벨테스트 완주(최근 완주 1건만 남아 그날에만 붙는다)
+     * @param key   하루 안에서 유일한 키 - 화면의 목록 키로 쓴다. 세트는 시도 id, 코스는 발행본 버전과 코스 id, 레벨테스트는
+     *              테스트 버전. 같은 세트를 하루 두 번 완료하거나 발행본이 바뀐 날 같은 코스 id가 두 발행본에 걸치면 {@code id}는
+     *              같아도 {@code key}는 다르다
      * @param id    세트 id, 코스 id, 레벨테스트는 테스트 버전
      * @param title 세트와 코스의 제목, 레벨테스트는 등급 이름
      * @param done  세트는 정답 수, 코스는 그날 채점을 마친 카드 수, 레벨테스트는 1
      * @param total 세트는 문항 수, 코스는 코스의 카드 수, 레벨테스트는 1
      */
-    public record Item(Kind kind, String id, String title, int done, int total) {
+    public record Item(Kind kind, String key, String id, String title, int done, int total) {
     }
 
     public enum Kind { SET, COURSE, LEVEL_TEST }

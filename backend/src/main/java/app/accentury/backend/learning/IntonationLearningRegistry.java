@@ -44,7 +44,11 @@ public class IntonationLearningRegistry {
      * @param courseResponses courseId별 상세 응답
      */
     public record Published(IntonationLearningDefinition definition, IntonationCourseListResponse listResponse,
-                            Map<String, IntonationCourseResponse> courseResponses) {
+                            Map<String, IntonationCourseResponse> courseResponses, Map<String, Located> cards) {
+
+        /** 카드와 그 카드가 속한 코스 - 발행 때 한 번 색인한다. */
+        public record Located(IntonationLearningDefinition.Course course, IntonationLearningDefinition.Card card) {
+        }
 
         /** 코스 상세 - 없으면 404 {@code LEARNING_COURSE_NOT_FOUND}. */
         public IntonationCourseResponse courseResponse(String courseId) {
@@ -57,29 +61,19 @@ public class IntonationLearningRegistry {
 
         /**
          * 카드 하나 - 채점(KAN-267, §3.19)이 업로드 받은 {@code cardId}로 scriptKey를 찾는다. 없으면 404
-         * {@code LEARNING_CARD_NOT_FOUND}. 발행본 카드는 백여 장이라 업로드마다 훑어도 된다.
+         * {@code LEARNING_CARD_NOT_FOUND}.
          */
         public IntonationLearningDefinition.Card card(String cardId) {
-            for (IntonationLearningDefinition.Course course : definition.courses()) {
-                for (IntonationLearningDefinition.Card card : course.cards()) {
-                    if (card.cardId().equals(cardId)) {
-                        return card;
-                    }
-                }
+            Located located = cards.get(cardId);
+            if (located == null) {
+                throw new ApiException(ErrorCode.LEARNING_CARD_NOT_FOUND);
             }
-            throw new ApiException(ErrorCode.LEARNING_CARD_NOT_FOUND);
+            return located.card();
         }
 
         /** 카드가 속한 코스 - 출석 달력(KAN-314)이 그날 채점한 카드를 코스로 묶는다. 발행본에 없는 카드면 비어 있다. */
         public Optional<IntonationLearningDefinition.Course> courseOf(String cardId) {
-            for (IntonationLearningDefinition.Course course : definition.courses()) {
-                for (IntonationLearningDefinition.Card card : course.cards()) {
-                    if (card.cardId().equals(cardId)) {
-                        return Optional.of(course);
-                    }
-                }
-            }
-            return Optional.empty();
+            return Optional.ofNullable(cards.get(cardId)).map(Located::course);
         }
     }
 
@@ -138,8 +132,14 @@ public class IntonationLearningRegistry {
                 .map(course -> IntonationCourseListResponse.Summary.unstarted(course.courseId(), course.seq(),
                         course.level(), course.topic(), course.title(), course.cards().size()))
                 .toList();
+        Map<String, Published.Located> cards = new HashMap<>();
+        for (IntonationLearningDefinition.Course course : ordered) {
+            for (IntonationLearningDefinition.Card card : course.cards()) {
+                cards.put(card.cardId(), new Published.Located(course, card));
+            }
+        }
         return new Published(sorted, new IntonationCourseListResponse(sorted.contentVersion(), summaries),
-                Map.copyOf(responses));
+                Map.copyOf(responses), Map.copyOf(cards));
     }
 
     private static IntonationLearningDefinition read(ObjectMapper objectMapper,
