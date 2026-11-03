@@ -315,7 +315,7 @@ pip-audit --require-hashes --disable-pip -r requirements.lock
 pytest
 ```
 
-`--python-version 3.12`는 전달본 이미지와 `Dockerfile.fake`의 파이썬 버전입니다. `--universal`은 플랫폼을
+`--python-version 3.12`는 전달본 이미지와 `Dockerfile.fake`의 파이썬 버전입니다. Dependabot은 `Dockerfile.fake`의 파이썬을 3.13 이상으로 올리지 않도록 막아 두었으니(`.github/dependabot.yml`의 `ignore`), 파이썬을 올릴 때는 이 명령의 버전과 `Dockerfile.fake`, `ignore`를 함께 바꿉니다. `--universal`은 플랫폼을
 가리지 않는 잠금이라 로컬(arm64)과 CI(amd64)가 같은 파일로 빌드합니다. 잠금 파일이 바뀐 PR은 staging 배포의
 스모크와 계약 적합성 스위트로 실모델 위에서 확인합니다 - 전달본과의 궁합은 거기서만 드러납니다.
 
