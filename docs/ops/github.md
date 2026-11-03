@@ -99,7 +99,7 @@ gh variable set ADSENSE_SLOT_ID   -R AISWM-2PL1/Accentury_App -e prod --body XXX
 
 고정한 값은 저절로 움직이지 않으므로 Dependabot(`.github/dependabot.yml`)이 **월 1회, 생태계마다 PR 하나**로 갱신을 올린다(생태계 3종: `github-actions`, `docker`, `pip`). 그 PR의 브랜치명은 `dependabot/...`으로 고정이라, 브랜치 네이밍 검사(`branch-name.yml`)는 PR을 연 계정이 `dependabot[bot]`일 때만 그 접두사를 통과시킨다. 병합하면 여느 Dev 병합처럼 staging 파이프라인이 돈다.
 
-`ai/Dockerfile.fake`의 `python:3.12-slim`은 Dependabot이 3.13 이상으로 올리는 PR을 만들지 않는다(`dependabot.yml`의 `ignore`). 파이썬 버전은 `ai/requirements.lock`(`--python-version 3.12`)과 모델 전달본에 묶여 있어서, 베이스만 올리면 잠긴 휠이 없는 패키지(`pydantic-core` 등)가 소스 빌드로 떨어져 `docker build -f ai/Dockerfile.fake`가 `linker cc not found`로 실패한다(2026-11 PR #56). 파이썬을 올릴 때는 사람이 잠금 파일을 다시 만들면서 `Dockerfile.fake`와 `ignore`를 같이 손본다(`ai/README.md` "의존성 잠금").
+`python` 이미지는 Dependabot이 minor/major로 올리지 않고 digest 갱신만 받는다(`dependabot.yml`의 `ignore`, `directories` 항목은 디렉터리별 ignore가 없어서 `/backend`와 `/ai`의 모든 `python` 이미지에 걸린다). 파이썬 버전이 `ai/requirements.lock`과 모델 전달본에 묶여 있기 때문이며, 이유와 올릴 때 함께 바꿀 곳(`test.yml`의 `ai-test` 포함)은 [`ai/README.md` "의존성 잠금"](../../ai/README.md#의존성-잠금)이 정본이다. 영구 고정이 아니라 Python 3.12 보안 지원이 끝나는 2028-10 전에 푼다. `ai-test`가 `ai/Dockerfile.fake`를 빌드하므로 베이스와 잠금 파일이 어긋나는 PR은 `ignore`와 무관하게 CI에서 잡힌다.
 
 워크플로에 새 action을 더하거나 손으로 올릴 때는 태그가 가리키는 commit SHA를 받아 적는다.
 

@@ -315,12 +315,25 @@ pip-audit --require-hashes --disable-pip -r requirements.lock
 pytest
 ```
 
-`--python-version 3.12`는 전달본 이미지와 `Dockerfile.fake`의 파이썬 버전입니다. Dependabot은 `Dockerfile.fake`의 파이썬을 3.13 이상으로 올리지 않도록 막아 두었으니(`.github/dependabot.yml`의 `ignore`), 파이썬을 올릴 때는 이 명령의 버전과 `Dockerfile.fake`, `ignore`를 함께 바꿉니다. `--universal`은 플랫폼을
+`--python-version 3.12`는 전달본 이미지와 `Dockerfile.fake`의 파이썬 버전입니다. `--universal`은 플랫폼을
 가리지 않는 잠금이라 로컬(arm64)과 CI(amd64)가 같은 파일로 빌드합니다. 잠금 파일이 바뀐 PR은 staging 배포의
 스모크와 계약 적합성 스위트로 실모델 위에서 확인합니다 - 전달본과의 궁합은 거기서만 드러납니다.
 
-CI(`test.yml`의 `ai-test`)는 `ai/`가 바뀐 PR마다 잠금 파일을 `pip-audit`로 검사합니다. 테스트 자체는
-`requirements-dev.txt`의 범위로 설치한 환경에서 돕니다.
+파이썬 버전은 이 잠금 파일과 모델 전달본에 묶여 있어서 `Dockerfile.fake`의 베이스만 올릴 수 없습니다. 잠긴 휠이
+없는 버전(예: `pydantic-core`의 cp315 휠)으로 올리면 pip이 소스 빌드로 떨어져 `docker build`가 `linker cc not
+found`로 실패합니다. 그래서 Dependabot은 `python` 이미지의 minor/major 상승 PR을 만들지 않고 digest 갱신만
+올립니다(`.github/dependabot.yml`의 `ignore`). 영구 고정은 아니고, Python 3.12 보안 지원이 끝나는 2028-10 전에
+풉니다. 파이썬을 올릴 때 함께 바꿀 곳은 다음 네 군데입니다.
+
+| 위치 | 바꿀 것 |
+| --- | --- |
+| 위 명령의 `--python-version` | 새 버전으로 잠금 파일을 다시 만듭니다. |
+| `Dockerfile.fake`의 `FROM python:<버전>-slim@<digest>` | 태그와 digest |
+| `.github/dependabot.yml`의 `ignore` | 새 버전에 맞춰 풀거나 유지합니다. |
+| `.github/workflows/test.yml` `ai-test`의 `python-version` | 이미지와 같은 버전 |
+
+CI(`test.yml`의 `ai-test`)는 `ai/`가 바뀐 PR마다 잠금 파일을 `pip-audit`로 검사하고 `Dockerfile.fake`를
+빌드합니다. 테스트 자체는 `requirements-dev.txt`의 범위로 설치한 환경(이미지와 같은 파이썬 3.12)에서 돕니다.
 
 ## 설정 (환경 변수)
 

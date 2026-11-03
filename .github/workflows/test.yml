@@ -94,7 +94,8 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
         with:
-          python-version: '3.13'
+          # 전달본 이미지와 Dockerfile.fake의 파이썬 버전과 같게 둔다 (ai/README.md "의존성 잠금").
+          python-version: '3.12'
           cache: pip
           cache-dependency-path: ai/requirements-dev.txt
       - run: pip install -r requirements-dev.txt
@@ -104,3 +105,6 @@ jobs:
       # 이 job은 ai/가 바뀐 PR에서만 돈다. 실패하면 잠금 파일을 다시 만든다 (ai/README.md "의존성 잠금").
       - run: pip install pip-audit==2.10.1
       - run: pip-audit --require-hashes --disable-pip -r requirements.lock
+      # 잠금 파일이 베이스 이미지의 파이썬 위에 실제로 설치되는지 확인한다. 베이스만 올라가 잠긴 휠이 없는
+      # 패키지가 소스 빌드로 떨어지는 경우(Dependabot docker PR 등)를 pip-audit은 못 잡는다.
+      - run: docker build -f Dockerfile.fake -t accentury-ai:fake .
