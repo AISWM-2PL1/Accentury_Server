@@ -99,6 +99,25 @@ data "aws_iam_policy_document" "host" {
     resources = local.readable_parameters
   }
 
+  # 위 Allow만으로는 경계가 서지 않는다 - 같은 역할에 붙은 AmazonSSMManagedInstanceCore(ssm_core)가 ssm:GetParameter와
+  # GetParameters를 리소스 *에 허용해서, 이름을 아는 파라미터는 다른 환경의 JWT 시크릿까지 단건으로 읽혔다
+  # (KAN-305, 2026-11-03 simulate-principal-policy로 확인). IAM은 Allow의 합집합이라 Allow를 좁혀도 관리형 정책의 범위는
+  # 줄지 않고, Deny가 Allow를 이기므로 읽는 세 경로 밖을 전부 막는다. ai-ami 빌드 역할의 DenyOtherParameters(KAN-285)와
+  # 같은 꼴이다. 호스트가 SSM을 읽는 곳은 accentury-up.sh의 /ai 하위 경로와 IMAGE_TAG 둘뿐이라 기동에는 영향이 없고,
+  # SSM 에이전트는 파라미터를 읽지 않는다(GetManifest, GetDocument만). 관리형 정책을 고객 관리형으로 바꾸는 안은 에이전트
+  # 요구 권한이 바뀔 때 따라가야 해서 쓰지 않는다.
+  statement {
+    sid    = "DenyOtherParameters"
+    effect = "Deny"
+    actions = [
+      "ssm:GetParameter",
+      "ssm:GetParameters",
+      "ssm:GetParametersByPath",
+      "ssm:GetParameterHistory",
+    ]
+    not_resources = local.readable_parameters
+  }
+
   # 호스트 타이머의 health 지표 (ai-health-metric.sh, KAN-36). PutMetricData는 리소스 수준 제한이 없는 API라
   # 네임스페이스 조건으로 좁힌다 - 이 호스트가 다른 서비스 이름으로 지표를 위조하지 못한다.
   statement {

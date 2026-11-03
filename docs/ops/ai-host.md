@@ -40,7 +40,7 @@ backend는 이 호스트에 없다. KAN-165 전의 backend 호스트(`accentury-
 | 컨테이너 메모리 상한 | `mem_limit: 7g`. 호스트 7.6GiB에서 OS와 에이전트 몫 0.6GiB를 뺀 값이다. 근거는 `docker-compose.ai.yml` 주석 |
 | 보안 그룹 | ai-sg (ai-alb-sg만 8000. ALB는 backend-sg만 8000) |
 | 컨테이너 | ai (호스트 8000, 내부 ALB만 닿는다) |
-| SSM 읽기 | 인라인 정책은 `/accentury/{env}/ai/*`와 `IMAGE_TAG`만 허용한다. 다만 같은 역할에 붙은 `AmazonSSMManagedInstanceCore`가 `ssm:GetParameter`, `ssm:GetParameters`를 `*`에 허용하므로, 이름을 아는 다른 파라미터도 단건으로는 읽힌다 (`modules/ai-host/main.tf`의 `ssm_core`). 기동 스크립트가 읽는 것은 위 둘뿐이다. 이 틈은 별도 티켓 몫이다 |
+| SSM 읽기 | 자기 환경 `/accentury/{env}/ai`, `/ai/*`, `IMAGE_TAG`만 읽는다. 같은 역할에 붙은 `AmazonSSMManagedInstanceCore`(`modules/ai-host/main.tf`의 `ssm_core`)가 `ssm:GetParameter`, `ssm:GetParameters`를 `*`에 허용하지만, 인라인 정책의 `DenyOtherParameters`가 그 세 경로 밖의 파라미터 읽기를 명시 Deny로 막는다. 기동 스크립트가 읽는 것은 `/ai` 하위와 `IMAGE_TAG` 둘뿐이다 |
 | IMDSv2 hop limit | 1 (컨테이너는 IMDS를 못 본다) |
 | 추가 | iptables egress 가드, health 타이머 |
 
@@ -238,7 +238,7 @@ true)와 user_data의 "있으면 건너뛰기"(docker, compose 버전 검사)다
 | 부모 이미지 | SSM 퍼블릭 파라미터 참조 `ssm:/aws/service/ami-amazon-linux-latest/al2023-ami-kernel-default-x86_64` - 빌드 때마다 그때의 최신 AL2023. Image Builder 관리형 AL2023 이미지는 이 리전에 DOCKER 형식뿐이라 못 쓴다 |
 | 컴포넌트 | `modules/ai-ami/component.yml` - docker 설치, compose 플러그인, SSM `/accentury/prod/IMAGE_TAG`를 읽어 ECR pull, docker 정지. user_data.sh.tftpl의 같은 단계를 옮긴 것이라 두 파일이 같은 결과를 만들어야 한다. 로그인 토큰은 AMI에 남기지 않는다 |
 | 빌드 인스턴스 | c7i.xlarge, prod 퍼블릭 서브넷, 전용 SG(인바운드 없음, 아웃바운드 443만), IMDSv2, 실패 시 종료. `resource_tags`에 `Name`은 예약 키라 못 넣는다 |
-| 빌드 역할 | SSM 코어 + Image Builder 관리형 + ECR 읽기 + `IMAGE_TAG` 1개, 그 밖의 파라미터 읽기는 명시 Deny. `AmazonSSMManagedInstanceCore`가 `ssm:GetParameter`를 `*`에 허용하므로 Allow를 좁히는 것만으로는 경계가 서지 않는다. ai 호스트 역할에는 이 Deny가 없다 (위 "호스트 사양") |
+| 빌드 역할 | SSM 코어 + Image Builder 관리형 + ECR 읽기 + `IMAGE_TAG` 1개, 그 밖의 파라미터 읽기는 명시 Deny. `AmazonSSMManagedInstanceCore`가 `ssm:GetParameter`를 `*`에 허용하므로 Allow를 좁히는 것만으로는 경계가 서지 않는다. ai 호스트 역할도 같은 Deny를 둔다 (위 "호스트 사양") |
 | 루트 볼륨 | 20GiB gp3 암호화 - 호스트 시작 템플릿(40GiB)보다 작아야 띄울 수 있다 |
 | 이미지 테스트 | 끔 (staging instance refresh가 대신한다) |
 | 버전 | `recipe_version`(1.0.0). component.yml이나 레시피 인자를 바꾸면 올린다 - 같은 이름과 버전의 레시피는 다시 못 만든다 |

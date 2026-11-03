@@ -372,7 +372,11 @@ prod 실측 부팅(시작에서 healthy까지) 약 3분 + 경보 해제 지연 1
 
 #### ai-ami 빌드 역할은 IMAGE_TAG 외 파라미터 읽기를 명시 Deny (KAN-285, Codex 리뷰)
 
-`AmazonSSMManagedInstanceCore`가 `ssm:GetParameter`를 `*`에 허용하므로 Allow를 좁히는 것만으로는 경계가 서지 않는다. ai 호스트 역할도 같은 관리형 정책을 붙이고 있어 같은 틈이 있다 - 별도 티켓으로 남겼다.
+`AmazonSSMManagedInstanceCore`가 `ssm:GetParameter`를 `*`에 허용하므로 Allow를 좁히는 것만으로는 경계가 서지 않는다. ai 호스트 역할도 같은 관리형 정책을 붙이고 있어 같은 틈이 있었고, KAN-305에서 같은 Deny를 더했다 (아래).
+
+#### ai 호스트 역할도 ai 경로와 IMAGE_TAG 외 파라미터 읽기를 명시 Deny (KAN-305, 2026-11-03)
+
+Well-Architected 검토(2026-10-30) 3.15가 위 틈을 다시 짚었다. `simulate-principal-policy`로 대조하니 staging과 prod ai 호스트 역할 모두 `/accentury/prod/ACCENTURY_AUTH_JWTSECRET`의 `GetParameter`가 allowed였고, SecureString이 `aws/ssm` 키라 복호화까지 된다. 컨테이너에서 IMDS로 가는 길은 막혀 있어 호스트 탈취나 SSM 세션이 전제라 Medium으로 봤지만, 고치는 비용이 정책 문장 하나라 ai-ami 빌드 역할과 같은 `DenyOtherParameters`를 호스트 정책 문서에 더했다. 관리형 정책을 고객 관리형으로 바꾸는 안은 SSM 에이전트 요구 권한을 따라가야 해서 쓰지 않았다. 호스트가 읽는 곳은 `accentury-up.sh`의 `/ai` 하위와 `IMAGE_TAG`뿐이라 기동에 영향이 없고, 부팅 자산과 user_data가 바뀌지 않아 instance refresh도 없다.
 
 #### reload 동안 ASG 프로세스 정지, 마커 파일로 재개 (KAN-201 Codex 리뷰 P1, KAN-212)
 

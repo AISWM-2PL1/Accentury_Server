@@ -199,9 +199,9 @@ c7i.xlarge와 루트 40GiB(`ai_instance_type`, `ai_root_volume_size`), AI ASG ma
 staging 설정으로 prod에 닿을 수 없는 이유: VPC가 분리돼 있고(피어링 없음), backend
 실행 역할과 태스크 역할, ai 호스트 역할이 자기 환경의 SSM 경로와 시크릿 ARN만 허용하며,
 시크릿 ARN 자체가 환경별로 다르다. 프라이빗 영역 `accentury.internal`은 이름이 같지만 각 환경 VPC에만 연결돼
-있어 staging backend가 prod ai를 풀 수 없다. ai 호스트 역할은 인라인 정책으로는 ai 경로만 읽지만,
-같은 역할에 붙은 `AmazonSSMManagedInstanceCore`가 `ssm:GetParameter(s)`를 `*`로 연다 (자세한 것은
-[`docs/ops/secrets-ssm.md`](../docs/ops/secrets-ssm.md)).
+있어 staging backend가 prod ai를 풀 수 없다. ai 호스트 역할에 붙은 `AmazonSSMManagedInstanceCore`는
+`ssm:GetParameter(s)`를 `*`로 열지만, 인라인 정책의 명시 Deny가 자기 환경 ai 경로와 `IMAGE_TAG` 밖의 파라미터 읽기를
+막는다 (자세한 것은 [`docs/ops/secrets-ssm.md`](../docs/ops/secrets-ssm.md)).
 
 ## 옛 절 이름 색인
 
