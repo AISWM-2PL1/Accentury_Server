@@ -40,23 +40,23 @@ prod의 승인 게이트는 GitHub environment `prod`의 **required reviewers**�
 
 ## environment 변수
 
-두 레포의 워크플로가 읽는 변수는 아래 4개이고 전부 환경 apply 출력에서 채운다(재구축으로 배포 ID나 역할 ARN이 바뀌면 다시 넣는다). 변수 이름 `AWS_DEPLOY_ROLE_ARN`은 두 레포가 같지만 값은 다르다 (KAN-306) - Server는 이미지 배포 역할, App은 웹 배포 역할이다. 값을 서로 바꿔 넣으면 configure-aws-credentials가 "Not authorized to perform sts:AssumeRoleWithWebIdentity"로만 실패해 철거 상태와 구분이 안 되므로, Server `deploy.yml`은 반영 전에 `AWS_DEPLOY_ROLE_ARN`과 `APP_DOMAIN`이 비어 있는지와 역할 이름이 `accentury-*-github-deploy`인지, App `web-deploy.yml`은 변수 3개가 비어 있는지와 역할 이름이 `accentury-*-github-web-deploy`인지 확인하고 아니면 메시지와 함께 실패한다.
+두 레포의 워크플로가 읽는 변수는 아래 5개이고 전부 환경 apply 출력에서 채운다(재구축으로 배포 ID나 역할 ARN이 바뀌면 다시 넣는다). 역할 ARN 변수는 레포마다 이름이 다르다 (KAN-306) - Server는 `AWS_DEPLOY_ROLE_ARN`에 이미지 배포 역할을, App은 `AWS_WEB_DEPLOY_ROLE_ARN`에 웹 배포 역할을 넣는다. 이름이 달라 한 레포의 역할 ARN을 다른 레포 변수에 바꿔 넣는 실수는 생기지 않고, 각 워크플로는 자기 변수가 비어 있으면 자격 증명 단계 전에 메시지와 함께 실패한다. 다른 환경의 역할 ARN을 넣는 실수(staging에 prod 역할)는 신뢰 정책이 environment에 묶여 있어 "Not authorized to perform sts:AssumeRoleWithWebIdentity"로 실패한다. 철거 상태의 실패와 같은 메시지이므로(`DEPLOY_PAUSED` 문단) 그때는 변수 값의 환경 이름을 먼저 본다.
 
 | 변수 | 출처 | 쓰는 곳 |
 | --- | --- | --- |
-| `AWS_DEPLOY_ROLE_ARN` (Server) | `terraform output -raw github_deploy_role_arn` | `deploy.yml`, `e2e-smoke.yml` |
-| `AWS_DEPLOY_ROLE_ARN` (App) | `terraform output -raw github_web_deploy_role_arn` | App `web-deploy.yml` |
+| `AWS_DEPLOY_ROLE_ARN` | `terraform output -raw github_deploy_role_arn` | `deploy.yml`, `e2e-smoke.yml` (이미지 배포 역할) |
+| `AWS_WEB_DEPLOY_ROLE_ARN` | `terraform output -raw github_web_deploy_role_arn` | App `web-deploy.yml` (웹 배포 역할, KAN-306) |
 | `WEB_BUCKET` | `terraform output -raw web_bucket` | App `web-deploy.yml` |
 | `CLOUDFRONT_DISTRIBUTION_ID` | `terraform output -raw cloudfront_distribution_id` | App `web-deploy.yml` |
 | `APP_DOMAIN` | `terraform output -raw domain` | E2E 스모크 대상(KAN-128). `deploy.yml`, `e2e-smoke.yml` |
 
-변수는 읽는 레포에 넣는다. `AWS_DEPLOY_ROLE_ARN`은 두 레포에 각각 다른 출력을, `WEB_BUCKET`과 `CLOUDFRONT_DISTRIBUTION_ID`는 App에, `APP_DOMAIN`은 Server에 넣는다. 아래 블록은 Server 클론의 `infra/envs/<env>`에서 돌리므로 `-R`을 빼면 gh가 현재 클론(Accentury_Server)에만 넣는다. 그래서 줄마다 `-R`을 명시한다.
+변수는 읽는 레포에 넣는다. `AWS_DEPLOY_ROLE_ARN`과 `APP_DOMAIN`은 Server에, `AWS_WEB_DEPLOY_ROLE_ARN`, `WEB_BUCKET`, `CLOUDFRONT_DISTRIBUTION_ID`는 App에 넣는다. 아래 블록은 Server 클론의 `infra/envs/<env>`에서 돌리므로 `-R`을 빼면 gh가 현재 클론(Accentury_Server)에만 넣는다. 그래서 줄마다 `-R`을 명시한다.
 
 ```
 cd infra/envs/staging   # 또는 prod
 env=$(basename "$PWD")   # envs/<env> 디렉터리 이름. 도메인으로 환경을 구분하지 않는다 (staging 이름은 랜덤, KAN-206)
 gh variable set AWS_DEPLOY_ROLE_ARN        -e "$env" -R AISWM-2PL1/Accentury_Server --body "$(terraform output -raw github_deploy_role_arn)"
-gh variable set AWS_DEPLOY_ROLE_ARN        -e "$env" -R AISWM-2PL1/Accentury_App    --body "$(terraform output -raw github_web_deploy_role_arn)"
+gh variable set AWS_WEB_DEPLOY_ROLE_ARN    -e "$env" -R AISWM-2PL1/Accentury_App    --body "$(terraform output -raw github_web_deploy_role_arn)"
 gh variable set WEB_BUCKET                 -e "$env" -R AISWM-2PL1/Accentury_App    --body "$(terraform output -raw web_bucket)"
 gh variable set CLOUDFRONT_DISTRIBUTION_ID -e "$env" -R AISWM-2PL1/Accentury_App    --body "$(terraform output -raw cloudfront_distribution_id)"
 gh variable set APP_DOMAIN                 -e "$env" -R AISWM-2PL1/Accentury_Server --body "$(terraform output -raw domain)"

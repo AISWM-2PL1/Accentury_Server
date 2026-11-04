@@ -177,14 +177,6 @@ jobs:
               missing=1
             fi
           done
-          # 변수 이름은 App 레포와 같고 값만 다르다 (KAN-306). 웹 배포 역할 ARN을 잘못 넣으면 아래 자격 증명
-          # 단계가 "Not authorized to perform sts:AssumeRoleWithWebIdentity"로만 실패해 철거 상태와 구분이
-          # 안 되므로 이미지 배포 역할 이름인지 여기서 먼저 본다.
-          case "$AWS_DEPLOY_ROLE_ARN" in
-            ""|*:role/accentury-*-github-deploy) ;;
-            *) echo "AWS_DEPLOY_ROLE_ARN이 이미지 배포 역할(accentury-<env>-github-deploy)이 아닙니다: $AWS_DEPLOY_ROLE_ARN (docs/ops/github.md 'environment 변수', 출력 github_deploy_role_arn)" >&2
-               missing=1 ;;
-          esac
           exit "$missing"
 
       - uses: aws-actions/configure-aws-credentials@e1253824e5c10ff9df46874f81ed3ec929e19cfd # v6.3.0
