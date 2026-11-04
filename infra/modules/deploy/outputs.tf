@@ -5,5 +5,5 @@ output "github_deploy_role_arn" {
 
 output "github_web_deploy_role_arn" {
   value       = aws_iam_role.github_web_deploy.arn
-  description = "Accentury_App 레포의 GitHub environment 변수 AWS_DEPLOY_ROLE_ARN 값 (KAN-306). 웹 번들 업로드와 캐시 무효화만"
+  description = "Accentury_App 레포의 GitHub environment 변수 AWS_WEB_DEPLOY_ROLE_ARN 값 (KAN-306). 웹 번들 업로드와 캐시 무효화만"
 }

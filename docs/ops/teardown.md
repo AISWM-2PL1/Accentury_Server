@@ -176,8 +176,10 @@ terraform apply
    리비전 배포를 한 번에 한다 ([deploy.md "이미지 배포 파이프라인과 롤백"](deploy.md#이미지-배포-파이프라인과-롤백-kan-128)).
 3. GitHub environment 변수 5개를 apply 출력으로 채운다 ([github.md "environment 변수"](github.md#environment-변수)). Server에는
    `AWS_DEPLOY_ROLE_ARN`(출력 `github_deploy_role_arn`)과 `APP_DOMAIN`, App에는 `AWS_WEB_DEPLOY_ROLE_ARN`(출력
-   `github_web_deploy_role_arn`), `WEB_BUCKET`, `CLOUDFRONT_DISTRIBUTION_ID`다 (KAN-306). 역할 변수는 레포마다 이름이 달라 서로
-   바꿔 넣을 수 없고, 비어 있으면 각 워크플로의 "environment 변수 확인" 스텝이 이름을 찍고 실패한다. 그 뒤 웹 번들은
+   `github_web_deploy_role_arn`), `WEB_BUCKET`, `CLOUDFRONT_DISTRIBUTION_ID`다 (KAN-306). 역할 변수는 레포마다 이름이 다르지만
+   맞는 변수에 다른 출력의 ARN을 넣는 값 혼동은 막지 못하고, 그때는 Not authorized로 실패한다 (github.md "environment 변수"의
+   확인 순서). 비어 있으면 Server `deploy.yml`의 deploy job과 App `web-deploy.yml`은 "environment 변수 확인" 스텝이 이름을 찍고
+   실패하고, Server `deploy.yml`의 build job(2단계의 Image Deploy가 먼저 거친다)과 `e2e-smoke.yml`은 자격 증명 오류로 실패한다. 그 뒤 웹 번들은
    Accentury_App 레포의 Web Deploy 워크플로가 올린다 (KAN-127).
 4. **등급 공유 이미지 5장을 올린다** (KAN-132). `scripts/publish-share-assets.sh <env>`를 환경마다 한 번 돌린다. backend는 SSM
    `ACCENTURY_RESULT_ASSETBASEURL`(= `https://<도메인>/share`)에 등급 code를 붙여 `/result`의 `share.imageUrl`을 만들므로, 버킷에
