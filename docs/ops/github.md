@@ -40,7 +40,7 @@ prod의 승인 게이트는 GitHub environment `prod`의 **required reviewers**�
 
 ## environment 변수
 
-두 레포의 워크플로가 읽는 변수는 아래 5개이고 전부 환경 apply 출력에서 채운다(재구축으로 배포 ID나 역할 ARN이 바뀌면 다시 넣는다). 역할 ARN 변수는 레포마다 이름이 다르다 (KAN-306) - Server는 `AWS_DEPLOY_ROLE_ARN`에 이미지 배포 역할을, App은 `AWS_WEB_DEPLOY_ROLE_ARN`에 웹 배포 역할을 넣는다. 이름이 달라 한 레포의 역할 ARN을 다른 레포 변수에 바꿔 넣는 실수는 생기지 않고, 각 워크플로는 자기 변수가 비어 있으면 자격 증명 단계 전에 메시지와 함께 실패한다. 다른 환경의 역할 ARN을 넣는 실수(staging에 prod 역할)는 신뢰 정책이 environment에 묶여 있어 "Not authorized to perform sts:AssumeRoleWithWebIdentity"로 실패한다. 철거 상태의 실패와 같은 메시지이므로(`DEPLOY_PAUSED` 문단) 그때는 변수 값의 환경 이름을 먼저 본다.
+두 레포의 워크플로가 읽는 변수는 아래 5개이고 전부 환경 apply 출력에서 채운다(재구축으로 배포 ID나 역할 ARN이 바뀌면 다시 넣는다). 역할 ARN 변수는 레포마다 이름이 다르다 (KAN-306) - Server는 `AWS_DEPLOY_ROLE_ARN`에 이미지 배포 역할을, App은 `AWS_WEB_DEPLOY_ROLE_ARN`에 웹 배포 역할을 넣는다. 이름이 다르면 변수 이름을 혼동하는 실수는 막지만, 맞는 변수에 다른 레포 출력(Server 변수에 `github_web_deploy_role_arn`)이나 다른 환경의 역할 ARN을 넣는 값 혼동은 막지 못한다. 그 경우 신뢰 정책이 레포와 environment에 묶여 있어 configure-aws-credentials가 "Not authorized to perform sts:AssumeRoleWithWebIdentity"로 실패하고, 철거 상태의 실패와 메시지가 같으므로(`DEPLOY_PAUSED` 문단) 그때는 변수 값의 역할 이름(`github-deploy`인지 `github-web-deploy`인지)과 환경 이름을 먼저 본다. 빈 값은 Server `deploy.yml`의 deploy job과 App `web-deploy.yml`에서는 "environment 변수 확인" 스텝이 이름을 찍고 실패하지만, Server `deploy.yml`의 build job과 `e2e-smoke.yml`에는 그 스텝이 없어 configure-aws-credentials의 자격 증명 오류로 실패한다.
 
 | 변수 | 출처 | 쓰는 곳 |
 | --- | --- | --- |
@@ -50,7 +50,14 @@ prod의 승인 게이트는 GitHub environment `prod`의 **required reviewers**�
 | `CLOUDFRONT_DISTRIBUTION_ID` | `terraform output -raw cloudfront_distribution_id` | App `web-deploy.yml` |
 | `APP_DOMAIN` | `terraform output -raw domain` | E2E 스모크 대상(KAN-128). `deploy.yml`, `e2e-smoke.yml` |
 
-변수는 읽는 레포에 넣는다. `AWS_DEPLOY_ROLE_ARN`과 `APP_DOMAIN`은 Server에, `AWS_WEB_DEPLOY_ROLE_ARN`, `WEB_BUCKET`, `CLOUDFRONT_DISTRIBUTION_ID`는 App에 넣는다. 아래 블록은 Server 클론의 `infra/envs/<env>`에서 돌리므로 `-R`을 빼면 gh가 현재 클론(Accentury_Server)에만 넣는다. 그래서 줄마다 `-R`을 명시한다.
+변수는 읽는 레포에 넣는다. `AWS_DEPLOY_ROLE_ARN`과 `APP_DOMAIN`은 Server에, `AWS_WEB_DEPLOY_ROLE_ARN`, `WEB_BUCKET`, `CLOUDFRONT_DISTRIBUTION_ID`는 App에 넣는다. 변수 이름을 나누기 전(KAN-306 이전) App 두 environment에 넣어 둔 `AWS_DEPLOY_ROLE_ARN`(값은 웹 배포 역할)과 `APP_DOMAIN`은 아직 남아 있다. App Release 브랜치의 `web-deploy.yml`이 승격 전까지 옛 이름 `AWS_DEPLOY_ROLE_ARN`을 읽으므로, App의 변수 이름 변경(App PR #63)이 Release까지 승격된 뒤에 두 environment에서 지운다. `APP_DOMAIN`은 App이 읽은 적이 없어 언제 지워도 된다.
+
+```
+for env in staging prod; do
+  gh variable delete AWS_DEPLOY_ROLE_ARN -e "$env" -R AISWM-2PL1/Accentury_App
+  gh variable delete APP_DOMAIN          -e "$env" -R AISWM-2PL1/Accentury_App
+done
+``` 아래 블록은 Server 클론의 `infra/envs/<env>`에서 돌리므로 `-R`을 빼면 gh가 현재 클론(Accentury_Server)에만 넣는다. 그래서 줄마다 `-R`을 명시한다.
 
 ```
 cd infra/envs/staging   # 또는 prod
