@@ -9,9 +9,4 @@ import org.jspecify.annotations.Nullable;
  *                  클라이언트는 그대로 돈다. 그 밖의 값은 400 {@code VALIDATION_FAILED}
  */
 record TranslationRequest(@Nullable String text, @Nullable String direction) {
-
-    /** 방향 없는 요청 - KAN-316 전 모양이고 테스트의 기본이다. */
-    TranslationRequest(@Nullable String text) {
-        this(text, null);
-    }
 }

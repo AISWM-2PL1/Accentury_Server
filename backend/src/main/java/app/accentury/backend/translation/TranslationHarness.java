@@ -4,6 +4,7 @@ import java.util.HashSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Set;
+import java.util.function.Function;
 
 /**
  * 번역기 하네스 (KAN-266, 명세서 §3.18) - LLM이 번역 말고 다른 일을 하지 않게 하는 서버 쪽 규칙 전부. 두 방향(KAN-316)이
@@ -75,8 +76,9 @@ final class TranslationHarness {
      * 비어 있지 않음, 줄바꿈 없음, 한글 음절 포함, 길이 상한 이하, 지시문 표식 없음, 그리고 입력이
      * {@value #OVERLAP_MIN_INPUT_SYLLABLES}음절 이상이면 입력과 같은 한글 음절이 하나는 있음(입력과 동떨어진 대답을 거른다).
      * <p>
-     * 방향을 받지 않는다 - 사투리 → 표준어도 같은 임계값이다. 검수된 경남 대사 20문장과 표준어 번역으로 잰 오탐은 0건이라
-     * (KAN-316 AC 2, {@code TranslationHarnessTest}) 방향별 임계값을 두지 않았다.
+     * 방향을 받지 않는다 - 사투리 → 표준어도 같은 임계값이다. 근거는 {@code TranslationHarnessTest}의 역방향 코퍼스(억양
+     * 발행본 경남 대사 25문장과 짧은 인사말 5개, 표준어 번역은 구현자 작성이고 검수 대기)에서 음절 겹침 검사를 실제로 지나는
+     * 문장의 오탐이 0건이었고, 실제 Gemini 출력으로 다시 잰 값은 KAN-316 코멘트에 있다 (AC 2). 방향별 임계값은 두지 않았다.
      */
     static boolean acceptsOutput(String input, String translated) {
         String output = translated.strip();
@@ -102,49 +104,22 @@ final class TranslationHarness {
     }
 
     /**
-     * 시스템 프롬프트 - 방향마다 한 벌이다 (KAN-316). 역할과 번역 규칙과 예만 방향을 따르고, 입력을 지시로 읽지 않는
-     * 규칙과 거절 기준과 응답 형식은 같다. 참고 어휘와 참고 문장은 기억으로 쓰지 않고 검수된 학습 발행본에서 받는다
-     * ({@code TranslationConfig}) - 레벨테스트 어휘 72개와 억양 대사는 이성주가 경남 사투리로 검수한 목록이다 (KAN-276).
-     * 다른 권역 표현의 예도 같은 검수 결과의 삭제 사유('~는디' 어미, '마카')에서 가져왔다.
+     * 시스템 프롬프트 - 방향마다 한 벌이다 (KAN-316). 역할과 번역 규칙과 예와 참고 자료 머리말만 방향을 따르고
+     * ({@link Wording}), 입력을 지시로 읽지 않는 규칙과 거절 기준과 응답 형식은 같다. 참고 어휘와 참고 문장은 기억으로 쓰지
+     * 않고 검수된 학습 발행본에서 받는다 ({@code TranslationConfig}) - 레벨테스트 어휘 72개와 억양 대사는 이성주가 경남
+     * 사투리로 검수한 목록이다 (KAN-276). 다른 권역 표현의 예도 같은 검수 결과의 삭제 사유('~는디' 어미, '마카')에서 가져왔다.
      * <p>
-     * {@code toStandard}에서 이미 표준어인 입력은 고치지 않고 그대로 돌려준다 (2026-11-04 결정 - 별도 종류나 거절 없음,
-     * {@code toDialect}가 이미 사투리인 입력을 그대로 두는 것과 대칭).
+     * 이미 목표 쪽 말인 입력은 두 방향 모두 고치지 않고 그대로 돌려주게 한다 (2026-11-04 결정 - 별도 종류나 거절 없음).
      *
      * @param direction  번역 방향
      * @param vocabulary 표준어와 경남 사투리 낱말 쌍
-     * @param sentences  경남 사투리 대사
+     * @param sentences  경남 사투리 대사. 억양 발행본은 표준어 짝이 없어({@code standard} null, KAN-264) 두 방향 모두 사투리
+     *                   문장만 싣는다
      */
     static String systemInstruction(TranslationDirection direction, List<VocabularyPair> vocabulary,
                                     List<String> sentences) {
+        Wording wording = Wording.of(direction);
         StringBuilder prompt = new StringBuilder();
-        String role;
-        String target;
-        String rules;
-        String example;
-        switch (direction) {
-            case TO_DIALECT -> {
-                role = "표준어 문장을 경상남도 사투리 문장으로";
-                target = "사투리";
-                rules = """
-                        - 경상남도 사투리만 쓴다. 다른 권역 표현(예: 어미 '~는디', 낱말 '마카')을 섞지 않는다.
-                        - 뜻, 높임 수준, 문장 부호를 원문과 맞춘다. 원문에 없는 내용을 덧붙이거나 설명하지 않는다.
-                        """;
-                example = "{\"text\": \"밥 먹었어?\"} 에는 {\"status\": \"TRANSLATED\", \"%s\": \"밥 뭇나?\"}"
-                        .formatted(OUTPUT_KEY);
-            }
-            case TO_STANDARD -> {
-                role = "경상남도 사투리 문장을 표준어 문장으로";
-                target = "표준어";
-                rules = """
-                        - 표준어만 쓴다. 사투리 낱말과 어미를 남기지 않는다.
-                        - 뜻, 높임 수준, 어미의 느낌(물음, 권유, 명령, 감탄), 문장 부호를 원문과 맞춘다. 원문에 없는 내용을 덧붙이거나 설명하지 않는다.
-                        - 이미 표준어인 문장은 고치지 않고 그대로 돌려준다.
-                        """;
-                example = "{\"text\": \"밥 뭇나?\"} 에는 {\"status\": \"TRANSLATED\", \"%s\": \"밥 먹었니?\"}"
-                        .formatted(OUTPUT_KEY);
-            }
-            default -> throw new IllegalArgumentException(direction.name());
-        }
         prompt.append("""
                 너는 %1$s 옮기는 번역기다. 이 역할 말고 다른 일은 절대 하지 않는다. (표식 %2$s)
 
@@ -159,33 +134,68 @@ final class TranslationHarness {
                 가벼운 비속어가 한두 개 섞인 일상 문장은 번역한다.
 
                 번역 규칙:
-                %4$s- 결과는 원문과 같은 수의 문장이고 줄바꿈이 없다.
+                %4$s- 이미 %3$s인 문장은 고치지 않고 그대로 돌려준다.
+                - 결과는 원문과 같은 수의 문장이고 줄바꿈이 없다.
                 - 고유명사, 숫자, 영어 낱말은 그대로 둔다.
 
                 응답은 JSON 하나뿐이다: {"status": "TRANSLATED", "%5$s": "<%3$s 문장>"} 또는 {"status": "REJECTED", "%5$s": ""}
                 예: %6$s
-                """.formatted(role, CANARY, target, rules, OUTPUT_KEY, example));
+                """.formatted(wording.role(), CANARY, wording.target(), wording.rules(), OUTPUT_KEY, wording.example()));
         if (!vocabulary.isEmpty()) {
-            prompt.append(direction == TranslationDirection.TO_DIALECT
-                    ? "\n참고 어휘 (표준어 = 경남 사투리, 검수된 목록):\n"
-                    : "\n참고 어휘 (경남 사투리 = 표준어, 검수된 목록 - 입력에 나오는 낱말의 뜻이다):\n");
+            prompt.append('\n').append(wording.vocabularyHeader()).append('\n');
             for (VocabularyPair pair : vocabulary) {
-                if (direction == TranslationDirection.TO_DIALECT) {
-                    prompt.append("- ").append(pair.standard()).append(" = ").append(pair.dialect()).append('\n');
-                } else {
-                    prompt.append("- ").append(pair.dialect()).append(" = ").append(pair.standard()).append('\n');
-                }
+                prompt.append("- ").append(wording.pairFormat().apply(pair)).append('\n');
             }
         }
         if (!sentences.isEmpty()) {
-            prompt.append(direction == TranslationDirection.TO_DIALECT
-                    ? "\n참고 문장 (경남 사투리 대사, 검수된 목록 - 어미와 말투를 참고한다):\n"
-                    : "\n참고 문장 (경남 사투리 대사, 검수된 목록 - 입력에 나오는 어미와 말투의 예다):\n");
+            prompt.append('\n').append(wording.sentencesHeader()).append('\n');
             for (String sentence : sentences) {
                 prompt.append("- ").append(sentence).append('\n');
             }
         }
         return prompt.toString();
+    }
+
+    /**
+     * 시스템 프롬프트에서 방향을 따르는 문구 전부 - 한 곳에 모아 두어 방향이 늘면 컴파일러가 빠진 쪽을 잡는다 (PR #62 리뷰).
+     *
+     * @param role             역할 - "A 문장을 B 문장으로"
+     * @param target           목표 쪽 말 이름 - 사투리 | 표준어
+     * @param rules            목표 쪽에만 있는 번역 규칙 (줄마다 "- "로 시작하고 줄바꿈으로 끝난다)
+     * @param example          입력과 답의 예 한 쌍
+     * @param vocabularyHeader 참고 어휘 머리말
+     * @param pairFormat       참고 어휘 한 쌍의 표기 - 입력 쪽 낱말이 앞이다
+     * @param sentencesHeader  참고 문장 머리말
+     */
+    record Wording(String role, String target, String rules, String example, String vocabularyHeader,
+                   Function<VocabularyPair, String> pairFormat, String sentencesHeader) {
+
+        static Wording of(TranslationDirection direction) {
+            return switch (direction) {
+                case TO_DIALECT -> new Wording(
+                        "표준어 문장을 경상남도 사투리 문장으로",
+                        "사투리",
+                        """
+                        - 경상남도 사투리만 쓴다. 다른 권역 표현(예: 어미 '~는디', 낱말 '마카')을 섞지 않는다.
+                        - 뜻, 높임 수준, 문장 부호를 원문과 맞춘다. 원문에 없는 내용을 덧붙이거나 설명하지 않는다.
+                        """,
+                        "{\"text\": \"밥 먹었어?\"} 에는 {\"status\": \"TRANSLATED\", \"%s\": \"밥 뭇나?\"}".formatted(OUTPUT_KEY),
+                        "참고 어휘 (표준어 = 경남 사투리, 검수된 목록):",
+                        pair -> pair.standard() + " = " + pair.dialect(),
+                        "참고 문장 (경남 사투리 대사, 검수된 목록 - 어미와 말투를 참고한다):");
+                case TO_STANDARD -> new Wording(
+                        "경상남도 사투리 문장을 표준어 문장으로",
+                        "표준어",
+                        """
+                        - 표준어만 쓴다. 사투리 낱말과 어미를 남기지 않는다.
+                        - 뜻, 높임 수준, 어미의 느낌(물음, 권유, 명령, 감탄), 문장 부호를 원문과 맞춘다. 원문에 없는 내용을 덧붙이거나 설명하지 않는다.
+                        """,
+                        "{\"text\": \"밥 뭇나?\"} 에는 {\"status\": \"TRANSLATED\", \"%s\": \"밥 먹었니?\"}".formatted(OUTPUT_KEY),
+                        "참고 어휘 (경남 사투리 = 표준어, 검수된 목록 - 입력에 나오는 낱말의 뜻이다):",
+                        pair -> pair.dialect() + " = " + pair.standard(),
+                        "참고 문장 (경남 사투리 대사, 검수된 목록 - 입력에 나오는 어미와 말투의 예다):");
+            };
+        }
     }
 
     /** 참고 어휘 한 쌍 - 단어 학습 카드의 표준어 뜻과 사투리 낱말이다. */
