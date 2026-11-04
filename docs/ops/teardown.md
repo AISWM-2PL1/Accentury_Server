@@ -175,7 +175,9 @@ terraform apply
    기동한다. 다른 SHA를 반영하려면 Actions "Image Deploy"를 해당 환경으로 수동 실행한다. SSM 갱신, ai 호스트 reload, backend
    리비전 배포를 한 번에 한다 ([deploy.md "이미지 배포 파이프라인과 롤백"](deploy.md#이미지-배포-파이프라인과-롤백-kan-128)).
 3. GitHub environment 변수 4개(`AWS_DEPLOY_ROLE_ARN`, `WEB_BUCKET`, `CLOUDFRONT_DISTRIBUTION_ID`, `APP_DOMAIN`)를 apply 출력으로
-   채운다 ([github.md](github.md)). 그 뒤 웹 번들은 Accentury_App 레포의 Web Deploy 워크플로가 올린다 (KAN-127).
+   채운다 ([github.md "environment 변수"](github.md#environment-변수)). `AWS_DEPLOY_ROLE_ARN`은 레포마다 다른 출력이다 - Server는
+   `github_deploy_role_arn`, App은 `github_web_deploy_role_arn` (KAN-306). 같은 ARN을 두 레포에 넣으면 App 웹 배포가
+   AssumeRoleWithWebIdentity 거부로 실패한다. 그 뒤 웹 번들은 Accentury_App 레포의 Web Deploy 워크플로가 올린다 (KAN-127).
 4. **등급 공유 이미지 5장을 올린다** (KAN-132). `scripts/publish-share-assets.sh <env>`를 환경마다 한 번 돌린다. backend는 SSM
    `ACCENTURY_RESULT_ASSETBASEURL`(= `https://<도메인>/share`)에 등급 code를 붙여 `/result`의 `share.imageUrl`을 만들므로, 버킷에
    `share/<code>.png`가 없으면 결과 화면과 카카오 카드의 이미지가 깨진다. 캐릭터가 바뀌면 다시 돌린다. 서버 배포는 없다

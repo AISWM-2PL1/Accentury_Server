@@ -15,7 +15,7 @@
 # publish-well-known.sh와 같은 이유다. 이미지는 웹 번들과 수명이 다르다 - 캐릭터가 바뀔 때만
 # 바뀌고, 그때는 build.py로 다시 만든 파일을 이 스크립트로 올리면 끝이다 (AC - 이미지 교체는
 # S3 업로드만으로 반영, 앱과 서버 배포 불필요). web-deploy.yml은 `sync --delete`를 쓰지 않고
-# 배포 역할에 DeleteObject가 없어, 여기서 올린 `share/*`는 이후 웹 배포에 살아남는다.
+# 웹 배포 역할(github-web-deploy)에 DeleteObject가 없어, 여기서 올린 `share/*`는 이후 웹 배포에 살아남는다.
 #
 # ── 캐시 ────────────────────────────────────────────────────────────────────
 # cache-control은 1일이다. 웹 번들처럼 1년 immutable로 올리면 캐릭터 교체가 1년 걸리는 사고가
@@ -23,7 +23,9 @@
 # 즉시 반영이 필요하면 아래 CloudFront 무효화가 그 몫이다 - 이 스크립트가 매번 한다.
 #
 # 필요한 권한은 대상 버킷의 `s3:PutObject`와 배포의 `cloudfront:CreateInvalidation`,
-# `cloudfront:GetInvalidation`이다 (배포 역할이 갖고 있다. DeleteObject는 필요 없다).
+# `cloudfront:GetInvalidation`이다. 이 셋을 가진 역할은 웹 배포 역할(github-web-deploy, App 레포 토큰 전용)뿐이라
+# Server CI의 이미지 배포 역할(github-deploy)로는 PutObject가 implicitDeny다 (KAN-306). 운영자 PC의 사람 자격
+# 증명으로 돌린다. DeleteObject는 필요 없다.
 set -euo pipefail
 
 CURRENT_STEP="시작"
