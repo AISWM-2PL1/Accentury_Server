@@ -26,14 +26,14 @@
 locals {
   name = "accentury-${var.env}"
 
-  server_subjects = [
-    "repo:${var.github_owner}/${var.github_server_repository.name}:environment:${var.env}",
-    "repo:${var.github_owner}@${var.github_owner_id}/${var.github_server_repository.name}@${var.github_server_repository.id}:environment:${var.env}",
-  ]
-  app_subjects = [
-    "repo:${var.github_owner}/${var.github_app_repository.name}:environment:${var.env}",
-    "repo:${var.github_owner}@${var.github_owner_id}/${var.github_app_repository.name}@${var.github_app_repository.id}:environment:${var.env}",
-  ]
+  # 역할별 sub 목록. 형식 문자열은 여기 한 곳에만 둔다 - 두 벌로 복사해 두면 sub 형식을 바꿀 때
+  # 한쪽만 고쳐 한 역할만 Not authorized로 남는 실수가 난다 (PR #63 리뷰).
+  subjects = {
+    for key, repo in { server = var.github_server_repository, app = var.github_app_repository } : key => [
+      "repo:${var.github_owner}/${repo.name}:environment:${var.env}",
+      "repo:${var.github_owner}@${var.github_owner_id}/${repo.name}@${repo.id}:environment:${var.env}",
+    ]
+  }
 }
 
 # 공급자는 계정에 1개뿐이라 bootstrap 스택이 소유한다 (infra/bootstrap/github-oidc.tf).
@@ -44,10 +44,7 @@ data "aws_iam_openid_connect_provider" "github" {
 
 # 신뢰 정책 두 벌 - 역할마다 자기 레포의 sub만 (KAN-306).
 data "aws_iam_policy_document" "assume" {
-  for_each = {
-    server = local.server_subjects
-    app    = local.app_subjects
-  }
+  for_each = local.subjects
 
   statement {
     actions = ["sts:AssumeRoleWithWebIdentity"]
@@ -81,6 +78,16 @@ resource "aws_iam_role" "github_deploy" {
 resource "aws_iam_role" "github_web_deploy" {
   name               = "${local.name}-github-web-deploy"
   assume_role_policy = data.aws_iam_policy_document.assume["app"].json
+
+  # 이 분리의 불변식 - 두 역할을 맡는 저장소가 서로 달라야 한다. tfvars나 저장소 ID 갱신 중 실수로 두 변수가
+  # 같은 저장소를 가리키면 한 레포 토큰이 image-deploy와 web-deploy를 다 맡아 KAN-306 이전 상태로 조용히
+  # 돌아가므로 plan 단계에서 막는다.
+  lifecycle {
+    precondition {
+      condition     = var.github_server_repository.id != var.github_app_repository.id && var.github_server_repository.name != var.github_app_repository.name
+      error_message = "github_server_repository와 github_app_repository는 서로 다른 저장소여야 한다. 같으면 한 레포 토큰이 이미지 배포와 웹 배포 역할을 다 맡게 된다 (KAN-306)."
+    }
+  }
 }
 
 # 웹 번들 업로드와 캐시 무효화만 (KAN-127). 이 환경의 버킷 1개와 배포 1개로 한정한다.

@@ -124,13 +124,15 @@ S3에 올리고 CloudFront를 무효화한 뒤 도메인으로 실제 응답을 
 한다. 멱등이라 몇 번 돌려도 된다.
 
 **웹 배포와 무관하게 이 파일들만 갈아 끼울 수 있다.** 웹 배포 워크플로(Accentury_App `.github/workflows/web-deploy.yml`)는 `aws s3 sync`를
-`--delete` 없이 쓰고 배포 역할에는 `s3:DeleteObject` 자체가 없어서(`infra/modules/deploy/main.tf`),
+`--delete` 없이 쓰고 웹 배포 역할(`accentury-{env}-github-web-deploy`)에는 `s3:DeleteObject` 자체가 없어서(`infra/modules/deploy/main.tf`),
 여기서 올린 `.well-known/*` 객체는 이후의 웹 배포에 지워지지 않는다. 지문이나 팀 ID가 바뀌면
 이 스크립트만 다시 돌리면 된다.
 
 필요한 권한은 해당 버킷의 `s3:PutObject`, 배포의 `cloudfront:CreateInvalidation`과 `cloudfront:GetInvalidation`
 셋이다. `GetInvalidation`은 스크립트가 무효화 완료를 기다릴 때(`aws cloudfront wait invalidation-completed`)
-폴링에 쓴다. 빼면 업로드와 무효화가 이미 일어난 뒤에 AccessDenied로 죽는다. `s3:DeleteObject`는 필요 없다.
+폴링에 쓴다. 빼면 업로드와 무효화가 이미 일어난 뒤에 AccessDenied로 죽는다. `s3:DeleteObject`는 필요 없다. 셋을 가진
+역할은 웹 배포 역할(`github-web-deploy`, Accentury_App 레포 토큰 전용)뿐이라 Server CI의 이미지 배포 역할로는 돌릴 수
+없고, 운영자 PC의 사람 자격 증명으로 돌린다 (KAN-306).
 
 ## 게시 뒤 확인
 

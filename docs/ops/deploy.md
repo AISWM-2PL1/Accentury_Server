@@ -15,9 +15,9 @@ GitHub environment와 변수는 [github.md](github.md), backend 서비스 쪽 �
 
 ## 정적 자산 게시
 
-두 자산 모두 Terraform이 만드는 것이 아니라 웹 S3 버킷 안의 객체다. apply로는 생기지 않고, apply를 다시 해도 지워지지 않는다. 웹 배포(Accentury_App 레포의 `web-deploy.yml`)의 `aws s3 sync`에 `--delete`가 없고 배포 역할에 `s3:DeleteObject`가 아예 없어서(`modules/deploy`), 스크립트로 올린 객체는 이후 웹 배포에 살아남는다. 그래서 자산 교체가 웹 재배포를 요구하지 않고, 웹 배포도 자산을 다시 올리지 않는다.
+두 자산 모두 Terraform이 만드는 것이 아니라 웹 S3 버킷 안의 객체다. apply로는 생기지 않고, apply를 다시 해도 지워지지 않는다. 웹 배포(Accentury_App 레포의 `web-deploy.yml`)의 `aws s3 sync`에 `--delete`가 없고 웹 배포 역할(`accentury-{env}-github-web-deploy`)에 `s3:DeleteObject`가 아예 없어서(`modules/deploy`), 스크립트로 올린 객체는 이후 웹 배포에 살아남는다. 그래서 자산 교체가 웹 재배포를 요구하지 않고, 웹 배포도 자산을 다시 올리지 않는다.
 
-두 스크립트가 쓰는 권한은 대상 버킷의 `s3:PutObject`와 배포의 `cloudfront:CreateInvalidation`, `cloudfront:GetInvalidation`이다(무효화 완료를 기다리기 때문이다). 배포 역할이 셋 다 갖고 있다.
+두 스크립트가 쓰는 권한은 대상 버킷의 `s3:PutObject`와 배포의 `cloudfront:CreateInvalidation`, `cloudfront:GetInvalidation`이다(무효화 완료를 기다리기 때문이다). 셋을 가진 역할은 웹 배포 역할(`github-web-deploy`)뿐이고 그 역할은 Accentury_App 레포의 environment 토큰으로만 맡을 수 있으므로(KAN-306), 이 레포의 CI가 맡는 이미지 배포 역할(`github-deploy`)로는 `s3:PutObject`가 implicitDeny라 실패한다. 두 스크립트는 운영자 PC의 사람 자격 증명으로 돌린다.
 
 ### App Link 검증 파일 (KAN-32)
 
