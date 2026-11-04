@@ -107,6 +107,7 @@ class TranslationHarnessTest {
         assertTrue(prompt.contains("- 부추 = 정구지"));
         assertTrue(prompt.contains("- 국수물을 좀 끓일라고"));
         assertTrue(prompt.contains("\"" + TranslationHarness.OUTPUT_KEY + "\": \"밥 뭇나?\""));
+        assertTrue(prompt.contains("이미 사투리인 문장은 고치지 않고 그대로 돌려준다"), "2026-11-04 결정 - 두 방향이 대칭이다");
     }
 
     @Test
@@ -131,8 +132,9 @@ class TranslationHarnessTest {
 
     /**
      * 사투리 → 표준어 코퍼스. 사투리 문장은 억양 학습 발행본 in-gn-2026.10.1(이성주 검수, V10)의 경남 대사 25개와 짧은
-     * 인사말 5개이고, 표준어 번역은 구현자가 썼다 (2026-11-04 결정 - 음절 겹침 규칙의 오탐을 재는 것이 목적이라 표준어
-     * 쪽의 미세한 어색함은 결과에 영향이 작다). 표준어 번역의 검수는 KAN-316 코멘트로 요청했다.
+     * 인사말 5개, 그리고 어휘가 통째로 바뀌는 의역 5개(발행본 대사를 낱말까지 바꿔 옮긴 것)다. 표준어 번역은 구현자가 썼고
+     * 검수 대기다 (KAN-316 코멘트 10832). 목적은 음절 겹침 규칙의 오탐 측정이라 표준어 쪽의 미세한 어색함은 결과에 영향이
+     * 작다. 실제 Gemini 출력으로 잰 값은 KAN-316 코멘트에 있다 (PR #62 리뷰 - 이 코퍼스만으로는 의역을 못 잡는다).
      */
     static final List<String[]> TO_STANDARD_CORPUS = List.of(
             new String[] {"국수물을 좀 끓일라고 하는데, 가마솥에 물은 얼만큼 부우면 됩니까?", "국수물을 좀 끓이려고 하는데, 가마솥에 물은 얼마나 부으면 됩니까?"},
@@ -164,21 +166,36 @@ class TranslationHarnessTest {
             new String[] {"어데 가노?", "어디 가니?"},
             new String[] {"하모", "그래"},
             new String[] {"개안심더", "괜찮습니다"},
-            new String[] {"니 누가 만들었노?", "너 누가 만들었니?"});
+            new String[] {"니 누가 만들었노?", "너 누가 만들었니?"},
+            // 의역 - 발행본 대사를 낱말까지 바꿔 옮긴 것. 겹침 규칙이 실제로 걸리는 표본이다 (PR #62 리뷰).
+            new String[] {"여기는 봄만 되면 진달래하고 참나리가 온데만데 피가 억수로 이뻐예.", "이 동네는 봄마다 꽃들이 곳곳에 피어 무척 곱습니다."},
+            new String[] {"오늘 바람이 심하이까네, 밖에 있는 돼지를 빨리 우리 안으로 넣으이소.", "오늘은 바람이 세니 밖의 가축을 서둘러 축사로 들이세요."},
+            new String[] {"맨날천날 무릎팍이 아프다는 양반이 놀러 다닐 때는 안 아픈교?", "늘 다리가 쑤신다던 분이 나들이 갈 땐 멀쩡하신가요?"},
+            new String[] {"옷 호주머니 떨어진 거 같은데, 꿰매서 입어야 하이까네 얼른 벗어라.", "주머니가 뜯어진 듯하니 바느질해야 하잖아, 빨리 벗으렴."},
+            new String[] {"저 위에 폭포에서 널찌는 물이 얼어서 얼음된 거 한번 보이소.", "위쪽 폭포수가 꽁꽁 언 모습을 한번 구경하세요."});
 
     @Test
     void 사투리_입력_코퍼스의_정상_표준어_번역이_번역_불가로_떨어지는_오탐은_10퍼센트_이하다() {
-        assertTrue(TO_STANDARD_CORPUS.size() >= 20, "코퍼스는 20문장 이상이다");
+        // 분모는 음절 겹침 검사를 실제로 지나는 입력(한글 음절 10개 이상)만이다 - 짧은 입력은 검사를 건너뛰어 언제나 통과하므로
+        // 분모에 넣으면 오탐률이 낙관적으로 나온다 (PR #62 리뷰). 짧은 입력은 통과 자체만 확인한다.
+        int checked = 0;
         List<String> falsePositives = new java.util.ArrayList<>();
         for (String[] pair : TO_STANDARD_CORPUS) {
             assertFalse(TranslationHarness.rejectsBeforeLlm(pair[0]), "사투리 입력이 호출 전 검사에 걸렸다: " + pair[0]);
-            if (!TranslationHarness.acceptsOutput(pair[0], pair[1])) {
+            boolean accepted = TranslationHarness.acceptsOutput(pair[0], pair[1]);
+            if (pair[0].codePoints().filter(c -> c >= 0xAC00 && c <= 0xD7A3).count()
+                    < TranslationHarness.OVERLAP_MIN_INPUT_SYLLABLES) {
+                assertTrue(accepted, "짧은 입력은 겹침 검사 없이 통과한다: " + pair[0]);
+                continue;
+            }
+            checked++;
+            if (!accepted) {
                 falsePositives.add(pair[0] + " -> " + pair[1]);
             }
         }
-        // 측정값: 30문장 중 0건 (2026-11-04). 방향별 임계값 분리는 하지 않았다.
-        assertTrue(falsePositives.size() * 10 <= TO_STANDARD_CORPUS.size(),
-                "오탐 " + falsePositives.size() + "/" + TO_STANDARD_CORPUS.size() + ": " + falsePositives);
+        assertTrue(checked >= 20, "겹침 검사를 지나는 문장이 20개 이상이다: " + checked);
+        // 측정값: 겹침 검사 대상 30문장(대사 25 + 의역 5) 중 0건 (2026-11-04). 방향별 임계값 분리는 하지 않았다.
+        assertTrue(falsePositives.size() * 10 <= checked, "오탐 " + falsePositives.size() + "/" + checked + ": " + falsePositives);
     }
 
     @Test

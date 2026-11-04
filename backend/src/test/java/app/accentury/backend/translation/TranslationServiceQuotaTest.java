@@ -107,7 +107,7 @@ class TranslationServiceQuotaTest {
     private TranslationResponse translate(String text) {
         AppUser user = mock(AppUser.class);
         when(user.id()).thenReturn(userId);
-        return service.translate(user, new TranslationRequest(text));
+        return service.translate(user, new TranslationRequest(text, null));
     }
 
     private static void assertCode(ErrorCode expected, Runnable call) {

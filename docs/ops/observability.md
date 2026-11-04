@@ -57,7 +57,10 @@ wiki의 "임계치를 언제 다시 보는가"에 있다.
 
 `translation-quota-exhausted`가 울면: Gemini 무료 등급이 429를 돌려줬다는 뜻이고 그동안의 번역 요청은 전부
 503 `TRANSLATION_UNAVAILABLE`이다. 분당 한도(RPM)면 몇 분 뒤 풀리고, 일일 한도(RPD)면 태평양 시간 자정까지 풀리지 않는다.
-backend 로그의 "Gemini 무료 한도 소진(429)" 빈도와 `accentury.translation.requests`로 가른다.
+backend 로그의 "Gemini 무료 한도 소진(429)" 빈도와 `accentury.translation.requests`로 가른다. 이 지표는 KAN-316부터 차원이
+`result`와 `direction` 둘이라, `result`만 고른 옛 그래프와 조회에는 KAN-316 배포 뒤 값이 없다 (CloudWatch는 차원 조합이 다르면
+다른 지표다). 방향 합산은 콘솔 검색 `SEARCH('{Accentury,direction,result} accentury.translation.requests.count', 'Sum')`이나
+두 `direction` 값의 SUM 수식으로 본다.
 
 **6종 모두 결측을 장애로 세지 않는다.** backend가 죽어 지표가 끊기는 것은 `no-healthy-target`이, AI 호스트가 죽는 것은
 `ai-unhealthy`가 이미 잡는다. 같은 사건에 메일을 여러 통 보내지 않는다.
@@ -239,7 +242,7 @@ aws logs describe-log-streams --region "$REGION" --log-group-name "$(terraform o
 | `accentury.analysis.judged` (KAN-272) | 3 | `reason` 3종 |
 | `accentury.result.wait` (KAN-284) | 5 | Timer 4 + 백분위 1 |
 | `StageDuration` (KAN-204, KAN-293) | 17 | 바깥 콜드/웜 7 + 안쪽 다섯 x 2 |
-| `accentury.translation.requests`, `.llm.calls`, `.records` (KAN-266, KAN-316) | 최대 15 (staging 13) | `requests`는 `result` 5종 x `direction` 2종(KAN-316) = 10, `outcome` 3종, `records`의 `result` 2종(기록 버킷이 있는 prod만). 카운터는 기동 때 전부 등록되지만 CloudWatch 지표는 값이 한 번이라도 나간 조합만 생긴다 |
+| `accentury.translation.requests`, `.llm.calls`, `.records` (KAN-266, KAN-316) | 15 (staging 13) | `requests`는 `result` 5종 x `direction` 2종(KAN-316) = 10, `outcome` 3종, `records`의 `result` 2종(기록 버킷이 있는 prod만). 카운터는 기동 때 전부 등록되고 Micrometer CloudWatch 레지스트리는 0이어도 주기마다 보내므로 기동 직후부터 전부 지표가 된다 |
 | 합계 | 약 71 (staging 약 69) | 환경당 월 약 21달러 |
 
 경보 6종은 환경당 월 약 0.70달러다 (`analysis-timeouts-high`는 지표 2개를 세는 math 경보라 0.20달러). 대시보드는 계정당 3개까지
