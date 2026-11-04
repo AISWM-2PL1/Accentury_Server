@@ -63,7 +63,7 @@ class TranslationRecordWiringApiTest extends IntegrationTest {
         DialectTranslator fakeTranslator() {
             return new DialectTranslator() {
                 @Override
-                public Reply translate(String text) {
+                public Reply translate(String text, TranslationDirection direction) {
                     return Reply.translated("밥 뭇나?");
                 }
 

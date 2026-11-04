@@ -668,12 +668,15 @@ test('사투리 번역기 절이 있고 구글 전송, 보관 항목, 장소, �
   assert.ok(html.includes('<h3>사투리 번역기 (앱)</h3>'), '사투리 번역기 절이 없다');
   const translator = section('<h3>사투리 번역기 (앱)</h3>', '<h3>테스트 세션</h3>').replace(/\s+/g, ' ');
   assert.ok(translator.includes('로그인해 이용하는 앱에서만'), '대상(로그인한 앱)이 없다');
+  // 두 방향이다 (KAN-316, TranslationDirection) - 한 방향만 적으면 사투리 → 표준어 이용자에게 거짓 고지다.
+  assert.ok(translator.includes('표준어 문장을 넣으시면 경남 사투리로, 경남 사투리 문장을 넣으시면 표준어로'), '양방향 문구가 없다 (KAN-316)');
+  assert.ok(!translator.includes('그 문장을 경남 사투리로 옮긴 결과를 만들기 위해'), 'KAN-316 전의 한 방향 문구가 남아 있다');
   assert.ok(translator.includes('Google LLC의 Gemini API로 보냅니다'), '구글 전송이 없다');
   assert.ok(translator.includes('제품의 개선에 쓸 수 있고 사람이 검토할 수 있습니다'), '구글의 제품 개선 이용과 사람 검토가 없다');
   assert.ok(translator.includes('개인정보나'), '개인정보를 넣지 말라는 안내가 없다');
   // 기록 객체의 필드 (S3TranslationRecordStore.body). 필드가 늘면 여기와 본문을 함께 늘린다.
   for (const item of [
-    '요청 식별자', '요청 시각', '입력하신 문장', '입력하신 문장의 길이', '앞 100자만', '번역 결과 문장', '처리 결과 종류', '처리 시간', '번역 모델의 이름',
+    '요청 식별자', '요청 시각', '번역 방향', '입력하신 문장', '입력하신 문장의 길이', '앞 100자만', '번역 결과 문장', '처리 결과 종류', '처리 시간', '번역 모델의 이름',
     '대체 식별자',
   ]) {
     assert.ok(translator.includes(item), `사투리 번역기 절의 항목에 「${item}」이 없다`);

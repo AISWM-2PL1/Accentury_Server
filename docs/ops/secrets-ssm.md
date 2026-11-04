@@ -344,7 +344,9 @@ WAF 로그 그룹에서 `/v0/share/kakao/webhook`의 BLOCK을 찾고, 있으면 
 ## 사투리 텍스트 번역 (KAN-266)
 
 앱의 사투리 번역기(`POST /v0/translations`, 명세서 §3.18)는 backend가 Google Gemini API 무료 등급을 직접 부른다. backend SG는
-HTTPS 443을 이미 전체로 열어 두어(`modules/network`의 `backend_https_ipv4`) 아웃바운드 추가는 없다.
+HTTPS 443을 이미 전체로 열어 두어(`modules/network`의 `backend_https_ipv4`) 아웃바운드 추가는 없다. 방향은 요청의
+`direction`(`toDialect` 기본 | `toStandard`, KAN-316)이고 방향마다 시스템 프롬프트가 한 벌이다 - 모델, 키, 한도, 기록 버킷은
+두 방향이 같은 것을 쓴다. 기록 객체와 지표 `accentury.translation.requests`에 `direction`이 붙는다.
 
 | 자원 | 환경 | 내용 |
 | --- | --- | --- |
@@ -355,7 +357,7 @@ HTTPS 443을 이미 전체로 열어 두어(`modules/network`의 `backend_https_
 
 **한도.** Gemini 무료 등급 한도는 RPM 15, RPD 500이고 프로젝트 전체 몫이다 (2026-10-15 AI Studio 확인). 한 계정이 다 쓰지
 못하게 backend가 성공한 번역을 계정당 하루 5건까지만 받고 6번째부터 LLM 없이 429 `TRANSLATION_DAILY_LIMIT_EXCEEDED`를
-돌려준다. 카운터는 Redis 키 `trq:{userId}:{yyyyMMdd}`이고 한국 시각 자정에 바뀐다 (코드 상수 `DAILY_LIMIT`). Redis 장애면
+돌려준다. 두 방향이 한 한도를 쓴다 (2026-11-04 결정 - 방향별로 나누면 계정당 10건이 되어 한도 산정 전제가 바뀐다). 카운터는 Redis 키 `trq:{userId}:{yyyyMMdd}`이고 한국 시각 자정에 바뀐다 (코드 상수 `DAILY_LIMIT`). Redis 장애면
 번역도 503 `TRANSLATION_UNAVAILABLE`이다. 분당 한도에 잠깐 닿는 정도를 허용하려면 monitoring 모듈의
 `translation_quota_exhausted_threshold`를 올린다.
 

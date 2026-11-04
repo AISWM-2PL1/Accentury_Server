@@ -35,7 +35,7 @@ class TranslationServiceQuotaTest {
 
     private final TranslationService service = new TranslationService(new DialectTranslator() {
         @Override
-        public Reply translate(String text) {
+        public Reply translate(String text, TranslationDirection direction) {
             llmInputs.add(text);
             return llm.apply(text);
         }

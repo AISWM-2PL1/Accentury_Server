@@ -17,6 +17,7 @@ import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
+import java.util.EnumSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -40,8 +41,10 @@ import java.util.concurrent.TimeoutException;
  * 요청 본문과 응답 본문은 로그에 남기지 않는다 (입력과 번역 텍스트가 들어 있다, 명세서 §2.6).
  * <p>
  * 답은 JSON 스키마로 묶는다({@code responseSchema}) - {@code status}가 {@code TRANSLATED}나 {@code REJECTED}이고
- * {@code dialect}가 번역 문장이다. 그래도 스키마를 벗어난 답은 {@link DialectTranslator.Kind#MALFORMED}로 돌려
- * 번역 불가가 되게 한다 - 사업자의 스키마 강제도 믿지 않는다.
+ * {@value TranslationHarness#OUTPUT_KEY}이 번역 문장이다. 그래도 스키마를 벗어난 답은 {@link DialectTranslator.Kind#MALFORMED}로
+ * 돌려 번역 불가가 되게 한다 - 사업자의 스키마 강제도 믿지 않는다.
+ * <p>
+ * 시스템 프롬프트는 방향마다 한 벌이고(KAN-316) 요청 때 방향으로 고른다 - 모델, 키, 시간 상한은 같다.
  */
 class GeminiDialectTranslator implements DialectTranslator {
 
@@ -65,14 +68,19 @@ class GeminiDialectTranslator implements DialectTranslator {
     private final String apiKey;
     private final String model;
     private final Duration timeout;
-    private final String systemInstruction;
+    private final Map<TranslationDirection, String> systemInstructions;
     private final ObjectMapper objectMapper;
     private final Counter ok;
     private final Counter rateLimited;
     private final Counter error;
 
-    GeminiDialectTranslator(String baseUrl, String apiKey, String model, Duration timeout, String systemInstruction,
-                            ObjectMapper objectMapper, MeterRegistry meterRegistry) {
+    /** @param systemInstructions 방향별 시스템 프롬프트 - 두 방향이 다 있어야 한다 */
+    GeminiDialectTranslator(String baseUrl, String apiKey, String model, Duration timeout,
+                            Map<TranslationDirection, String> systemInstructions, ObjectMapper objectMapper,
+                            MeterRegistry meterRegistry) {
+        if (!systemInstructions.keySet().containsAll(EnumSet.allOf(TranslationDirection.class))) {
+            throw new IllegalArgumentException("방향별 시스템 프롬프트가 모자란다: " + systemInstructions.keySet());
+        }
         this.httpClient = HttpClient.newBuilder()
                 .connectTimeout(CONNECT_TIMEOUT.compareTo(timeout) < 0 ? CONNECT_TIMEOUT : timeout)
                 .build();
@@ -81,7 +89,7 @@ class GeminiDialectTranslator implements DialectTranslator {
         this.apiKey = apiKey;
         this.model = model;
         this.timeout = timeout;
-        this.systemInstruction = systemInstruction;
+        this.systemInstructions = Map.copyOf(systemInstructions);
         this.objectMapper = objectMapper;
         this.ok = counter(meterRegistry, "ok");
         this.rateLimited = counter(meterRegistry, "rate_limited");
@@ -101,8 +109,8 @@ class GeminiDialectTranslator implements DialectTranslator {
     }
 
     @Override
-    public Reply translate(String text) {
-        String body = requestBody(text);
+    public Reply translate(String text, TranslationDirection direction) {
+        String body = requestBody(text, direction);
         long deadline = System.nanoTime() + timeout.toNanos();
         for (int attempt = 1; ; attempt++) {
             Duration remaining = Duration.ofNanos(deadline - System.nanoTime());
@@ -167,16 +175,16 @@ class GeminiDialectTranslator implements DialectTranslator {
 
     /**
      * 요청 본문. 사용자 입력은 JSON 문자열 값으로만 들어간다 - 따옴표와 줄바꿈이 이스케이프되므로 입력이 프롬프트의
-     * 경계를 넘어 지시문처럼 읽힐 수 없다. 지시문은 {@code systemInstruction}에만 있다.
+     * 경계를 넘어 지시문처럼 읽힐 수 없다. 지시문은 {@code systemInstruction}에만 있고 방향으로 고른다.
      */
-    String requestBody(String text) {
+    String requestBody(String text, TranslationDirection direction) {
         Map<String, Object> input = Map.of("text", text);
         Map<String, Object> schema = new LinkedHashMap<>();
         schema.put("type", "OBJECT");
         schema.put("properties", Map.of(
                 "status", Map.of("type", "STRING", "enum", List.of("TRANSLATED", "REJECTED")),
-                "dialect", Map.of("type", "STRING")));
-        schema.put("required", List.of("status", "dialect"));
+                TranslationHarness.OUTPUT_KEY, Map.of("type", "STRING")));
+        schema.put("required", List.of("status", TranslationHarness.OUTPUT_KEY));
 
         Map<String, Object> generationConfig = new LinkedHashMap<>();
         generationConfig.put("responseMimeType", "application/json");
@@ -186,7 +194,8 @@ class GeminiDialectTranslator implements DialectTranslator {
         generationConfig.put("maxOutputTokens", MAX_OUTPUT_TOKENS);
 
         Map<String, Object> request = new LinkedHashMap<>();
-        request.put("systemInstruction", Map.of("parts", List.of(Map.of("text", systemInstruction))));
+        request.put("systemInstruction",
+                Map.of("parts", List.of(Map.of("text", systemInstructions.get(direction)))));
         request.put("contents", List.of(Map.of("role", "user",
                 "parts", List.of(Map.of("text", objectMapper.writeValueAsString(input))))));
         request.put("generationConfig", generationConfig);
@@ -227,9 +236,9 @@ class GeminiDialectTranslator implements DialectTranslator {
         if ("REJECTED".equals(status)) {
             return Reply.of(Kind.REFUSED);
         }
-        JsonNode dialect = answer.path("dialect");
-        if ("TRANSLATED".equals(status) && dialect.isString()) {
-            return Reply.translated(dialect.asString());
+        JsonNode translation = answer.path(TranslationHarness.OUTPUT_KEY);
+        if ("TRANSLATED".equals(status) && translation.isString()) {
+            return Reply.translated(translation.asString());
         }
         return Reply.of(Kind.MALFORMED);
     }
