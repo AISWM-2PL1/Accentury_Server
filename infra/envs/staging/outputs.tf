@@ -89,7 +89,12 @@ output "rds_master_user_secret_arn" {
 
 output "github_deploy_role_arn" {
   value       = module.deploy.github_deploy_role_arn
-  description = "GitHub environment 변수 AWS_DEPLOY_ROLE_ARN에 넣는다 (KAN-127, docs/ops/github.md 'environment 변수')"
+  description = "Accentury_Server 레포의 GitHub environment 변수 AWS_DEPLOY_ROLE_ARN에 넣는다 (KAN-127, docs/ops/github.md 'environment 변수')"
+}
+
+output "github_web_deploy_role_arn" {
+  value       = module.deploy.github_web_deploy_role_arn
+  description = "Accentury_App 레포의 GitHub environment 변수 AWS_DEPLOY_ROLE_ARN에 넣는다 (KAN-306, docs/ops/github.md 'environment 변수')"
 }
 
 output "waf_log_group" {

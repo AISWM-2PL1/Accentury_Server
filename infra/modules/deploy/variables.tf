@@ -13,12 +13,20 @@ variable "github_owner_id" {
   description = "저장소 소유자(조직)의 숫자 ID. 불변 subject claim(repo:OWNER@ID/REPO@ID:...)에 들어간다."
 }
 
-variable "github_repositories" {
-  type = list(object({
+variable "github_server_repository" {
+  type = object({
     name = string # 저장소 이름 (소유자 제외)
     id   = number # 저장소의 숫자 ID. 불변 subject claim에 들어간다.
-  }))
-  description = "이 환경의 배포 역할을 맡을 수 있는 저장소 목록 (KAN-221). 레포 분리 뒤 Accentury_Server(이미지 배포, 스모크)와 Accentury_App(웹 배포)이 같은 역할을 맡는다. 목록에 없는 저장소는 environment 이름이 같아도 AssumeRoleWithWebIdentity가 거부된다."
+  })
+  description = "이미지 배포 역할(github-deploy)을 맡는 저장소 - Accentury_Server (KAN-221 레포 분리, KAN-306 역할 분리). 이미지 배포와 스모크가 여기서 돈다. 다른 저장소는 environment 이름이 같아도 AssumeRoleWithWebIdentity가 거부된다."
+}
+
+variable "github_app_repository" {
+  type = object({
+    name = string # 저장소 이름 (소유자 제외)
+    id   = number # 저장소의 숫자 ID. 불변 subject claim에 들어간다.
+  })
+  description = "웹 배포 역할(github-web-deploy)을 맡는 저장소 - Accentury_App (KAN-306). 웹 번들 업로드와 캐시 무효화만 할 수 있고 이미지 배포 역할은 맡을 수 없다."
 }
 
 variable "web_bucket_arn" {

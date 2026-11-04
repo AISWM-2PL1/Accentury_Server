@@ -8,14 +8,14 @@
 - [.github/workflows/branch-name.yml](../../.github/workflows/branch-name.yml)
 - [.github/dependabot.yml](../../.github/dependabot.yml)
 - [infra/modules/deploy](../../infra/modules/deploy) (OIDC 배포 역할과 신뢰 정책)
-- `infra/envs/*/variables.tf`의 `github_repositories`
+- `infra/envs/*/variables.tf`의 `github_server_repository`, `github_app_repository`
 - Accentury_App 레포의 `.github/workflows/web-deploy.yml` (웹 배포)
 
 ## environment와 배포 역할 (KAN-127)
 
-배포 워크플로(이 레포의 `deploy.yml`, `e2e-smoke.yml`과 Accentury_App 레포의 `web-deploy.yml`)는 GitHub environment `staging`, `prod`를 지정해 실행되고, 그 environment의 변수에서 대상을 읽는다. 역할의 신뢰 정책이 `repo:AISWM-2PL1/<레포>:environment:{env}`로 묶여 있어 environment 이름은 Terraform의 `env`와 같아야 한다. 레포 분리(KAN-221) 뒤에는 배포 역할 하나를 Accentury_Server와 Accentury_App 두 레포가 함께 맡는다. 신뢰 정책의 sub 목록에 두 레포가 들어 있고(`envs/*/variables.tf`의 `github_repositories`), environment와 변수는 두 레포에 각각 있다.
+배포 워크플로(이 레포의 `deploy.yml`, `e2e-smoke.yml`과 Accentury_App 레포의 `web-deploy.yml`)는 GitHub environment `staging`, `prod`를 지정해 실행되고, 그 environment의 변수에서 대상을 읽는다. 역할의 신뢰 정책이 `repo:AISWM-2PL1/<레포>:environment:{env}`로 묶여 있어 environment 이름은 Terraform의 `env`와 같아야 한다. 역할은 레포마다 하나다 (KAN-306, 2026-11-04). `accentury-{env}-github-deploy`는 Accentury_Server만 맡고 정책은 `image-deploy`(IMAGE_TAG, AI 호스트 Run Command, ECS 리비전과 서비스 갱신, 관리자 토큰 읽기, staging은 ECR push)뿐이다. `accentury-{env}-github-web-deploy`는 Accentury_App만 맡고 정책은 `web-deploy`(웹 버킷 ListBucket과 PutObject, CloudFront 무효화)뿐이다. 레포 분리(KAN-221)부터 2026-11-04까지는 역할 하나에 두 정책이 붙어 두 레포가 함께 맡았는데, 그러면 App 레포의 environment 토큰만으로 AI 호스트 root 셸과 ECS 배포까지 되어 신뢰 경계가 두 레포 중 약한 쪽으로 내려간다. 저장소는 `envs/*/variables.tf`의 `github_server_repository`, `github_app_repository`이고, environment와 변수는 두 레포에 각각 있다.
 
-역할의 신뢰 정책은 이름만 있는 구형식과 숫자 ID가 붙는 불변 형식(`repo:AISWM-2PL1@295795156/Accentury_Server@1380964825:environment:{env}`)을 레포마다 둘 다 허용한다. 두 레포는 불변 형식을 쓴다(2026-07-15 이후 생성 저장소 기본). 지금 ID는 Accentury_Server 1380964825, Accentury_App 1380964859다. 저장소를 옮기거나 다시 만들면 ID가 바뀌므로 `gh api repos/OWNER/REPO --jq '[.owner.id, .id]'`로 다시 받아 `envs/*/variables.tf`의 `github_repositories` 기본값을 맞춘다. 분리 전 레포 Accentury_Prototype(id 1308814203)은 아카이브라 목록에 없다.
+각 역할의 신뢰 정책은 자기 레포의 이름만 있는 구형식과 숫자 ID가 붙는 불변 형식(`repo:AISWM-2PL1@295795156/Accentury_Server@1380964825:environment:{env}`) 둘을 허용한다. 두 레포는 불변 형식을 쓴다(2026-07-15 이후 생성 저장소 기본). 지금 ID는 Accentury_Server 1380964825, Accentury_App 1380964859다. 저장소를 옮기거나 다시 만들면 ID가 바뀌므로 `gh api repos/OWNER/REPO --jq '[.owner.id, .id]'`로 다시 받아 `envs/*/variables.tf`의 `github_server_repository`, `github_app_repository` 기본값을 맞춘다. 분리 전 레포 Accentury_Prototype(id 1308814203)은 아카이브라 목록에 없다.
 
 ## deployment branch policy
 
@@ -40,21 +40,23 @@ prod의 승인 게이트는 GitHub environment `prod`의 **required reviewers**�
 
 ## environment 변수
 
-이 레포의 워크플로가 읽는 변수는 아래 4개다. 앞의 셋은 환경 apply 출력에서 채운다(재구축으로 배포 ID나 역할 ARN이 바뀌면 다시 넣는다). `deploy.yml`은 반영 전에 `AWS_DEPLOY_ROLE_ARN`과 `APP_DOMAIN`이 비어 있으면 실패한다.
+두 레포의 워크플로가 읽는 변수는 아래 4개다. 앞의 셋은 환경 apply 출력에서 채운다(재구축으로 배포 ID나 역할 ARN이 바뀌면 다시 넣는다). `deploy.yml`은 반영 전에 `AWS_DEPLOY_ROLE_ARN`과 `APP_DOMAIN`이 비어 있으면 실패한다. 변수 이름 `AWS_DEPLOY_ROLE_ARN`은 두 레포가 같지만 값은 다르다 (KAN-306) - Server는 이미지 배포 역할, App은 웹 배포 역할이다.
 
 | 변수 | 출처 | 쓰는 곳 |
 | --- | --- | --- |
-| `AWS_DEPLOY_ROLE_ARN` | `terraform output -raw github_deploy_role_arn` | `deploy.yml`, `e2e-smoke.yml`, App `web-deploy.yml` |
+| `AWS_DEPLOY_ROLE_ARN` (Server) | `terraform output -raw github_deploy_role_arn` | `deploy.yml`, `e2e-smoke.yml` |
+| `AWS_DEPLOY_ROLE_ARN` (App) | `terraform output -raw github_web_deploy_role_arn` | App `web-deploy.yml` |
 | `WEB_BUCKET` | `terraform output -raw web_bucket` | App `web-deploy.yml` |
 | `CLOUDFRONT_DISTRIBUTION_ID` | `terraform output -raw cloudfront_distribution_id` | App `web-deploy.yml` |
 | `APP_DOMAIN` | `terraform output -raw domain` | E2E 스모크 대상(KAN-128). `deploy.yml`, `e2e-smoke.yml` |
 
-같은 값을 두 레포에 넣는다. `gh variable set`에 `-R AISWM-2PL1/Accentury_Server`와 `-R AISWM-2PL1/Accentury_App`을 각각 준다.
+`WEB_BUCKET`, `CLOUDFRONT_DISTRIBUTION_ID`, `APP_DOMAIN`은 같은 값을 두 레포에 넣고, `AWS_DEPLOY_ROLE_ARN`만 레포마다 다른 출력을 넣는다. `gh variable set`에 `-R AISWM-2PL1/Accentury_Server`와 `-R AISWM-2PL1/Accentury_App`을 각각 준다.
 
 ```
 cd infra/envs/staging   # 또는 prod
 env=$(basename "$PWD")   # envs/<env> 디렉터리 이름. 도메인으로 환경을 구분하지 않는다 (staging 이름은 랜덤, KAN-206)
-gh variable set AWS_DEPLOY_ROLE_ARN        -e "$env" --body "$(terraform output -raw github_deploy_role_arn)"
+gh variable set AWS_DEPLOY_ROLE_ARN        -e "$env" -R AISWM-2PL1/Accentury_Server --body "$(terraform output -raw github_deploy_role_arn)"
+gh variable set AWS_DEPLOY_ROLE_ARN        -e "$env" -R AISWM-2PL1/Accentury_App    --body "$(terraform output -raw github_web_deploy_role_arn)"
 gh variable set WEB_BUCKET                 -e "$env" --body "$(terraform output -raw web_bucket)"
 gh variable set CLOUDFRONT_DISTRIBUTION_ID -e "$env" --body "$(terraform output -raw cloudfront_distribution_id)"
 gh variable set APP_DOMAIN                 -e "$env" --body "$(terraform output -raw domain)"

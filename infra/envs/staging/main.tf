@@ -280,7 +280,8 @@ module "deploy" {
   env                         = var.env
   github_owner                = var.github_owner
   github_owner_id             = var.github_owner_id
-  github_repositories         = var.github_repositories
+  github_server_repository    = var.github_server_repository
+  github_app_repository       = var.github_app_repository
   ssm_prefix                  = var.ssm_prefix
   ci_image_push               = var.ci_image_push
   web_bucket_arn              = module.edge.web_bucket_arn

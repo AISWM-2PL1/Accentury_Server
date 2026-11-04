@@ -17,17 +17,23 @@
 # (StringEquals의 값 목록은 OR). 실제 형식은 `gh api repos/OWNER/REPO/actions/oidc/customization/sub`의
 # sub_claim_prefix로 확인한다.
 
+# 역할은 레포마다 하나다 (KAN-306, 2026-11-04). 레포 분리(KAN-221) 뒤로 Server와 App이 역할 하나를 같이 맡았는데,
+# 그 역할에 웹 배포 정책과 이미지 배포 정책이 함께 붙어 있어 웹 번들만 올리는 App 레포의 environment 토큰으로도
+# AI 호스트 Run Command(root 셸), ECS 서비스 갱신, 관리자 토큰 읽기가 됐다. App 레포의 워크플로나 서드파티 액션이
+# 오염되면 신뢰 경계가 두 레포 중 약한 쪽으로 내려간다. 지금은 github-deploy(이미지 배포, Server만)와
+# github-web-deploy(웹 배포, App만)로 나뉘어 있고, 각 역할의 신뢰 정책 sub에는 자기 레포 두 줄(구형식, 불변 형식)만 있다.
+# 분리 전 저장소(Accentury_Prototype, id 1308814203)는 아카이브라 어디에도 없다.
 locals {
   name = "accentury-${var.env}"
 
-  # 저장소마다 구형식과 불변 형식 하나씩. 레포 분리(KAN-221) 뒤 Server와 App 두 저장소가 같은
-  # 역할을 맡으므로 목록이다. 분리 전 저장소(Accentury_Prototype, id 1308814203)는 아카이브라 없다.
-  github_subjects = flatten([
-    for repo in var.github_repositories : [
-      "repo:${var.github_owner}/${repo.name}:environment:${var.env}",
-      "repo:${var.github_owner}@${var.github_owner_id}/${repo.name}@${repo.id}:environment:${var.env}",
-    ]
-  ])
+  server_subjects = [
+    "repo:${var.github_owner}/${var.github_server_repository.name}:environment:${var.env}",
+    "repo:${var.github_owner}@${var.github_owner_id}/${var.github_server_repository.name}@${var.github_server_repository.id}:environment:${var.env}",
+  ]
+  app_subjects = [
+    "repo:${var.github_owner}/${var.github_app_repository.name}:environment:${var.env}",
+    "repo:${var.github_owner}@${var.github_owner_id}/${var.github_app_repository.name}@${var.github_app_repository.id}:environment:${var.env}",
+  ]
 }
 
 # 공급자는 계정에 1개뿐이라 bootstrap 스택이 소유한다 (infra/bootstrap/github-oidc.tf).
@@ -36,7 +42,13 @@ data "aws_iam_openid_connect_provider" "github" {
   url = "https://token.actions.githubusercontent.com"
 }
 
+# 신뢰 정책 두 벌 - 역할마다 자기 레포의 sub만 (KAN-306).
 data "aws_iam_policy_document" "assume" {
+  for_each = {
+    server = local.server_subjects
+    app    = local.app_subjects
+  }
+
   statement {
     actions = ["sts:AssumeRoleWithWebIdentity"]
 
@@ -54,21 +66,29 @@ data "aws_iam_policy_document" "assume" {
     condition {
       test     = "StringEquals"
       variable = "token.actions.githubusercontent.com:sub"
-      values   = local.github_subjects
+      values   = each.value
     }
   }
 }
 
+# 이미지 배포 역할 - Accentury_Server의 deploy.yml과 e2e-smoke.yml이 맡는다. 정책은 image-deploy 하나다.
 resource "aws_iam_role" "github_deploy" {
   name               = "${local.name}-github-deploy"
-  assume_role_policy = data.aws_iam_policy_document.assume.json
+  assume_role_policy = data.aws_iam_policy_document.assume["server"].json
+}
+
+# 웹 배포 역할 - Accentury_App의 web-deploy.yml이 맡는다 (KAN-306). 정책은 web-deploy 하나다.
+resource "aws_iam_role" "github_web_deploy" {
+  name               = "${local.name}-github-web-deploy"
+  assume_role_policy = data.aws_iam_policy_document.assume["app"].json
 }
 
 # 웹 번들 업로드와 캐시 무효화만 (KAN-127). 이 환경의 버킷 1개와 배포 1개로 한정한다.
 # DeleteObject는 주지 않는다 - 파이프라인이 sync --delete를 쓰지 않기 때문이다. 구 index.html을
 # 아직 든 브라우저가 이전 해시 자산을 계속 받아야 하고, 등급 이미지(KAN-132)와 개인정보처리방침
 # (KAN-133)이 같은 버킷에 산다. 지울 권한이 없으면 파이프라인 결함이 그것들을 지울 수도 없다.
-# KAN-128(이미지 배포)은 SSM PutParameter와 Run Command 문장을 여기에 덧붙인다.
+# KAN-306부터 이 정책은 웹 배포 역할(github-web-deploy)에만 붙는다 - 이미지 배포 문장은 아래 image-deploy에
+# 따로 있고 그 역할은 이 버킷을 만지지 못한다.
 data "aws_iam_policy_document" "web_deploy" {
   statement {
     sid       = "ListWebBucket"
@@ -92,7 +112,7 @@ data "aws_iam_policy_document" "web_deploy" {
 
 resource "aws_iam_role_policy" "web_deploy" {
   name   = "web-deploy"
-  role   = aws_iam_role.github_deploy.id
+  role   = aws_iam_role.github_web_deploy.id
   policy = data.aws_iam_policy_document.web_deploy.json
 }
 
