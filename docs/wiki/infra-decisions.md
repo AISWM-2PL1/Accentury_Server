@@ -338,7 +338,7 @@ backend가 새 AI 계약을 전제로 할 수 있어 AI가 먼저 올라와야 �
 
 #### 배포 역할은 레포마다 하나 - Server는 이미지 배포, App은 웹 배포 (KAN-306, 2026-11-04)
 
-레포 분리(KAN-221, 2026-09-22) 때는 환경마다 배포 역할 하나를 두 레포가 같이 맡게 했다. 그 역할에 웹 배포 정책(버킷 PutObject, CloudFront 무효화)과 이미지 배포 정책(AI 호스트 Run Command, ECS 리비전과 서비스 갱신, 관리자 토큰 읽기, staging ECR push)이 함께 붙어 있어, 웹 번들만 올리는 App 레포의 environment 토큰으로도 AI 호스트 root 셸과 ECS 배포가 됐다. 2026-11-03 보안 전면 검수의 Medium 항목이라 역할을 `github-deploy`(Server, image-deploy만)와 `github-web-deploy`(App, web-deploy만)로 나눴다. 신뢰 정책 sub는 역할마다 자기 레포 두 줄(구형식, 불변 형식)뿐이다. 변수는 `github_repositories` 목록 대신 `github_server_repository`, `github_app_repository` 둘이다. GitHub 변수 이름 `AWS_DEPLOY_ROLE_ARN`은 두 레포가 같지만 값은 다르다. 완화 요소(environment 이름에 묶인 sub, IMMUTABLE ECR 태그, prod required reviewers)는 그대로다.
+레포 분리(KAN-221, 2026-09-22) 때는 환경마다 배포 역할 하나를 두 레포가 같이 맡게 했다. 그 역할에 웹 배포 정책(버킷 PutObject, CloudFront 무효화)과 이미지 배포 정책(AI 호스트 Run Command, ECS 리비전과 서비스 갱신, 관리자 토큰 읽기, staging ECR push)이 함께 붙어 있어, 웹 번들만 올리는 App 레포의 environment 토큰으로도 AI 호스트 root 셸과 ECS 배포가 됐다. 2026-11-03 보안 전면 검수의 Medium 항목이라 역할을 `github-deploy`(Server, image-deploy만)와 `github-web-deploy`(App, web-deploy만)로 나눴다. 신뢰 정책 sub는 역할마다 자기 레포 두 줄(구형식, 불변 형식)뿐이다. 변수는 `github_repositories` 목록 대신 `github_server_repository`, `github_app_repository` 둘이다. GitHub 변수는 Server `AWS_DEPLOY_ROLE_ARN`(이미지 배포 역할), App `AWS_WEB_DEPLOY_ROLE_ARN`(웹 배포 역할)로 이름을 나눠 서로 바꿔 넣을 수 없게 했다 (PR #63 리뷰). 완화 요소(environment 이름에 묶인 sub, IMMUTABLE ECR 태그, prod required reviewers)는 그대로다.
 
 #### Actions는 SHA로, 베이스 이미지는 digest로 고정하고 Dependabot이 월 1회 올린다 (KAN-246)
 
