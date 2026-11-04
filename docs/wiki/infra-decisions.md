@@ -336,6 +336,10 @@ backend가 새 AI 계약을 전제로 할 수 있어 AI가 먼저 올라와야 �
 - 값은 두 환경이 같아야 하므로 tfvars가 아니라 모듈 기본값에 둔다.
 - 목표 추적이 만드는 AlarmHigh, AlarmLow는 SNS에 붙이지 않는다. 늘고 주는 것은 정상 동작이고, 상한에 닿아 못 늘리는 상태는 `backend-cpu-high`가 대신 드러낸다.
 
+#### 배포 역할은 레포마다 하나 - Server는 이미지 배포, App은 웹 배포 (KAN-306, 2026-11-04)
+
+레포 분리(KAN-221, 2026-09-22) 때는 환경마다 배포 역할 하나를 두 레포가 같이 맡게 했다. 그 역할에 웹 배포 정책(버킷 PutObject, CloudFront 무효화)과 이미지 배포 정책(AI 호스트 Run Command, ECS 리비전과 서비스 갱신, 관리자 토큰 읽기, staging ECR push)이 함께 붙어 있어, 웹 번들만 올리는 App 레포의 environment 토큰으로도 AI 호스트 root 셸과 ECS 배포가 됐다. 2026-11-03 보안 전면 검수의 Medium 항목이라 역할을 `github-deploy`(Server, image-deploy만)와 `github-web-deploy`(App, web-deploy만)로 나눴다. 신뢰 정책 sub는 역할마다 자기 레포 두 줄(구형식, 불변 형식)뿐이다. 변수는 `github_repositories` 목록 대신 `github_server_repository`, `github_app_repository` 둘이다. GitHub 변수 이름 `AWS_DEPLOY_ROLE_ARN`은 두 레포가 같지만 값은 다르다. 완화 요소(environment 이름에 묶인 sub, IMMUTABLE ECR 태그, prod required reviewers)는 그대로다.
+
 #### Actions는 SHA로, 베이스 이미지는 digest로 고정하고 Dependabot이 월 1회 올린다 (KAN-246)
 
 태그는 주인이 다른 커밋으로 옮길 수 있어서, 태그로 두면 남의 저장소가 뚫렸을 때 바뀐 코드가 우리 배포 역할(`id-token: write`)을 쥔 채 돈다(2025년 tj-actions 사례). 고정한 값은 저절로 움직이지 않으므로 Dependabot이 월 1회, 생태계마다 PR 하나로 갱신을 올린다(2026-10-05 결정, AI 호스트 AMI 갱신과 같은 주기).
@@ -566,7 +570,7 @@ ai 이미지가 7GB라 reload마다 SHA 2개와 pull 임시 공간이 루트 볼
 
 #### 수신 주소는 variables.tf 기본값 (KAN-134, 2026-08-28)
 
-두 환경이 같은 값이라 `github_repositories`와 같은 이유로 tfvars가 아니라 기본값에 둔다.
+두 환경이 같은 값이라 `github_server_repository`와 같은 이유로 tfvars가 아니라 기본값에 둔다.
 
 #### 슬랙 알림 구조 (KAN-273)
 

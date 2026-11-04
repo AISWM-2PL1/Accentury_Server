@@ -146,14 +146,17 @@ variable "github_owner_id" {
   default = 295795156
 }
 
-# 배포 역할을 맡는 저장소 목록 (KAN-221 레포 분리). Server는 이미지 배포와 스모크, App은 웹 배포.
-# 분리 전 저장소 Accentury(id 1308814203, 지금은 Accentury_Prototype)는 아카이브라 뺐다.
-variable "github_repositories" {
-  type = list(object({ name = string, id = number }))
-  default = [
-    { name = "Accentury_Server", id = 1380964825 },
-    { name = "Accentury_App", id = 1380964859 },
-  ]
+# 배포 역할을 맡는 저장소 (KAN-221 레포 분리, KAN-306 역할 분리). Server는 이미지 배포 역할(github-deploy)로
+# 이미지 배포와 스모크를, App은 웹 배포 역할(github-web-deploy)로 웹 번들 업로드만 한다. 두 역할은 서로의
+# 레포 토큰을 받지 않는다. 분리 전 저장소 Accentury(id 1308814203, 지금은 Accentury_Prototype)는 아카이브라 없다.
+variable "github_server_repository" {
+  type    = object({ name = string, id = number })
+  default = { name = "Accentury_Server", id = 1380964825 }
+}
+
+variable "github_app_repository" {
+  type    = object({ name = string, id = number })
+  default = { name = "Accentury_App", id = 1380964859 }
 }
 
 variable "alert_email" {
