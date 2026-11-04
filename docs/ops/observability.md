@@ -239,8 +239,8 @@ aws logs describe-log-streams --region "$REGION" --log-group-name "$(terraform o
 | `accentury.analysis.judged` (KAN-272) | 3 | `reason` 3종 |
 | `accentury.result.wait` (KAN-284) | 5 | Timer 4 + 백분위 1 |
 | `StageDuration` (KAN-204, KAN-293) | 17 | 바깥 콜드/웜 7 + 안쪽 다섯 x 2 |
-| `accentury.translation.requests`, `.llm.calls`, `.records` (KAN-266) | 최대 9 (staging 7) | `result` 4종, `outcome` 3종, `records`의 `result` 2종(기록 버킷이 있는 prod만) |
-| 합계 | 약 65 (staging 약 63) | 환경당 월 약 19달러 |
+| `accentury.translation.requests`, `.llm.calls`, `.records` (KAN-266, KAN-316) | 최대 15 (staging 13) | `requests`는 `result` 5종 x `direction` 2종(KAN-316) = 10, `outcome` 3종, `records`의 `result` 2종(기록 버킷이 있는 prod만). 카운터는 기동 때 전부 등록되지만 CloudWatch 지표는 값이 한 번이라도 나간 조합만 생긴다 |
+| 합계 | 약 71 (staging 약 69) | 환경당 월 약 21달러 |
 
 경보 6종은 환경당 월 약 0.70달러다 (`analysis-timeouts-high`는 지표 2개를 세는 math 경보라 0.20달러). 대시보드는 계정당 3개까지
 무료라 이 하나는 요금이 없다.

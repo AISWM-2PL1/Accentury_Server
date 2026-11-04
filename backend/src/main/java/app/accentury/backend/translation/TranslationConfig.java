@@ -12,6 +12,7 @@ import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import tools.jackson.databind.ObjectMapper;
 
+import java.util.EnumMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -35,7 +36,7 @@ class TranslationConfig {
     static DialectTranslator unconfigured(String model) {
         return new DialectTranslator() {
             @Override
-            public Reply translate(String text) {
+            public Reply translate(String text, TranslationDirection direction) {
                 throw new Unavailable("API 키 없음");
             }
 
@@ -55,11 +56,22 @@ class TranslationConfig {
             log.warn("번역 API 키가 없다 - 번역은 전부 503 TRANSLATION_UNAVAILABLE (SSM ACCENTURY_TRANSLATION_APIKEY, KAN-266)");
             return unconfigured(translation.model());
         }
-        String systemInstruction = TranslationHarness.systemInstruction(vocabulary(words), sentences(intonation));
-        log.info("번역 LLM model={} timeout={} 참고 어휘와 대사로 지시문 {}자", translation.model(), translation.timeout(),
-                systemInstruction.length());
+        Map<TranslationDirection, String> systemInstructions = systemInstructions(vocabulary(words), sentences(intonation));
+        log.info("번역 LLM model={} timeout={} 참고 어휘와 대사로 지시문 toDialect {}자, toStandard {}자", translation.model(),
+                translation.timeout(), systemInstructions.get(TranslationDirection.TO_DIALECT).length(),
+                systemInstructions.get(TranslationDirection.TO_STANDARD).length());
         return new GeminiDialectTranslator(translation.baseUrl(), Objects.requireNonNull(translation.apiKey()),
-                translation.model(), translation.timeout(), systemInstruction, objectMapper, meterRegistry);
+                translation.model(), translation.timeout(), systemInstructions, objectMapper, meterRegistry);
+    }
+
+    /** 방향별 시스템 프롬프트 - 같은 참고 어휘와 대사를 두 벌에 싣는다 (KAN-316). */
+    static Map<TranslationDirection, String> systemInstructions(List<TranslationHarness.VocabularyPair> vocabulary,
+                                                                List<String> sentences) {
+        Map<TranslationDirection, String> instructions = new EnumMap<>(TranslationDirection.class);
+        for (TranslationDirection direction : TranslationDirection.values()) {
+            instructions.put(direction, TranslationHarness.systemInstruction(direction, vocabulary, sentences));
+        }
+        return instructions;
     }
 
     /**

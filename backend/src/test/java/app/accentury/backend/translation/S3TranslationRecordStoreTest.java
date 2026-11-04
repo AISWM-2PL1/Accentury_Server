@@ -50,8 +50,13 @@ class S3TranslationRecordStoreTest {
     }
 
     private static TranslationRecord record(TranslationResult result, String output, Long llmMs) {
-        return new TranslationRecord(REQUEST_ID, REQUESTED_AT, USER_ID, "밥 먹었어?", 6, output, result, 812, llmMs,
-                "gemini-3.5-flash-lite");
+        return record(TranslationDirection.TO_DIALECT, result, output, llmMs);
+    }
+
+    private static TranslationRecord record(TranslationDirection direction, TranslationResult result, String output,
+                                            Long llmMs) {
+        return new TranslationRecord(REQUEST_ID, REQUESTED_AT, USER_ID, direction, "밥 먹었어?", 6, output, result, 812,
+                llmMs, "gemini-3.5-flash-lite");
     }
 
     private double count(String result) {
@@ -75,11 +80,12 @@ class S3TranslationRecordStoreTest {
             json = new String(in.readAllBytes(), StandardCharsets.UTF_8);
         }
         JsonNode object = objectMapper.readTree(json);
-        assertEquals(List.of("requestId", "requestedAt", "subjectId", "input", "inputLength", "output", "result",
-                "totalMs", "llmMs", "model"), List.copyOf(object.propertyNames()));
+        assertEquals(List.of("requestId", "requestedAt", "subjectId", "direction", "input", "inputLength", "output",
+                "result", "totalMs", "llmMs", "model"), List.copyOf(object.propertyNames()));
         assertEquals(REQUEST_ID.toString(), object.get("requestId").asString());
         assertEquals("2026-10-09T08:30+09:00", object.get("requestedAt").asString());
         assertEquals(SUBJECT_ID.toString(), object.get("subjectId").asString());
+        assertEquals("toDialect", object.get("direction").asString(), "KAN-316 - 이 필드가 없는 구 레코드는 toDialect다");
         assertEquals("밥 먹었어?", object.get("input").asString());
         assertEquals(6, object.get("inputLength").asInt());
         assertEquals("밥 뭇나?", object.get("output").asString());
@@ -89,6 +95,22 @@ class S3TranslationRecordStoreTest {
         assertEquals("gemini-3.5-flash-lite", object.get("model").asString());
         assertFalse(json.contains(USER_ID.toString()), "객체에 계정 ID가 없다");
         assertEquals(1, count("saved"));
+    }
+
+    @Test
+    void 역방향_기록은_direction이_toStandard다() throws Exception {
+        when(subjects.resolve(any(), any())).thenReturn(SUBJECT_ID);
+
+        store(Runnable::run).save(record(TranslationDirection.TO_STANDARD, TranslationResult.SUCCESS, "밥 먹었니?", 640L));
+
+        ArgumentCaptor<RequestBody> body = ArgumentCaptor.forClass(RequestBody.class);
+        verify(s3).putObject(any(PutObjectRequest.class), body.capture());
+        JsonNode object;
+        try (InputStream in = body.getValue().contentStreamProvider().newStream()) {
+            object = objectMapper.readTree(in.readAllBytes());
+        }
+        assertEquals("toStandard", object.get("direction").asString());
+        assertEquals("밥 먹었니?", object.get("output").asString());
     }
 
     @Test

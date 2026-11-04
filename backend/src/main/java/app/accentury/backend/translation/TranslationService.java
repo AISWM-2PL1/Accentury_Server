@@ -22,9 +22,9 @@ import java.util.UUID;
 import java.util.concurrent.TimeUnit;
 
 /**
- * 사투리 텍스트 번역 (KAN-266, 명세서 §3.18).
+ * 사투리 텍스트 번역 (KAN-266, 명세서 §3.18) - 두 방향이다 (KAN-316, {@link TranslationDirection}).
  * <p>
- * 순서: 형식 검사(400) → 길이(422 {@code TRANSLATION_TOO_LONG}) → 서버 사전 검사(422 {@code TRANSLATION_REJECTED}) →
+ * 순서: 형식 검사(400, {@code text}와 {@code direction}) → 길이(422 {@code TRANSLATION_TOO_LONG}) → 서버 사전 검사(422 {@code TRANSLATION_REJECTED}) →
  * 일일 한도(429 {@code TRANSLATION_DAILY_LIMIT_EXCEEDED}) → LLM 호출(실패면 503 {@code TRANSLATION_UNAVAILABLE}) →
  * 응답 검사(어기면 422 {@code TRANSLATION_REJECTED}) → 200.
  * 400을 뺀 모든 끝에서 결과 종류를 지표로 세고 번역 기록을 넘긴다.
@@ -42,7 +42,9 @@ class TranslationService {
     private final TranslationQuota quota;
     private final TranslationRecordStore records;
     private final Clock clock;
-    private final Map<TranslationResult, Counter> requests = new EnumMap<>(TranslationResult.class);
+    /** 결과 종류 x 방향 카운터 - 지표는 하나고 태그 {@code result}, {@code direction}으로 가른다. */
+    private final Map<TranslationDirection, Map<TranslationResult, Counter>> requests =
+            new EnumMap<>(TranslationDirection.class);
 
     @Autowired
     TranslationService(DialectTranslator translator, TranslationQuota quota,
@@ -57,11 +59,17 @@ class TranslationService {
         this.quota = quota;
         this.records = records;
         this.clock = clock;
-        for (TranslationResult result : TranslationResult.values()) {
-            requests.put(result, Counter.builder(ServiceMetrics.TRANSLATION_REQUESTS)
-                    .description("번역 요청 - 태그 result는 success | rejected | too_long | limited | llm_failed (KAN-266)")
-                    .tag("result", result.metricTag())
-                    .register(meterRegistry));
+        for (TranslationDirection direction : TranslationDirection.values()) {
+            Map<TranslationResult, Counter> byResult = new EnumMap<>(TranslationResult.class);
+            for (TranslationResult result : TranslationResult.values()) {
+                byResult.put(result, Counter.builder(ServiceMetrics.TRANSLATION_REQUESTS)
+                        .description("번역 요청 - 태그 result는 success | rejected | too_long | limited | llm_failed (KAN-266), "
+                                + "direction은 toDialect | toStandard (KAN-316)")
+                        .tag("result", result.metricTag())
+                        .tag("direction", direction.apiValue())
+                        .register(meterRegistry));
+            }
+            requests.put(direction, byResult);
         }
     }
 
@@ -76,7 +84,8 @@ class TranslationService {
         if (text == null || text.isBlank()) {
             throw new ApiException(ErrorCode.VALIDATION_FAILED, "text가 비어 있습니다.");
         }
-        Attempt attempt = new Attempt(UUID.randomUUID(), requestedAt, started, user.id(), text);
+        TranslationDirection direction = direction(request);
+        Attempt attempt = new Attempt(UUID.randomUUID(), requestedAt, started, user.id(), direction, text);
         String input = text.strip();
 
         if (TranslationHarness.length(input) > AccenturyProperties.Translation.MAX_INPUT_LENGTH) {
@@ -110,28 +119,39 @@ class TranslationService {
         }
     }
 
+    /** 요청의 방향 - 없으면 기본값({@code toDialect}), 모르는 값은 400이다 (KAN-316). 400은 기록하지 않는다. */
+    private static TranslationDirection direction(TranslationRequest request) {
+        String value = request.direction();
+        if (value == null) {
+            return TranslationDirection.TO_DIALECT;
+        }
+        return TranslationDirection.fromApiValue(value)
+                .orElseThrow(() -> new ApiException(ErrorCode.VALIDATION_FAILED,
+                        "direction은 toDialect 또는 toStandard여야 합니다."));
+    }
+
     /** 한도 칸을 잡은 뒤의 LLM 호출과 응답 검사 - 여기서 성공으로 끝나지 않으면 부르는 쪽이 칸을 돌려준다. */
     private TranslationResponse translateWithin(Attempt attempt, String input, TranslationQuota.Slot slot) {
         long llmStarted = System.nanoTime();
         DialectTranslator.Reply reply;
         try {
-            reply = translator.translate(input);
+            reply = translator.translate(input, attempt.direction());
         } catch (DialectTranslator.Unavailable e) {
             finish(attempt, TranslationResult.LLM_FAILED, null, elapsedMs(llmStarted));
             throw new ApiException(ErrorCode.TRANSLATION_UNAVAILABLE);
         }
         long llmMs = elapsedMs(llmStarted);
 
-        String dialect = reply.dialect();
-        if (reply.kind() != DialectTranslator.Kind.TRANSLATED || dialect == null
-                || !TranslationHarness.acceptsOutput(input, dialect)) {
-            log.info("번역 불가 판정 kind={}", reply.kind());
+        String translated = reply.output();
+        if (reply.kind() != DialectTranslator.Kind.TRANSLATED || translated == null
+                || !TranslationHarness.acceptsOutput(input, translated)) {
+            log.info("번역 불가 판정 kind={} direction={}", reply.kind(), attempt.direction().apiValue());
             finish(attempt, TranslationResult.REJECTED, null, llmMs);
             throw new ApiException(ErrorCode.TRANSLATION_REJECTED);
         }
-        String output = dialect.strip();
+        String output = translated.strip();
         finish(attempt, TranslationResult.SUCCESS, output, llmMs);
-        return new TranslationResponse(output, quota.remaining(slot));
+        return TranslationResponse.of(attempt.direction(), output, quota.remaining(slot));
     }
 
     /**
@@ -146,11 +166,11 @@ class TranslationService {
         String input = result == TranslationResult.TOO_LONG
                 ? leading(attempt.text(), AccenturyProperties.Translation.MAX_INPUT_LENGTH)
                 : attempt.text();
-        requests.get(result).increment();
-        log.info("번역 requestId={} result={} inputLength={} totalMs={} llmMs={}", attempt.requestId(), result,
-                inputLength, totalMs, llmMs);
+        requests.get(attempt.direction()).get(result).increment();
+        log.info("번역 requestId={} direction={} result={} inputLength={} totalMs={} llmMs={}", attempt.requestId(),
+                attempt.direction().apiValue(), result, inputLength, totalMs, llmMs);
         records.save(new TranslationRecord(attempt.requestId(), attempt.requestedAt(), attempt.userId(),
-                input, inputLength, output, result, totalMs, llmMs, translator.model()));
+                attempt.direction(), input, inputLength, output, result, totalMs, llmMs, translator.model()));
     }
 
     /** 앞에서 코드 포인트 {@code count}개 - 서로게이트 쌍 가운데를 자르지 않는다. */
@@ -165,6 +185,7 @@ class TranslationService {
         return TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - startedNanos);
     }
 
-    private record Attempt(UUID requestId, Instant requestedAt, long started, UUID userId, String text) {
+    private record Attempt(UUID requestId, Instant requestedAt, long started, UUID userId,
+                           TranslationDirection direction, String text) {
     }
 }
