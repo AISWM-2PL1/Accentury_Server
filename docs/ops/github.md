@@ -15,7 +15,7 @@
 
 배포 워크플로(이 레포의 `deploy.yml`, `e2e-smoke.yml`과 Accentury_App 레포의 `web-deploy.yml`)는 GitHub environment `staging`, `prod`를 지정해 실행되고, 그 environment의 변수에서 대상을 읽는다. 역할의 신뢰 정책이 `repo:AISWM-2PL1/<레포>:environment:{env}`로 묶여 있어 environment 이름은 Terraform의 `env`와 같아야 한다. 역할은 레포마다 하나다 (KAN-306, 2026-11-04). `accentury-{env}-github-deploy`는 Accentury_Server만 맡고 정책은 `image-deploy`(IMAGE_TAG, AI 호스트 Run Command, ECS 리비전과 서비스 갱신, 관리자 토큰 읽기, staging은 ECR push)뿐이다. `accentury-{env}-github-web-deploy`는 Accentury_App만 맡고 정책은 `web-deploy`(웹 버킷 ListBucket과 PutObject, CloudFront 무효화)뿐이다. 레포 분리(KAN-221)부터 2026-11-04까지는 역할 하나에 두 정책이 붙어 두 레포가 함께 맡았는데, 그러면 App 레포의 environment 토큰만으로 AI 호스트 root 셸과 ECS 배포까지 되어 신뢰 경계가 두 레포 중 약한 쪽으로 내려간다. 저장소는 `envs/*/variables.tf`의 `github_server_repository`, `github_app_repository`이고, environment와 변수는 두 레포에 각각 있다.
 
-각 역할의 신뢰 정책은 자기 레포의 이름만 있는 구형식과 숫자 ID가 붙는 불변 형식(`repo:AISWM-2PL1@295795156/Accentury_Server@1380964825:environment:{env}`) 둘을 허용한다. 두 레포는 불변 형식을 쓴다(2026-07-15 이후 생성 저장소 기본). 지금 ID는 Accentury_Server 1380964825, Accentury_App 1380964859다. 저장소를 옮기거나 다시 만들면 ID가 바뀌므로 `gh api repos/OWNER/REPO --jq '[.owner.id, .id]'`로 다시 받아 `envs/*/variables.tf`의 `github_server_repository`, `github_app_repository` 기본값을 맞춘다. 분리 전 레포 Accentury_Prototype(id 1308814203)은 아카이브라 목록에 없다.
+각 역할의 신뢰 정책은 자기 레포의 이름만 있는 구형식과 숫자 ID가 붙는 불변 형식(`repo:AISWM-2PL1@295795156/Accentury_Server@1380964825:environment:{env}`) 둘을 허용한다. 두 레포는 불변 형식을 쓴다(2026-07-15 이후 생성 저장소 기본). 지금 ID는 Accentury_Server 1380964825, Accentury_App 1380964859다. 저장소를 옮기거나 다시 만들면 ID가 바뀌므로 `gh api repos/OWNER/REPO --jq '[.owner.id, .id]'`로 다시 받아 `envs/*/variables.tf`의 `github_server_repository`, `github_app_repository` 기본값을 맞춘다. 분리 전 레포 Accentury_Prototype(id 1308814203)은 아카이브라 어느 역할의 신뢰 정책에도 없다.
 
 ## deployment branch policy
 
@@ -57,7 +57,9 @@ for env in staging prod; do
   gh variable delete AWS_DEPLOY_ROLE_ARN -e "$env" -R AISWM-2PL1/Accentury_App
   gh variable delete APP_DOMAIN          -e "$env" -R AISWM-2PL1/Accentury_App
 done
-``` 아래 블록은 Server 클론의 `infra/envs/<env>`에서 돌리므로 `-R`을 빼면 gh가 현재 클론(Accentury_Server)에만 넣는다. 그래서 줄마다 `-R`을 명시한다.
+```
+
+아래 블록은 Server 클론의 `infra/envs/<env>`에서 돌리므로 `-R`을 빼면 gh가 현재 클론(Accentury_Server)에만 넣는다. 그래서 줄마다 `-R`을 명시한다.
 
 ```
 cd infra/envs/staging   # 또는 prod
