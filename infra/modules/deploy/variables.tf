@@ -27,6 +27,15 @@ variable "github_app_repository" {
     id   = number # 저장소의 숫자 ID. 불변 subject claim에 들어간다.
   })
   description = "웹 배포 역할(github-web-deploy)을 맡는 저장소 - Accentury_App (KAN-306). 웹 번들 업로드와 캐시 무효화만 할 수 있고 이미지 배포 역할은 맡을 수 없다."
+
+  # 이 분리의 불변식 - 두 역할을 맡는 저장소가 서로 달라야 한다. tfvars나 저장소 ID 갱신 중 실수로 두 변수가
+  # 같은 저장소를 가리키면 한 레포 토큰이 image-deploy와 web-deploy를 다 맡아 KAN-306 이전 상태로 조용히
+  # 돌아가므로 plan 단계에서 막는다. 두 입력값 사이의 관계라 리소스가 아니라 변수에 둔다 - 역할 리소스를
+  # 옮기거나 지워도 검사가 같이 사라지지 않는다 (PR #63 리뷰). 다른 변수 참조는 Terraform 1.9부터 된다.
+  validation {
+    condition     = var.github_server_repository.id != var.github_app_repository.id && var.github_server_repository.name != var.github_app_repository.name
+    error_message = "github_server_repository와 github_app_repository는 서로 다른 저장소여야 한다. 같으면 한 레포 토큰이 이미지 배포와 웹 배포 역할을 다 맡게 된다 (KAN-306)."
+  }
 }
 
 variable "web_bucket_arn" {
