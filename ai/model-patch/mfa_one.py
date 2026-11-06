@@ -48,7 +48,7 @@ MFA import, 토크나이저 생성, librosa import 와 numba 컴파일(`_prewarm
 MFA 안에 앞 건의 상태가 남는 것이다. 새로 띄운 프로세스의 첫 건은 한 번짜리와 바이트까지 같았으므로,
 import 만 끝낸 부모를 매번 fork 해서 자식이 늘 "첫 건"이 되게 한다. 부모는 정렬을 한 번도 하지 않는다.
 
-    요청  {"op": "ping", "dic"?, "acoustic"?}                       → {"ok": true}
+    요청  {"op": "ping", "dic"?, "acoustic"?}                       → {"ok": true, "warm": {"audio": bool, "lexicon"?: bool}}
           {"op": "align", "wav", "txt", "dic", "acoustic", "out"}   → {"ok": true} | {"ok": false, "error": "..."}
 
 MFA 와 Kaldi 가 표준출력에 찍는 로그가 응답 줄에 섞이지 않도록, 응답은 기동 때 복제해 둔 fd 로만 쓰고
@@ -101,7 +101,7 @@ def _lexicon_kwargs(acoustic: str) -> dict:
     )
 
 
-def _prebuild_lexicon(dic: Path, acoustic: str) -> None:
+def _prebuild_lexicon(dic: Path, acoustic: str) -> bool:
     """발음 사전 FST 를 부모에서 한 번 만든다 (KAN-296 3차).
 
     `align_one` 은 `--clean` 이면 요청마다 사전 파일 전체(2만 2천 줄)를 읽어 FST 를 새로 만든다. 2026-10-27
@@ -113,7 +113,7 @@ def _prebuild_lexicon(dic: Path, acoustic: str) -> None:
     try:
         key = _lexicon_key(dic, acoustic)
         if key in _LEXICON:
-            return
+            return True
         from kalpy.fstext.lexicon import LexiconCompiler
 
         kwargs = _lexicon_kwargs(acoustic)
@@ -122,8 +122,10 @@ def _prebuild_lexicon(dic: Path, acoustic: str) -> None:
         compiler.create_fsts()
         compiler.clear()
         _LEXICON[key] = (kwargs, compiler)
+        return True
     except Exception:                        # noqa: BLE001 - 사전 예열 실패는 속도 문제일 뿐이다
         print(f"mfa_one: 사전 예열 실패, 자식이 직접 한다\n{traceback.format_exc()[-400:]}", file=sys.stderr)
+        return False
 
 
 def _use_prebuilt_lexicon(dic: Path, acoustic: str) -> None:
@@ -204,7 +206,7 @@ def restore_labels(path: Path, transcript: str) -> None:
 
 
 @functools.lru_cache(maxsize=1)
-def _prewarm_audio() -> None:
+def _prewarm_audio() -> bool:
     """librosa import 와 numba 컴파일을 부모에서 한 번 치른다 (KAN-296 2차).
 
     `align_one` 은 음성을 `librosa.load` 로 읽는데, librosa 는 처음 쓰일 때 import 되고 그 안의 numba 함수가
@@ -220,12 +222,14 @@ def _prewarm_audio() -> None:
         import numpy as np
         import soundfile as sf
 
-        with tempfile.TemporaryDirectory(prefix="mfa-warm-") as td:
+        with tempfile.TemporaryDirectory(prefix="track1-warm-") as td:
             wav = os.path.join(td, "warm.wav")
             sf.write(wav, np.zeros(44100, dtype="float32"), 44100)
             librosa.load(wav, sr=16000, mono=False)
+        return True
     except Exception:                        # noqa: BLE001 - 예열 실패는 속도 문제일 뿐이다
         print(f"mfa_one: 오디오 예열 실패, 자식이 직접 한다\n{traceback.format_exc()[-400:]}", file=sys.stderr)
+        return False
 
 
 def _handle(msg: dict) -> dict:
@@ -234,10 +238,10 @@ def _handle(msg: dict) -> dict:
         if msg.get("op") == "ping":
             from montreal_forced_aligner.command_line.mfa import mfa_cli  # noqa: F401 - import 비용을 기동 때 치른다
             _tokenizer()
-            _prewarm_audio()
+            warm = {"audio": _prewarm_audio()}
             if msg.get("dic") and msg.get("acoustic"):
-                _prebuild_lexicon(Path(msg["dic"]), msg["acoustic"])
-            return {"ok": True}
+                warm["lexicon"] = _prebuild_lexicon(Path(msg["dic"]), msg["acoustic"])
+            return {"ok": True, "warm": warm}
         if msg.get("op") != "align":
             return {"ok": False, "error": f"모르는 op: {msg.get('op')!r}"}
         out = Path(msg["out"])
@@ -276,8 +280,9 @@ def _handle_forked(msg: dict) -> dict:
         chunks.append(chunk)
     os.close(r)
     _, status = os.waitpid(pid, 0)
-    if not chunks:
-        return {"ok": False, "error": f"정렬 자식이 결과 없이 끝났다 (wait status {status})"}
+    if status != 0 or not chunks:
+        # OOM이나 segfault다. 입력 탓이 아니므로 "정렬 실패"가 아니라 "답하지 못함"으로 알린다
+        return {"ok": False, "crashed": True, "error": f"정렬 자식이 결과 없이 끝났다 (wait status {status})"}
     return json.loads(b"".join(chunks))
 
 

@@ -166,7 +166,7 @@ AI 서버는 backend와 다른 EC2에서 돕니다. 같은 compose 네트워크 
 Whisper, `gate`는 `align_transcript`, `align`은 MFA, `f0`는 `extract_utterance`, `scoring`은 `score_extracted`),
 가중치와 참조 분포와 패키지는 `26ac67a`와 같습니다. 모델 레포의 커밋 해시가 아니라
 `sha256("base=26ac67a" + 두 파일)[:7]`이라, 같은 패치가 모델 레포에 들어가 정식 해시로 올라오면 그 태그로
-바꿉니다. 지금 쓰는 태그는 `6415e0d`이고 `modelVersion`은 `track1-v3.4-2026-08-31b+6415e0d+whisper-large-v3+ov-int8`로 나옵니다.
+바꿉니다. 지금 쓰는 태그는 `e382764`이고 `modelVersion`은 `track1-v3.4-2026-08-31b+e382764+whisper-large-v3+ov-int8`로 나옵니다.
 
 콜드/웜은 **그 워커에서 MFA가 처음 실제로 돈 요청까지인가**입니다. 가중치는 워밍업에서
 이미 올라와 있어도 전달본 안쪽의 지연 초기화가 첫 채점에서 한 번 일어나고, 그 실체는 MFA 첫 실행입니다
@@ -184,7 +184,7 @@ Whisper, `gate`는 `align_transcript`, `align`은 MFA, `f0`는 `extract_utteranc
 
 ### MFA 상주화와 OpenVINO int8
 
-지금 모델 태그 `6415e0d`(`ai/Dockerfile`의 `MODEL_TAG`)는 `f77011c`에 아래를 더한 이미지입니다.
+지금 모델 태그 `e382764`(`ai/Dockerfile`의 `MODEL_TAG`)는 `f77011c`에 아래를 더한 이미지입니다.
 
 | 항목 | 내용 |
 | --- | --- |
@@ -192,9 +192,16 @@ Whisper, `gate`는 `align_transcript`, `align`은 MFA, `f0`는 `extract_utteranc
 | Whisper | OpenVINO int8로 추론합니다. 스레드는 `ACCENTURY_WHISPER_OV_THREADS=2`입니다. |
 | 제거 | 기존 Whisper 가중치와 기본 파이썬 torch를 뺐습니다. |
 
-원본 파일은 `model-patch/`에 있습니다. `model-patch/build.sh`로 다시 만들 수 있고, 태그는 `sha256("base=f77011c" + 빌드 입력 파일)[:7]`이라
-`6415e0d`와 다른 값이 나옵니다. 이 태그는 같은 내용을 단계별로 쌓아 만든 이미지입니다. OpenVINO IR은 ECR의 `ai-model:6415e0d`에서
-가져오고, IR을 새로 만들 때는 `model-patch/export_ir.py`를 씁니다.
+원본 파일은 `model-patch/`에 있습니다. `model-patch/build.sh`로 다시 만들고, 태그는 `sha256("base=f77011c" + 빌드 입력 파일)[:7]`입니다.
+OpenVINO 패키지는 `ov.lock`(해시 포함)으로 설치합니다. 패키지를 바꿀 때는 `ov.requirements`와 `ov.constraints`를 고친 뒤 아래 명령으로
+잠금 파일을 다시 만듭니다. OpenVINO IR은 ECR의 `ai-model:6415e0d`에서 가져오고, IR을 새로 만들 때는 `model-patch/export_ir.py`를 씁니다.
+
+```bash
+cd ai/model-patch
+uv pip compile ov.requirements -c ov.constraints --generate-hashes --python-version 3.12 \
+  --python-platform x86_64-manylinux_2_28 --extra-index-url https://download.pytorch.org/whl/cpu \
+  --index-strategy unsafe-best-match -o ov.lock
+```
 
 **MFA 상주화.** 워밍업 때 `mfa_one.py --serve`를 띄워 import, librosa 예열, 발음 사전 FST 생성을 끝내 둡니다. 요청은 이 프로세스를
 fork한 자식이 정렬합니다. 한 프로세스에서 연달아 정렬하면 둘째 건부터 경계와 묵음 칸이 달라지기 때문입니다.
@@ -202,6 +209,8 @@ fork한 자식이 정렬합니다. 한 프로세스에서 연달아 정렬하면
 | 상황 | 동작 |
 | --- | --- |
 | 상주 프로세스가 죽었거나 30초 안에 답하지 않음 | 그 요청은 한 번짜리 정렬로 처리하고 다음 요청에서 다시 띄웁니다. |
+| 상주 프로세스 기동 실패 | 사유를 로그에 남기고 300초 동안 상주 모드를 쉽니다 (`ACCENTURY_MFA_RESIDENT_COOLDOWN`). 그동안 요청은 한 번짜리 정렬로 처리합니다. |
+| 정렬 자식이 크래시 | 입력 탓이 아니므로 한 번짜리 정렬로 다시 시도합니다. |
 | 정렬 자체가 실패 | `mfa align`으로 한 번 더 갑니다. |
 | 200건마다 | 상주 프로세스를 새로 띄웁니다 (`ACCENTURY_MFA_RESIDENT_RECYCLE`). 새 프로세스는 뒤에서 뜨므로 다음 요청이 기동을 기다리지 않습니다. |
 | 취소 | 상주 프로세스는 워커와 같은 프로세스 그룹이라 함께 거둬지고, 새 워커가 워밍업 때 다시 띄웁니다. |

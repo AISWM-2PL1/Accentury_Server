@@ -10,10 +10,10 @@ ARG IR_TAG=6415e0d
 FROM ${MODEL_REGISTRY}/accentury/ai-model:${IR_TAG} AS ir
 
 FROM ${MODEL_REGISTRY}/accentury/ai-model:${BASE_TAG} AS src
-COPY ov.requirements ov.constraints /tmp/ov/
+COPY ov.lock /tmp/ov/
 RUN python -m pip install --no-cache-dir uv \
  && uv venv /opt/venv-ov --python /usr/local/bin/python3 \
- && uv pip install --no-cache --python /opt/venv-ov/bin/python -r /tmp/ov/ov.requirements -c /tmp/ov/ov.constraints \
+ && uv pip install --no-cache --python /opt/venv-ov/bin/python --require-hashes --no-deps -r /tmp/ov/ov.lock \
       --extra-index-url https://download.pytorch.org/whl/cpu --index-strategy unsafe-best-match \
  && python -m pip uninstall -y uv torch \
  && rm -rf /tmp/ov /opt/hf/hub/models--openai--whisper-large-v3

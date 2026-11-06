@@ -11,7 +11,7 @@ cd "$(dirname "$0")"
 
 BASE_TAG=f77011c
 REGISTRY=325771561913.dkr.ecr.ap-northeast-2.amazonaws.com
-TAG=$( { printf 'base=%s' "$BASE_TAG"; cat Dockerfile ov.requirements ov.constraints serve.py mfa_one.py track2_asr.py ov_asr.py; } | shasum -a 256 | cut -c1-7)
+TAG=$( { printf 'base=%s' "$BASE_TAG"; cat Dockerfile ov.lock serve.py mfa_one.py track2_asr.py ov_asr.py; } | shasum -a 256 | cut -c1-7)
 echo "base ${BASE_TAG} -> tag ${TAG}"
 
 aws ecr get-login-password --region ap-northeast-2 | docker login --username AWS --password-stdin "$REGISTRY" >/dev/null

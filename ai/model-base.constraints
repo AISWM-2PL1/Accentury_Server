@@ -1,4 +1,4 @@
-# 모델 전달본 이미지(accentury/ai-model:6415e0d)에 깔려 있는 파이썬 패키지 목록 (KAN-246, KAN-326). 기본 파이썬에서 torch는
+# 모델 전달본 이미지(accentury/ai-model:e382764)에 깔려 있는 파이썬 패키지 목록 (KAN-246, KAN-326). 기본 파이썬에서 torch는
 # 빠졌고, OpenVINO 패키지는 /opt/venv-ov에 따로 있어 이 목록에 없다.
 # requirements.lock을 만들 때 제약(-c)으로 쓴다 - 전달본과 겹치는 패키지를 전달본과 같은 버전으로 잠가
 # 이미지 빌드의 pip가 전달본 쪽 패키지를 건드리지 않게 한다. 손으로 고치지 않는다.
