@@ -13,12 +13,29 @@ variable "github_owner_id" {
   description = "저장소 소유자(조직)의 숫자 ID. 불변 subject claim(repo:OWNER@ID/REPO@ID:...)에 들어간다."
 }
 
-variable "github_repositories" {
-  type = list(object({
+variable "github_server_repository" {
+  type = object({
     name = string # 저장소 이름 (소유자 제외)
     id   = number # 저장소의 숫자 ID. 불변 subject claim에 들어간다.
-  }))
-  description = "이 환경의 배포 역할을 맡을 수 있는 저장소 목록 (KAN-221). 레포 분리 뒤 Accentury_Server(이미지 배포, 스모크)와 Accentury_App(웹 배포)이 같은 역할을 맡는다. 목록에 없는 저장소는 environment 이름이 같아도 AssumeRoleWithWebIdentity가 거부된다."
+  })
+  description = "이미지 배포 역할(github-deploy)을 맡는 저장소 - Accentury_Server (KAN-221 레포 분리, KAN-306 역할 분리). 이미지 배포와 스모크가 여기서 돈다. 다른 저장소는 environment 이름이 같아도 AssumeRoleWithWebIdentity가 거부된다."
+}
+
+variable "github_app_repository" {
+  type = object({
+    name = string # 저장소 이름 (소유자 제외)
+    id   = number # 저장소의 숫자 ID. 불변 subject claim에 들어간다.
+  })
+  description = "웹 배포 역할(github-web-deploy)을 맡는 저장소 - Accentury_App (KAN-306). 웹 번들 업로드와 캐시 무효화만 할 수 있고 이미지 배포 역할은 맡을 수 없다."
+
+  # 이 분리의 불변식 - 두 역할을 맡는 저장소가 서로 달라야 한다. tfvars나 저장소 ID 갱신 중 실수로 두 변수가
+  # 같은 저장소를 가리키면 한 레포 토큰이 image-deploy와 web-deploy를 다 맡아 KAN-306 이전 상태로 조용히
+  # 돌아가므로 plan 단계에서 막는다. 두 입력값 사이의 관계라 리소스가 아니라 변수에 둔다 - 역할 리소스를
+  # 옮기거나 지워도 검사가 같이 사라지지 않는다 (PR #63 리뷰). 다른 변수 참조는 Terraform 1.9부터 된다.
+  validation {
+    condition     = var.github_server_repository.id != var.github_app_repository.id && var.github_server_repository.name != var.github_app_repository.name
+    error_message = "github_server_repository와 github_app_repository는 서로 다른 저장소여야 한다. 같으면 한 레포 토큰이 이미지 배포와 웹 배포 역할을 다 맡게 된다 (KAN-306)."
+  }
 }
 
 variable "web_bucket_arn" {

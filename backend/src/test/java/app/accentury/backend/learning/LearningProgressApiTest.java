@@ -17,6 +17,7 @@ import org.springframework.context.annotation.Import;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
 import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.test.context.TestPropertySource;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.ResultActions;
@@ -26,8 +27,11 @@ import tools.jackson.databind.ObjectMapper;
 
 import java.sql.Date;
 import java.sql.Timestamp;
+import java.time.Clock;
 import java.time.Instant;
 import java.time.LocalDate;
+import java.time.YearMonth;
+import java.time.ZoneOffset;
 import java.time.temporal.ChronoUnit;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
@@ -90,6 +94,9 @@ class LearningProgressApiTest extends IntegrationTest {
 
     @Autowired
     private JdbcTemplate jdbc;
+
+    @Autowired
+    private JdbcClient jdbcClient;
 
     private SessionTestFlow flow;
 
@@ -252,6 +259,181 @@ class LearningProgressApiTest extends IntegrationTest {
         authed(post("/v0/users/me/withdrawal"), withdrawn.access()).andExpect(status().isNoContent());
         assertFalse(attendance.record(withdrawn.userId(), Instant.now()));
         assertEquals(List.of(), attendedDates(withdrawn.userId()));
+    }
+
+    // === 월별 출석 - 홈 달력 시트 (KAN-314) ===
+
+    @Test
+    void 월별_출석은_그_달의_출석_날짜와_이번달과_지난달_수와_홈과_같은_연속_출석과_오늘을_준다() throws Exception {
+        Account account = signUp();
+        LocalDate today = today();
+        // 지난달과 그 전달에 걸쳐 심는다 - 요청한 달만 나오고 지난달은 수로만 나온다. 날짜는 전부 과거라 오늘 판정과 무관하다.
+        YearMonth target = YearMonth.from(today).minusMonths(1);
+        YearMonth before = target.minusMonths(1);
+        seedAttendance(account.userId(), target.atDay(1), target.atDay(2), target.atDay(3), target.atDay(5),
+                target.atDay(8), before.atDay(20), before.atEndOfMonth());
+        JsonNode month = attendanceMonth(account, target);
+        assertEquals(target.getYear(), month.get("year").asInt());
+        assertEquals(target.getMonthValue(), month.get("month").asInt());
+        assertEquals(List.of(target.atDay(1), target.atDay(2), target.atDay(3), target.atDay(5), target.atDay(8)),
+                dates(month.get("days")));
+        assertEquals(5, month.get("monthCount").asInt());
+        assertEquals(2, month.get("lastMonthCount").asInt());
+        for (JsonNode day : month.get("days")) {
+            assertEquals(0, day.get("items").size(), "심은 출석에는 시도 기록이 없다");
+        }
+        assumeSameDay(today);
+        assertEquals(today.toString(), month.get("today").asString());
+
+        // 연속 출석은 홈과 같은 값이다.
+        seedAttendance(account.userId(), today, today.minusDays(1));
+        JsonNode streak = attendanceMonth(account, YearMonth.from(today)).get("streak");
+        JsonNode homeStreak = home(account).get("streak");
+        assumeSameDay(today);
+        assertEquals(2, streak.get("currentDays").asInt());
+        assertTrue(streak.get("attendedToday").asBoolean());
+        assertEquals(today.toString(), streak.get("lastAttendedDate").asString());
+        assertEquals(homeStreak, streak);
+    }
+
+    @Test
+    void 출석한_날에는_그날_마친_세트와_코스와_레벨테스트가_붙는다() throws Exception {
+        Account account = signUp();
+        LocalDate today = today();
+        // 레벨테스트 완주, 세트 하나를 1문항 틀리고 완료, 첫 코스의 카드 두 장 채점 완료(한 장은 두 번, 실패 한 건은 제외)
+        // 순서로 만든다 - 응답은 종류가 아니라 마친 시각 순이어야 한다 (Codex 리뷰).
+        completeLevelTest(account);
+        WordLearningDefinition.Set set = wordRegistry.current().definition().sets().get(0);
+        solve(account, set, 1);
+        IntonationLearningRegistry.Published current = intonationRegistry.current();
+        IntonationLearningDefinition.Course course = current.definition().courses().get(0);
+        String version = current.definition().contentVersion();
+        seedAttempt(account.userId(), version, course.cards().get(0).cardId(), "COMPLETED");
+        seedAttempt(account.userId(), version, course.cards().get(0).cardId(), "COMPLETED");
+        seedAttempt(account.userId(), version, course.cards().get(1).cardId(), "COMPLETED");
+        seedAttempt(account.userId(), version, course.cards().get(1).cardId(), "FAILED");
+
+        JsonNode month = attendanceMonth(account, YearMonth.from(today));
+        assumeSameDay(today);
+        assertEquals(List.of(today), dates(month.get("days")));
+        JsonNode items = month.get("days").get(0).get("items");
+        Map<String, JsonNode> byKind = new LinkedHashMap<>();
+        for (JsonNode item : items) {
+            byKind.put(item.get("kind").asString(), item);
+        }
+        assertEquals(3, items.size(), items.toString());
+        assertEquals(List.of("LEVEL_TEST", "SET", "COURSE"), new ArrayList<>(byKind.keySet()), "마친 시각 순이다");
+        JsonNode setItem = byKind.get("SET");
+        assertEquals(jdbc.queryForObject("select id from word_set_attempt where user_id = ? and set_id = ?",
+                String.class, account.userId(), set.setId()), setItem.get("key").asString(), "세트 키는 시도 id다");
+        assertEquals(set.setId(), setItem.get("id").asString());
+        assertEquals(set.title(), setItem.get("title").asString());
+        assertEquals(set.items().size() - 1, setItem.get("done").asInt());
+        assertEquals(set.items().size(), setItem.get("total").asInt());
+        JsonNode courseItem = byKind.get("COURSE");
+        assertEquals(version + ":" + course.courseId(), courseItem.get("key").asString());
+        assertEquals(course.courseId(), courseItem.get("id").asString());
+        assertEquals(course.title(), courseItem.get("title").asString());
+        assertEquals(2, courseItem.get("done").asInt(), "같은 카드 두 번은 한 장, 실패는 세지 않는다");
+        assertEquals(course.cards().size(), courseItem.get("total").asInt());
+        JsonNode levelTest = byKind.get("LEVEL_TEST");
+        JsonNode home = home(account).get("levelTest");
+        assertEquals(home.get("testVersion").asString(), levelTest.get("key").asString());
+        assertEquals(home.get("testVersion").asString(), levelTest.get("id").asString());
+        assertEquals(home.get("tier").get("name").asString(), levelTest.get("title").asString());
+        assertEquals(1, levelTest.get("done").asInt());
+        assertEquals(1, levelTest.get("total").asInt());
+    }
+
+    @Test
+    void 달력의_오늘과_연속_출석은_같은_기준일이고_달_범위만_나온다() throws Exception {
+        // 고정 시계라 자정 경계를 건너뛰지 않고 본다 (PR #61 리뷰). 10-31 23:59:59 KST와 11-01 00:00:00 KST.
+        Account account = signUp();
+        seedAttendance(account.userId(), LocalDate.of(2026, 10, 30), LocalDate.of(2026, 10, 31));
+        LearningAttendance beforeMidnight = new LearningAttendance(jdbcClient,
+                Clock.fixed(Instant.parse("2026-10-31T14:59:59Z"), ZoneOffset.UTC));
+        LearningAttendance afterMidnight = new LearningAttendance(jdbcClient,
+                Clock.fixed(Instant.parse("2026-10-31T15:00:00Z"), ZoneOffset.UTC));
+
+        LearningAttendance.Calendar october = beforeMidnight.calendar(account.userId(), YearMonth.of(2026, 10));
+        assertEquals(LocalDate.of(2026, 10, 31), october.today());
+        assertEquals(List.of(LocalDate.of(2026, 10, 30), LocalDate.of(2026, 10, 31)), october.days());
+        assertEquals(0, october.lastMonthCount());
+        assertEquals(new LearningAttendance.Streak(2, true, LocalDate.of(2026, 10, 31)), october.streak());
+
+        LearningAttendance.Calendar november = afterMidnight.calendar(account.userId(), YearMonth.of(2026, 11));
+        assertEquals(LocalDate.of(2026, 11, 1), november.today());
+        assertEquals(List.of(), november.days(), "미래 달과 아직 출석이 없는 달은 비어 있다");
+        assertEquals(2, november.lastMonthCount());
+        assertEquals(new LearningAttendance.Streak(2, false, LocalDate.of(2026, 10, 31)), november.streak(),
+                "자정이 지나면 아직 출석 전이지만 어제까지 이어진 2일이다");
+        assertEquals(november.streak(), afterMidnight.streak(account.userId()), "홈과 같은 값이다");
+
+        // 이틀 뒤에는 끊긴다 - 마지막 출석일은 그대로 보인다.
+        LearningAttendance twoDaysLater = new LearningAttendance(jdbcClient,
+                Clock.fixed(Instant.parse("2026-11-02T03:00:00Z"), ZoneOffset.UTC));
+        assertEquals(new LearningAttendance.Streak(0, false, LocalDate.of(2026, 10, 31)),
+                twoDaysLater.calendar(account.userId(), YearMonth.of(2026, 11)).streak());
+        assertEquals(LearningAttendance.Streak.NONE, twoDaysLater.calendar(signUp().userId(), YearMonth.of(2026, 11)).streak());
+    }
+
+    @Test
+    void 월_경계는_KST_자정이다() throws Exception {
+        Account account = signUp();
+        // 2026-09-30 23:59 KST와 2026-10-01 00:00 KST - UTC로는 둘 다 9월 30일이다.
+        assertTrue(attendance.record(account.userId(), Instant.parse("2026-09-30T14:59:00Z")));
+        assertTrue(attendance.record(account.userId(), Instant.parse("2026-09-30T15:00:00Z")));
+        JsonNode september = attendanceMonth(account, YearMonth.of(2026, 9));
+        JsonNode october = attendanceMonth(account, YearMonth.of(2026, 10));
+        assertEquals(List.of(LocalDate.of(2026, 9, 30)), dates(september.get("days")));
+        assertEquals(List.of(LocalDate.of(2026, 10, 1)), dates(october.get("days")));
+        assertEquals(1, october.get("lastMonthCount").asInt());
+    }
+
+    @Test
+    void 월별_출석에_다른_사용자의_기록은_섞이지_않는다() throws Exception {
+        Account account = signUp();
+        Account other = signUp();
+        YearMonth target = YearMonth.from(today()).minusMonths(1);
+        seedAttendance(account.userId(), target.atDay(4));
+        seedAttendance(other.userId(), target.atDay(4), target.atDay(9), target.atDay(10));
+        assertEquals(List.of(target.atDay(4)), dates(attendanceMonth(account, target).get("days")));
+        assertEquals(List.of(target.atDay(4), target.atDay(9), target.atDay(10)),
+                dates(attendanceMonth(other, target).get("days")));
+    }
+
+    @Test
+    void 기록_없는_계정과_미래_달은_빈_목록_200이고_범위_밖_달과_형식_오류는_400이다() throws Exception {
+        Account account = signUp();
+        LocalDate today = today();
+        JsonNode empty = attendanceMonth(account, YearMonth.from(today));
+        assertEquals(List.of(), dates(empty.get("days")));
+        assertEquals(0, empty.get("monthCount").asInt());
+        assertEquals(0, empty.get("lastMonthCount").asInt());
+        assertEquals(0, empty.get("streak").get("currentDays").asInt());
+
+        seedAttendance(account.userId(), today);
+        YearMonth future = YearMonth.from(today).plusMonths(1);
+        JsonNode next = attendanceMonth(account, future);
+        assertEquals(List.of(), dates(next.get("days")));
+        assertEquals(future.getYear(), next.get("year").asInt());
+        assertEquals(future.getMonthValue(), next.get("month").asInt());
+        assumeSameDay(today);
+        assertEquals(1, next.get("lastMonthCount").asInt(), "다음 달에서 보면 이번 달이 지난달이다");
+
+        for (String query : List.of("year=2026&month=0", "year=2026&month=13", "year=0&month=1",
+                "year=2026&month=abc", "year=2026", "month=11")) {
+            authed(get("/v0/learning/attendance?" + query), account.access())
+                    .andExpect(status().isBadRequest())
+                    .andExpect(jsonPath("$.code").value("VALIDATION_FAILED"));
+        }
+        // 누락과 형식 오류는 어느 파라미터인지 메시지에 담는다 (PR #61 리뷰).
+        authed(get("/v0/learning/attendance?year=2026"), account.access())
+                .andExpect(jsonPath("$.message").value("month: 필수 값이 없습니다."));
+        authed(get("/v0/learning/attendance?year=2026&month=abc"), account.access())
+                .andExpect(jsonPath("$.message").value("month: 값의 형식이 올바르지 않습니다."));
+        mockMvc.perform(get("/v0/learning/attendance?year=2026&month=11")).andExpect(status().isUnauthorized())
+                .andExpect(jsonPath("$.code").value("AUTH_TOKEN_INVALID"));
     }
 
     // === 코스 목록의 완료 표시와 추천 (AC 2, AC 3) ===
@@ -488,6 +670,21 @@ class LearningProgressApiTest extends IntegrationTest {
         return body(authed(get("/v0/learning/home"), account.access())
                 .andExpect(status().isOk())
                 .andExpect(header().string(HttpHeaders.CACHE_CONTROL, "no-store")));
+    }
+
+    private JsonNode attendanceMonth(Account account, YearMonth month) throws Exception {
+        return body(authed(get("/v0/learning/attendance?year=" + month.getYear() + "&month=" + month.getMonthValue()),
+                account.access())
+                .andExpect(status().isOk())
+                .andExpect(header().string(HttpHeaders.CACHE_CONTROL, "no-store")));
+    }
+
+    private static List<LocalDate> dates(JsonNode days) {
+        List<LocalDate> values = new ArrayList<>();
+        for (JsonNode day : days) {
+            values.add(LocalDate.parse(day.get("date").asString()));
+        }
+        return values;
     }
 
     private JsonNode courses(Account account) throws Exception {

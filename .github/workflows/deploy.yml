@@ -30,7 +30,7 @@
 # 자격 증명은 GitHub OIDC 환경별 역할(infra/modules/deploy). staging 역할만 ECR push 권한이 있고
 # prod 역할은 조회뿐이다 - prod로 가는 이미지는 언제나 staging을 거친 것이어야 하기 때문이다.
 # 테스트는 여기서 다시 돌리지 않는다: PR의 backend-test, ai-test required check가 게이트다.
-# prod 승인 게이트는 GitHub environment prod의 required reviewers로 건다 (infra/README.md "GitHub 설정").
+# prod 승인 게이트는 GitHub environment prod의 required reviewers로 건다 (docs/ops/github.md "prod 승인 게이트 (KAN-128)").
 # 환경 철거 중(DEPLOY_PAUSED=true)이면 web-deploy.yml과 같이 건너뛴다.
 
 name: Image Deploy
@@ -173,7 +173,7 @@ jobs:
           missing=0
           for name in AWS_DEPLOY_ROLE_ARN APP_DOMAIN; do
             if [ -z "${!name}" ]; then
-              echo "GitHub environment 변수가 비어 있습니다: $name (infra/README.md 'GitHub 설정')" >&2
+              echo "GitHub environment 변수가 비어 있습니다: $name (docs/ops/github.md 'environment 변수')" >&2
               missing=1
             fi
           done
@@ -437,7 +437,7 @@ jobs:
           # 통째로 끊겨 resume이 돌지 않으므로, 정지한 ASG 이름을 마커 파일에 남기고 "ASG 프로세스 정리" 스텝
           # (always())이 되살린다 (KAN-212). 마커는 suspend가 성공한 뒤 쓰고 resume이 성공한 뒤 지운다 - 파이프라인이
           # 직접 멈춘 ASG만 가리키고, 누가 손으로 멈춘 프로세스는 건드리지 않는다. 러너 자체가 사라지면 어떤 스텝도
-          # 돌지 않으니 그때만 README "내부 ALB와 오토스케일링"의 수동 resume 절차를 따른다.
+          # 돌지 않으니 그때만 docs/ops/ai-host.md "배포 시 순차 reload"의 수동 resume 절차를 따른다.
           ASG_PROCESSES="HealthCheck ReplaceUnhealthy AlarmNotification"
           ASG_SUSPENDED_MARKER="$RUNNER_TEMP/asg-suspended"
           suspend_asg() {
@@ -700,7 +700,7 @@ jobs:
       # 시작되지 않는다. always()라 취소와 timeout에도 돈다(GitHub은 timeout도 취소로 처리한다). 되살리는 대상은
       # suspend_asg가 마커에 적은 ASG뿐이다 - 반영 전에 실패한 실행(태그 결정 실패 등)과 정상 완료(resume_asg가
       # 마커를 지움)에서는 "재개할 ASG 없음"으로 끝난다. 롤백 스텝 뒤에 두는 이유는 롤백도 같은 apply.sh로 reload를
-      # 돌려 ASG를 멈추기 때문이다. 러너 자체가 사라지면 이 스텝도 돌지 않으므로 그때는 README의 수동 절차다.
+      # 돌려 ASG를 멈추기 때문이다. 러너 자체가 사라지면 이 스텝도 돌지 않으므로 그때는 docs/ops/ai-host.md "배포 시 순차 reload"의 수동 절차다.
       - name: ASG 프로세스 정리 (잔존 확인)
         id: asg_leftover
         if: always() && steps.gate.outputs.paused != 'true'
@@ -740,7 +740,7 @@ jobs:
             fi
             sleep 5
           done
-          echo "::error::ASG $ASG 프로세스 재개 실패 - 수동으로 aws autoscaling resume-processes --auto-scaling-group-name $ASG --scaling-processes $processes (infra/README.md '내부 ALB와 오토스케일링')"
+          echo "::error::ASG $ASG 프로세스 재개 실패 - 수동으로 aws autoscaling resume-processes --auto-scaling-group-name $ASG --scaling-processes $processes (docs/ops/ai-host.md '배포 시 순차 reload')"
           exit 1
 
       - name: 배포 기록
@@ -781,7 +781,7 @@ jobs:
 
       # 두 환경 모두 반영 직후 같은 job에서 E2E 스모크를 돌린다 (KAN-138, prod는 KAN-217부터). 관리자 토큰은
       # 대상 환경 SSM에서 읽어 합성 트래픽으로 표시한다 - 저장소 시크릿 하나로 두 환경 토큰을 못 담던
-      # 문제(README)가 여기서 해소되고, 두 환경 역할 모두 그 파라미터의 GetParameter 권한이 있다
+      # 문제(docs/wiki/infra-history.md의 KAN-171 항목)가 여기서 해소되고, 두 환경 역할 모두 그 파라미터의 GetParameter 권한이 있다
       # (infra/modules/deploy ReadAdminToken). e2e-smoke.yml의 workflow_call을 쓰지 않는 이유: 토큰을 job
       # output으로 넘기면 GitHub이 마스킹된 값이라며 output을 버린다. 그래서 같은 job 안에서 스크립트를 직접
       # 부른다. e2e-smoke.yml의 workflow_dispatch는 승격과 무관한 재실행용으로 남는다.

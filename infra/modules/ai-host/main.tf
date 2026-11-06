@@ -81,6 +81,9 @@ locals {
   # 자기 환경 경로 안에서도 하위 경로 /ai와 IMAGE_TAG만 읽는다 (KAN-36) - DB URL, 관리자 토큰 같은 backend
   # 시크릿이 신뢰하지 않는 오디오를 받는 호스트에 내려가지 않는다. backend 쪽은 반대로 /ai 하위 경로를 못 읽는다
   # (fargate 모듈 실행 역할이 config 파라미터 목록만 허용) - 내부 호출 토큰은 어차피 양쪽이 같은 값이다.
+  # 이 목록은 accentury-up.sh가 읽는 이름(get-parameters-by-path /ai, get-parameter IMAGE_TAG)과 짝이다. 아래
+  # DenyOtherParameters가 이 목록 밖을 전부 막으므로, 스크립트가 새 이름을 읽게 되면 여기도 함께 늘려야 한다 - 빠뜨리면
+  # 기동이 AccessDenied로 실패하고 대상 그룹 unhealthy로 ASG 교체가 반복된다.
   readable_parameters = [
     "${local.parameter_arn_prefix}/ai",
     "${local.parameter_arn_prefix}/ai/*",
@@ -97,6 +100,29 @@ data "aws_iam_policy_document" "host" {
       "ssm:GetParametersByPath",
     ]
     resources = local.readable_parameters
+  }
+
+  # 위 Allow만으로는 경계가 서지 않는다 - 같은 역할에 붙은 AmazonSSMManagedInstanceCore(ssm_core)가 ssm:GetParameter와
+  # GetParameters를 리소스 *에 허용해서, 이름을 아는 파라미터는 자기 환경의 backend 시크릿(DB URL, 관리자 토큰)과 다른 환경의
+  # JWT 시크릿까지 읽혔다 - GetParameters는 한 호출에 10개까지다 (KAN-305, 2026-11-03 simulate-principal-policy로 확인).
+  # IAM은 Allow의 합집합이라 Allow를 좁혀도 관리형 정책의 범위는 줄지 않고, Deny가 Allow를 이기므로 읽는 세 경로 밖을 전부
+  # 막는다. 액션은 ssm:GetParameter* 하나로 적는다 - 지금 매칭되는 것은 GetParameter, GetParameters, GetParametersByPath,
+  # GetParameterHistory 넷이고, 같은 접두사의 읽기 API가 늘어도 따라간다.
+  #
+  # 같이 고칠 것: modules/ai-ami/main.tf의 DenyOtherParameters(KAN-285)가 같은 문장이다 (not_resources만 다르다). 한쪽을
+  # 바꾸면 다른 쪽도 맞춘다.
+  #
+  # 기동에는 영향이 없다 - 호스트가 SSM을 읽는 곳은 accentury-up.sh의 /ai 하위 경로와 IMAGE_TAG 둘뿐이고(위 readable_parameters),
+  # 이 호스트에 보내는 SSM 문서(deploy.yml의 AWS-RunShellScript, Session Manager)는 {{ssm:...}}, {{ssm-secure:...}} 파라미터
+  # 참조를 쓰지 않는다. 그런 참조가 든 문서를 보내면 에이전트가 인스턴스 역할로 GetParameters를 불러 이 Deny에 걸린다.
+  # 퍼블릭 파라미터(arn:aws:ssm:<region>::parameter/aws/service/*)도 막힌다 - 호스트는 읽지 않고, AMI 갱신 런북의
+  # /aws/service/ami-amazon-linux-latest 조회는 운영자 PC에서 돈다 (docs/ops/ai-host.md). 관리형 정책을 고객 관리형으로 바꾸는
+  # 안은 에이전트 요구 권한이 바뀔 때 따라가야 해서 쓰지 않는다. 경계 재검증 명령은 docs/ops/secrets-ssm.md "읽기 권한".
+  statement {
+    sid           = "DenyOtherParameters"
+    effect        = "Deny"
+    actions       = ["ssm:GetParameter*"]
+    not_resources = local.readable_parameters
   }
 
   # 호스트 타이머의 health 지표 (ai-health-metric.sh, KAN-36). PutMetricData는 리소스 수준 제한이 없는 API라
@@ -349,7 +375,7 @@ resource "aws_launch_template" "ai" {
   name_prefix = "${local.name}-"
   # AMI는 tfvars에 명시한다 (KAN-246). SSM의 "최신 AMI" 파라미터를 직접 읽으면 값이 시간에 따라 바뀌어
   # 손대지 않은 plan에 교체가 끼어든다. 그걸 막으려고 ignore_changes로 묶어 뒀더니(KAN-36) 이번에는 최초
-  # 생성 시점의 AMI에 영구히 고정돼 OS 보안 업데이트가 들어오지 않았다. 갱신 절차는 README "AI 호스트 AMI 갱신".
+  # 생성 시점의 AMI에 영구히 고정돼 OS 보안 업데이트가 들어오지 않았다. 갱신 절차는 docs/ops/ai-host.md "AMI 갱신과 무중단 교체 (KAN-246)".
   image_id      = var.ami_id
   instance_type = var.instance_type
 
@@ -413,7 +439,7 @@ resource "aws_launch_template" "ai" {
 
     precondition {
       condition     = local.user_data_bytes <= local.user_data_max_bytes
-      error_message = "ai 호스트 user_data가 EC2 상한 ${local.user_data_max_bytes} 바이트를 넘습니다 (약 ${local.user_data_bytes} 바이트). compose와 스크립트는 이미 부팅 자산 버킷에 있으므로(KAN-38), 남은 것은 user_data.sh.tftpl 본문입니다 - 주석을 main.tf나 infra/README.md로 옮기거나 systemd 유닛 정의도 부팅 자산으로 내리세요."
+      error_message = "ai 호스트 user_data가 EC2 상한 ${local.user_data_max_bytes} 바이트를 넘습니다 (약 ${local.user_data_bytes} 바이트). compose와 스크립트는 이미 부팅 자산 버킷에 있으므로(KAN-38), 남은 것은 user_data.sh.tftpl 본문입니다 - 주석을 main.tf나 docs/ops/ai-host.md로 옮기거나 systemd 유닛 정의도 부팅 자산으로 내리세요."
     }
   }
 
@@ -431,7 +457,7 @@ resource "aws_autoscaling_group" "ai" {
   target_group_arns = [aws_lb_target_group.ai.arn]
 
   # 대상 그룹 상태 검사(/internal/v0/health 200)를 본다 (KAN-201). EC2 상태 검사만 보던 KAN-36과 달리 컨테이너가
-  # 준비 상태를 잃은 인스턴스도 교체된다. 유예는 첫 부팅(docker 설치 + 이미지 7GB pull + 모델 적재)을 덮는
+  # 준비 상태를 잃은 인스턴스도 교체된다. 유예는 첫 부팅(docker 설치 + 이미지 약 6GB pull + 모델 적재)을 덮는
   # 값이다 - 짧으면 아직 워밍업 중인 새 인스턴스를 unhealthy로 보고 종료해 교체가 무한히 돈다 (variables.tf).
   health_check_type         = "ELB"
   health_check_grace_period = var.health_check_grace_period
@@ -486,8 +512,8 @@ resource "aws_autoscaling_group" "ai" {
 # ---- 오토스케일링 정책 (KAN-201) ----
 
 # 기준은 backend가 CloudWatch에 올리는 전 인스턴스의 PROCESSING 작업 수(accentury.analysis.processing, KAN-167)다.
-# 큐가 없는 구조라 그 값이 곧 AI에 걸린 압력이고, 폴링 혼잡 판정(congestion-threshold 6, KAN-172)과 같은 지표다.
-# CPU는 쓰지 않는다 - 추론 1건이 10초라 CPU가 오르는 시점에는 이미 대기열이 있다. 새 인스턴스는 부팅에 수 분이
+# 큐가 없는 구조라 그 값이 곧 AI에 걸린 압력이고, 폴링 혼잡 판정(congestion-threshold, KAN-172)과 같은 지표다.
+# CPU는 쓰지 않는다 - 추론 1건이 약 6초라 CPU가 오르는 시점에는 이미 대기열이 있다. 새 인스턴스는 부팅에 수 분이
 # 걸리므로(docker 설치 + 이미지 pull + 모델 적재) 확대는 그 시간을 워밍업으로 잡아 그동안 또 늘리지 않는다.
 # backend 태스크가 여럿이면 지표는 태스크마다 같은 값이라 Maximum으로 읽는다 (monitoring 모듈 analysis-backlog-high와
 # 같다). 지표 이름의 .value 접미사는 Micrometer CloudWatch 레지스트리가 게이지에 붙이는 것이다.
@@ -519,9 +545,9 @@ resource "aws_autoscaling_policy" "scale_in" {
 }
 
 # 혼잡 임계치 이상이 1분이면 +1 (KAN-272, 2026-10-06 - 그 전에는 2분 연속). 2분을 요구한 것은 한 사람이 문항을
-# 연달아 제출한 순간에 늘리지 않기 위해서였는데, 그 경우는 진행 중이 5건을 넘지 않아 임계치 6에 닿지 않는다.
-# 6건이면 이미 두 사람 이상이 겹친 것이고 대기열이 1분이다. 2026-10-06 prod에서는 부하 시작(14:52)부터 2번째
-# 인스턴스 기동(14:56)까지 4분이 걸렸고 그 사이 진행 중이 19건까지 쌓였다 - 판정에서 1분을 줄인다.
+# 연달아 제출한 순간에 늘리지 않기 위해서였는데, 한 사람의 음성은 3건이라 임계치 10에 닿지 않는다.
+# 10건이면 3~4명이 겹친 것이고 AI 1대 기준 대기열이 1분 안쪽이다 (KAN-326). 2026-10-06 prod에서는 부하 시작(14:52)부터
+# 2번째 인스턴스 기동(14:56)까지 4분이 걸렸고 그 사이 진행 중이 19건까지 쌓였다 - 판정에서 1분을 줄인다.
 # treat_missing_data = notBreaching: backend가 죽어 지표가 끊긴 것은 no-healthy-target(monitoring)이 잡는다.
 resource "aws_cloudwatch_metric_alarm" "scale_out" {
   alarm_name        = "${local.name}-scale-out"

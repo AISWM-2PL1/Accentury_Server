@@ -9,7 +9,9 @@ import java.sql.Date;
 import java.time.Clock;
 import java.time.Instant;
 import java.time.LocalDate;
+import java.time.YearMonth;
 import java.time.ZoneId;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.UUID;
 
@@ -68,42 +70,77 @@ public class LearningAttendance {
 
     /** 홈 (H-1) - 오늘(KST) 기준 연속 출석. */
     Streak streak(UUID userId) {
-        LocalDate today = attendanceDate(Instant.now(clock));
-        // 최근 날짜부터 읽는다. 연속이 끊기는 날 너머는 쓰지 않지만 계정당 하루 1행이라 양이 작다.
-        List<LocalDate> newestFirst = jdbc.sql("""
-                        select attended_on from learning_attendance
-                         where user_id = :userId and attended_on <= :today
-                         order by attended_on desc
-                        """)
-                .param("userId", userId)
-                .param("today", Date.valueOf(today))
-                .query((rs, rowNum) -> rs.getDate("attended_on").toLocalDate())
-                .list();
-        return streak(newestFirst, today);
+        return streak(userId, attendanceDate(Instant.now(clock)));
     }
 
     /**
-     * 연속 출석 계산 (§3.20). 오늘 출석했으면 오늘부터, 아직이면 어제부터 거슬러 끊김 없이 이어진 날을 센다 - 오늘이 끝나기
-     * 전에는 끊긴 것으로 보지 않는다. 어제와 오늘 모두 없으면 0이다.
-     *
-     * @param newestFirst 오늘 이전(오늘 포함)의 출석 날짜, 최근이 앞, 중복 없음
+     * 연속 출석 (§3.20) - 홈과 달력이 같은 문장을 쓴다 (PR #61 리뷰). 오늘 출석했으면 오늘부터, 아직이면 어제부터 거슬러
+     * 끊김 없이 이어진 날을 센다 - 오늘이 끝나기 전에는 끊긴 것으로 보지 않는다. 어제와 오늘 모두 없으면 0이다.
+     * <p>
+     * 날짜에서 내림차순 행 번호를 더하면 이어진 날들은 같은 값(섬)이 되므로, 가장 최근 날짜가 속한 섬의 크기가 이어진
+     * 일수다. SQL이 한 행만 돌려주어 달을 넘길 때마다 이력을 다시 받아오지 않는다.
      */
-    static Streak streak(List<LocalDate> newestFirst, LocalDate today) {
-        if (newestFirst.isEmpty()) {
-            return Streak.NONE;
-        }
-        LocalDate last = newestFirst.getFirst();
-        boolean attendedToday = last.equals(today);
-        LocalDate expected = attendedToday ? today : today.minusDays(1);
-        int days = 0;
-        for (LocalDate date : newestFirst) {
-            if (!date.equals(expected)) {
-                break;
+    Streak streak(UUID userId, LocalDate today) {
+        return jdbc.sql("""
+                        with ranked as (
+                            select attended_on,
+                                   attended_on + (row_number() over (order by attended_on desc))::int as island
+                              from learning_attendance
+                             where user_id = :userId and attended_on <= :today
+                        ),
+                        latest as (select attended_on, island from ranked order by attended_on desc limit 1)
+                        select latest.attended_on as last_date,
+                               (select count(*) from ranked where ranked.island = latest.island) as island_days
+                          from latest
+                        """)
+                .param("userId", userId)
+                .param("today", Date.valueOf(today))
+                .query((rs, rowNum) -> {
+                    LocalDate last = rs.getDate("last_date").toLocalDate();
+                    boolean attendedToday = last.equals(today);
+                    boolean unbroken = attendedToday || last.equals(today.minusDays(1));
+                    return new Streak(unbroken ? rs.getInt("island_days") : 0, attendedToday, last);
+                })
+                .optional()
+                .orElse(Streak.NONE);
+    }
+
+    /** 달력 시트의 출석 부분 (KAN-314) - 그 달의 출석 날짜(오름차순), 지난달 출석 수, 홈과 같은 연속 출석, 오늘. */
+    record Calendar(List<LocalDate> days, int lastMonthCount, Streak streak, LocalDate today) {
+    }
+
+    /**
+     * 홈 앱바 달력 시트 (KAN-314, §3.20) - 한 달(KST)의 출석 날짜와 지난달 출석 수, 홈과 같은 연속 출석, 서버의 오늘.
+     * <p>
+     * 달은 KST 날짜의 달이다 - 출석일 자체가 KST 날짜로 저장돼 있어 경계 변환이 없다. 미래 달이나 기록이 없는 계정은
+     * 빈 목록이다. 오늘은 한 번만 정해 {@code today}와 {@code streak}가 같은 기준일을 본다 (PR #61 리뷰). 날짜 목록은
+     * 지난달부터 그 달까지만 읽고(기본 키 범위), 연속 출석은 홈과 같은 {@link #streak(UUID, LocalDate)}로 한 행만
+     * 받는다. 두 문장이 같은 스냅샷을 보는 것은 호출부({@link LearningProgress})의 REPEATABLE READ 트랜잭션이 맡는다.
+     * 그날 무엇을 했는지는 이 표에 없다 - {@link LearningProgress}가 시도 기록에서 붙인다.
+     */
+    Calendar calendar(UUID userId, YearMonth month) {
+        LocalDate today = attendanceDate(Instant.now(clock));
+        LocalDate first = month.atDay(1);
+        List<LocalDate> dates = jdbc.sql("""
+                        select attended_on from learning_attendance
+                         where user_id = :userId and attended_on between :previousFirst and :last
+                         order by attended_on
+                        """)
+                .param("userId", userId)
+                .param("previousFirst", Date.valueOf(month.minusMonths(1).atDay(1)))
+                .param("last", Date.valueOf(month.atEndOfMonth()))
+                .query((rs, rowNum) -> rs.getDate("attended_on").toLocalDate())
+                .list();
+        List<LocalDate> days = new ArrayList<>();
+        int lastMonthCount = 0;
+        for (LocalDate date : dates) {
+            if (date.isBefore(first)) {
+                lastMonthCount++;
+            } else {
+                days.add(date);
             }
-            days++;
-            expected = expected.minusDays(1);
         }
-        return new Streak(days, attendedToday, last);
+        return new Calendar(days, lastMonthCount, streak(userId, today), today);
     }
 
     /** 한 시각이 속한 출석 날짜 - Asia/Seoul 자정이 경계다. */

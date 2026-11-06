@@ -1,5 +1,6 @@
 /**
- * 사투리 텍스트 번역 (KAN-266, API 명세서 §3.18) - 표준어 문장 하나를 경남 사투리 문장 하나로 옮긴다.
+ * 사투리 텍스트 번역 (KAN-266, API 명세서 §3.18) - 문장 하나를 표준어와 경남 사투리 사이에서 옮긴다. 방향은 요청의
+ * {@code direction}이고 기본은 표준어 → 사투리다 (KAN-316, {@link app.accentury.backend.translation.TranslationDirection}).
  * <p>
  * 앱 전용이고 로그인 필수다 (2026-10-08 결정). 번역은 외부 LLM(Google Gemini API 무료 등급)이 하고
  * ({@link app.accentury.backend.translation.GeminiDialectTranslator}), 이 패키지는 그 앞뒤의 하네스를 맡는다

@@ -265,7 +265,7 @@ class Track1Engine:
         """워커를 정리한다 - 앱 종료 시 lifespan이 부른다.
 
         부르지 않으면 워커가 살아남는다. 별도 세션으로 띄우기 때문에(``start_new_session``)
-        부모가 죽어도 따라 죽지 않고, RSS 7GB대짜리 고아 프로세스가 호스트에 남는다.
+        부모가 죽어도 따라 죽지 않고, RSS 5GB대짜리 고아 프로세스가 호스트에 남는다.
         """
         # 적재 중이면 그것부터 접는다 - 남겨 두면 "종료 중에 올라온 워커"가 아무도 죽이지
         # 않는 채로 남고, 파이썬은 종료 시점에 미완 태스크를 경고로만 남긴다
@@ -638,6 +638,18 @@ class Track1Engine:
 # ── 워커 프로세스 ────────────────────────────────────────────────────────────
 
 
+#: 전달본이 OpenVINO 상주 프로세스를 잃었을 때 내는 예외 메시지다 (model-patch/track2_asr.py).
+_STT_PROCESS_GONE = "OpenVINO 프로세스가 끝났다"
+
+
+def _stt_process_gone(error: Exception) -> bool:
+    """전사 상주 프로세스가 죽어 이 워커로는 더 채점할 수 없는 예외인가.
+
+    요청을 쓰다가 죽었으면 BrokenPipeError, 응답을 기다리다 죽었으면 전달본의 RuntimeError가 온다.
+    """
+    return isinstance(error, BrokenPipeError) or _STT_PROCESS_GONE in str(error)
+
+
 def _worker_main(argv: list[str]) -> int:
     """자식 프로세스의 진입점 (``python -m app.track1 '<spec>'``).
 
@@ -693,6 +705,12 @@ def _worker_main(argv: list[str]) -> int:
             # 예외 문자열에 실릴 수 있고, 부모는 이 값을 예외로 다시 던져 스택트레이스와
             # 함께 컨테이너 로그에 남긴다 - 그 경로로 발화 내용이 로그에 고이는 자리다
             # (Codex sol 리뷰 P1). 종류만으로도 어느 단계에서 깨졌는지는 좁혀진다
+            if _stt_process_gone(error):
+                # 전사 상주 프로세스는 워커가 띄운다. 그것이 죽었는데 워커가 남으면 health는 UP인 채
+                # 모든 요청이 실패한다. 응답 없이 끝내야 부모가 워커 사망으로 보고 새로 적재해 이 요청을
+                # 한 번 다시 시도한다
+                print("전사 프로세스가 끝나 워커를 내린다", file=sys.stderr, flush=True)
+                return 1
             _send(
                 channel,
                 {

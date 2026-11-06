@@ -10,12 +10,14 @@
 # 건드리면 매 배포가 지문을 다시 밀어 올리게 되고, 지문의 정본이 레포인지 버킷인지가 흐려진다.
 #
 # 웹 배포와 서로를 지우지 않는다: web-deploy.yml은 `aws s3 sync`를 `--delete` 없이 쓰고,
-# 배포 역할에는 `s3:DeleteObject` 자체가 없다 (infra/modules/deploy/main.tf). 그래서 여기서
+# 웹 배포 역할(github-web-deploy)에는 `s3:DeleteObject` 자체가 없다 (infra/modules/deploy/main.tf). 그래서 여기서
 # 올린 `.well-known/*` 객체는 이후의 웹 배포에 살아남는다. 반대로 이 스크립트는 그 두 키만
 # `cp`하므로 웹 번들을 건드리지 않는다. 몇 번을 돌려도 같은 결과다 (멱등).
 #
-# 필요한 권한은 대상 버킷의 `s3:PutObject`와 배포의 `cloudfront:CreateInvalidation` 둘뿐이다
-# (배포 역할이 둘 다 갖고 있다. DeleteObject는 필요 없다).
+# 필요한 권한은 대상 버킷의 `s3:PutObject`와 배포의 `cloudfront:CreateInvalidation`, 아래 `wait
+# invalidation-completed`가 폴링에 쓰는 `cloudfront:GetInvalidation` 셋이다. 이 셋을 가진 역할은 웹 배포 역할
+# (github-web-deploy, App 레포 토큰 전용)뿐이라 Server CI의 이미지 배포 역할(github-deploy)로는 PutObject가
+# implicitDeny다 (KAN-306). 운영자 PC의 사람 자격 증명으로 돌린다. DeleteObject는 필요 없다.
 #
 # ── content-type을 반드시 박는 이유 ──────────────────────────────────────────
 # `apple-app-site-association`은 확장자가 없어서 S3가 타입을 못 알아보고

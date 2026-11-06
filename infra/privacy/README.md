@@ -1,8 +1,7 @@
-# 개인정보처리방침 정적 호스팅 (KAN-133)
+# 개인정보처리방침 정적 호스팅
 
 마이크를 쓰는 앱은 Play와 App Store 심사 모두 개인정보처리방침 URL을 요구하고, 그 URL 뒤에는
-실제 문서가 있어야 한다 (FR-DP-06, KAN-2에서 "동의 화면은 범위 제외하되 이 고지는 별도 유지"로
-남겨 둔 항목). 이 디렉터리는 그 문서가 사는 자리다.
+실제 문서가 있어야 한다 (FR-DP-06). 이 디렉터리는 그 문서가 사는 자리다.
 
 ```
 infra/privacy/privacy.html    각 환경의 웹 S3 버킷 루트에 privacy.html로 올라간다
@@ -13,10 +12,9 @@ infra/privacy/privacy.html    각 환경의 웹 S3 버킷 루트에 privacy.html
 | 환경 | URL |
 | --- | --- |
 | prod | `https://accentury.app/privacy.html` |
-| staging | `https://<staging 도메인>/privacy.html` (도메인은 `infra/envs/staging/terraform.tfvars`, KAN-206) |
+| staging | `https://<staging 도메인>/privacy.html` (도메인은 `infra/envs/staging/terraform.tfvars`) |
 
-스토어 등록 정보(KAN-174 Play, KAN-175 App Store)와 앱 내 링크(KAN-177), 출시 검증(KAN-39)이
-참조하는 주소는 prod 쪽이다. **이 주소는 바뀌지 않는다.** 본문이 바뀌어도 URL은 그대로다.
+스토어 등록 정보(Play, App Store)와 앱 내 링크, 출시 검증이 참조하는 주소는 prod 쪽이다. **이 주소는 바뀌지 않는다.** 본문이 바뀌어도 URL은 그대로다.
 
 ## 왜 `/privacy`가 아니라 `/privacy.html`인가
 
@@ -26,7 +24,7 @@ CloudFront의 SPA 재작성 함수(`infra/modules/edge/spa-rewrite.js`)가 마�
 
 확장자를 붙이면 그 규칙을 그냥 지나가므로 함수를 고칠 필요가 없고, "본문 교체는 S3 업로드만"이라는
 AC도 그대로다. 확장자 없는 URL이 꼭 필요해지면 `/.well-known/`처럼 함수에 예외 한 줄을 넣는
-대안이 있다 (KAN-133 코멘트, 2026-09-01).
+대안이 있다.
 
 이 전제는 `infra/modules/edge/spa-rewrite.test.mjs`가 붙들고 있다. 재작성 규칙을 고치다가
 `/privacy.html`이 index.html로 넘어가면 그 테스트가 먼저 깨진다.
@@ -41,41 +39,42 @@ scripts/publish-privacy.sh prod
 S3에 올리고 CloudFront를 무효화한 뒤 도메인으로 실제 응답을 받아 상태, content-type, 내용까지
 대조한다. 멱등이라 몇 번 돌려도 된다.
 
-**환경별 본문 (KAN-239).** 파일은 하나이고, `<!-- staging-only:begin -->`와 `<!-- staging-only:end -->`
+**환경별 본문.** 파일은 하나이고, `<!-- staging-only:begin -->`와 `<!-- staging-only:end -->`
 두 줄 사이는 staging에만 올라간다. prod에는 스크립트가 두 줄과 그 사이를 잘라낸 본문을 올린다. **지금 이 블록은
-비어 있다 (KAN-269).** 음성 저장이 두 환경 공통의 선택 동의가 되면서 staging에만 붙던 학습 수집 고지를 지웠고,
-두 환경의 게시 본문은 같다(계약 테스트가 대조한다). 자르는 경로는 다음에 환경별 문구가 생길 때를 위해 남겼다.
+비어 있다.** 음성 저장은 두 환경 공통의 선택 동의라 두 환경의 게시 본문은 같다(계약 테스트가 대조한다).
+자르는 경로는 다음에 환경별 문구가 생길 때를 위해 남겨 둔다.
 블록을 다시 채우면 그 테스트를 함께 고친다. 표식은 각자 한 줄을 통째로
 차지해야 한다. 올라갈 본문은 AWS 없이 `scripts/publish-privacy.sh --render <env>`로 볼 수 있고, 계약 테스트가
 같은 경로로 prod 본문을 검사한다.
 
-**웹 배포와 무관하게 이 파일만 갈아 끼울 수 있다.** `web-deploy.yml`은 `aws s3 sync`를
-`--delete` 없이 쓰고 배포 역할에는 `s3:DeleteObject` 자체가 없어서
+**웹 배포와 무관하게 이 파일만 갈아 끼울 수 있다.** 웹 배포 워크플로(Accentury_App `.github/workflows/web-deploy.yml`)는 `aws s3 sync`를
+`--delete` 없이 쓰고 웹 배포 역할(`accentury-{env}-github-web-deploy`)에는 `s3:DeleteObject` 자체가 없어서
 (`infra/modules/deploy/main.tf`), 여기서 올린 `privacy.html`은 이후의 웹 배포에 지워지지 않는다.
 반대로 이 스크립트는 그 키 하나만 올리므로 웹 번들을 건드리지 않는다.
 
 필요한 권한은 해당 버킷의 `s3:PutObject`, 배포의 `cloudfront:CreateInvalidation`과
 `cloudfront:GetInvalidation` 셋이다. `GetInvalidation`은 스크립트가 무효화 완료를 기다릴 때
 (`aws cloudfront wait invalidation-completed`) 폴링에 쓴다. 빼면 업로드와 무효화가 이미
-일어난 뒤에 AccessDenied로 죽어서, 게시는 됐는데 명령은 실패한 애매한 상태로 남는다.
+일어난 뒤에 AccessDenied로 죽어서, 게시는 됐는데 명령은 실패한 애매한 상태로 남는다. 셋을 가진 역할은
+웹 배포 역할(`github-web-deploy`, Accentury_App 레포 토큰 전용)뿐이라 Server CI의 이미지 배포 역할로는 돌릴 수
+없고, 운영자 PC의 사람 자격 증명으로 돌린다 (KAN-306).
 `s3:DeleteObject`는 필요 없다.
 
-## 본문은 확정됐다 (KAN-176)
+## 본문은 확정됐다
 
-`privacy.html`은 더 이상 자리표시자가 아니다. KAN-176이 14개 절의 확정 본문을 넣고 검색 노출을
-막던 `<meta name="robots" content="noindex">`를 지웠다. 이 티켓(KAN-133)이 마련한 게시 경로는
-그대로고, 바뀐 것은 그 경로로 올라가는 내용뿐이다.
+`privacy.html`은 자리표시자가 아니라 14개 절의 확정 본문이고, 검색 노출을 막는
+`<meta name="robots" content="noindex">`를 두지 않는다. 본문을 바꿔도 위 게시 경로는 그대로다.
 
 본문을 고칠 때 순서는 셋이다.
 
 1. `infra/privacy/privacy.html`의 `<body>` 안을 고친다.
-2. `node --test 'infra/privacy/*.test.mjs'` 를 돌린다. 디렉터리 경로를 그냥 넘기면 안 된다 —
+2. `node --test 'infra/privacy/*.test.mjs'` 를 돌린다. 디렉터리 경로를 그냥 넘기면 안 된다 -
    node 22.6부터 `--test`의 위치 인자가 glob으로 해석돼 `MODULE_NOT_FOUND`로 죽는다.
 3. `scripts/publish-privacy.sh <env>` 로 게시한다.
 
-`privacy.test.mjs`는 페이지가 홀로 서는 조건(외부 CSS·글꼴·스크립트 0)과 법정 필수 절, 그리고
-본문이 약속한 핵심 수치(음성 즉시 삭제, 임시 파일 30분, 세션·결과 24시간, 서울 리전, 광고 절과
-동의·거부 경로)를 붙든다. KAN-269부터는 음성 저장과 AI 모델 학습 활용의 선택 동의 절(대상, 저장 항목, 장소,
+`privacy.test.mjs`는 페이지가 홀로 서는 조건(외부 CSS, 글꼴, 스크립트 0)과 법정 필수 절, 그리고
+본문이 약속한 핵심 수치(음성 즉시 삭제, 임시 파일 30분, 세션과 결과 24시간, 서울 리전, 광고 절과
+동의와 거부 경로)를 붙든다. 음성 저장과 AI 모델 학습 활용의 선택 동의 절(대상, 저장 항목, 장소,
 보유 기간, 철회)이 있는지와, 「음성을 저장하지 않는다」가 선택 동의를 하지 않은 경우로 한정돼 있는지도 붙든다. 코드가 바뀌어 문서가 거짓이 되기 전에 이 테스트가 먼저 깨지라는 것이
 목적이다. CI에서는 `.github/workflows/test.yml`의 `edge-test` 잡이 돌리고, 그 잡의 paths 필터에
 `infra/privacy/**`가 들어 있다.
@@ -83,35 +82,30 @@ S3에 올리고 CloudFront를 무효화한 뒤 도메인으로 실제 응답을 
 페이지는 외부 CSS, 외부 글꼴, 스크립트를 하나도 쓰지 않는다. `web/` 번들이 어떻게 바뀌든
 이 파일 하나로 렌더링이 끝나야 "S3 업로드만으로 교체"가 성립하기 때문이다.
 
-### prod 게시 게이트
+### prod 게시
 
-**staging은 지금 그대로 게시해도 된다.** prod는 아래가 닫히기 전까지 게시하지 않는다.
+prod에 게시된 방침 버전은 `2026-10-20`이다. staging은 언제든 그대로 게시해도 된다.
+본문을 고쳐 prod에 다시 올릴 때는 아래를 맞춘다. 게이트를 하나씩 닫아 온 기록은
+[`docs/wiki/infra-history.md`](../../docs/wiki/infra-history.md)에 있다.
 
-- ~~**광고 사업자 확정**~~ — 닫혔다 (2026-09-11, KAN-196 1단계). 1차 배포에 맞춤형 광고를
-  넣기로 한 2026-09-07 팀 결정(KAN-196 앱, KAN-197 웹) 뒤 사업자가 Google LLC의 Google AdMob으로
-  정해져, 2항 제3자 제공 표, 4항 국외 이전, 10항 광고의 「확정 후 기재」 자리표시자를 전부
-  채웠다.
-- **시행일과 방침 버전** - 2026-09-29(KAN-240)부터 시행일은 방침 버전과 같은 날짜다. 지금 값은
-  `2026-10-20`이다 (KAN-286, 출석 기록 개정본. 처음 `2026-10-15`로 적었다가 prod 게시일에 맞춰 올렸다. 그 앞은 KAN-269의 `2026-10-04`). 본문 머리와 14항의
-  `시행일: <날짜> (방침 버전 <날짜>)` 두 자리, `<meta name="accentury-policy-version">`, backend
+- **시행일과 방침 버전** - 시행일은 방침 버전과 같은 날짜다. 지금 값은 `2026-10-20`이다. 본문
+  머리와 14항의 `시행일: <날짜> (방침 버전 <날짜>)` 두 자리, `<meta name="accentury-policy-version">`, backend
   `AccenturyProperties.Auth.PRIVACY_POLICY_VERSION`이 한 값이어야 하고 `privacy.test.mjs`가 대조한다. prod 게시일이
-  이 날짜와 다르면 네 자리를 게시일로 함께 올리고, 앱 두 곳의 상수(Android `LoginScreenState.kt`,
+  이 날짜와 다르면 네 자리를 게시일로 함께 올리고, 앱 두 곳의 상수(Accentury_App Android `LoginScreenState.kt`,
   iOS `LoginScreenState.swift`)도 같은 값으로 올린다. 서버는 게시 중인 버전과 다른 동의를 400으로 거절하므로
   **서버 배포와 앱 상수가 어긋나면 그동안 앱 가입이 막힌다.**
-- **계정 PII 반영 (KAN-240)** - 앱 소셜 로그인(KAN-223)이 받는 계정 정보가 1항 「계정」, 3항 「소셜 로그인
+- **계정 PII 반영** - 앱 소셜 로그인이 받는 계정 정보가 1항 「계정」, 3항 「소셜 로그인
   제공자로부터 받는 정보」, 5항 파기, 6항 탈퇴 절차, 7항 생년월일 확인, 12항 가입 동의에 반영돼 있어야 한다.
-  반영 여부는 `privacy.test.mjs`의 KAN-240 테스트 넷이 붙든다. 앱 로그인(KAN-224)을 prod에 내기 전에
-  이 본문이 prod에 게시돼 있어야 한다. 6항의 임시 탈퇴 절차(보호책임자 이메일)는 탈퇴 API(KAN-241)가 나오면
-  앱 안 탈퇴로 바꾼다.
-- **스토어 답안 일치** — KAN-174(Play 데이터 안전)와 KAN-175(App Store 라벨)의 답이 광고
-  도입 후 기준으로 갱신돼 있어야 한다.
-
-사업자 확정 전에는 자리표시자를 테스트로 막지 않았다 — 막으면 확정 전 단계의 본문을 커밋할 수
-없어 오히려 문서가 코드보다 뒤처진다. 확정 뒤로는 반대로 「확정 후 기재」가 되살아나는 쪽을
-`privacy.test.mjs`가 막는다.
+  반영 여부는 `privacy.test.mjs`의 `계정 PII` 구획 테스트 넷이 붙든다.
+- **6항 탈퇴 절차** - 본문 6항은 아직 이메일 요청으로 탈퇴하는 임시 절차(보호책임자 이메일)를 적고 있다. 탈퇴
+  API(`POST /v0/users/me/withdrawal`)는 이미 있으므로, 앱 안 탈퇴 화면이 스토어 빌드로 나가면 6항을 앱
+  안 탈퇴로 바꾼다.
+- **광고** - 사업자는 Google LLC의 Google AdMob이다. 2항 제3자 제공 표, 4항 국외 이전, 10항 광고가
+  이 값으로 채워져 있고, 「확정 후 기재」 자리표시자가 되살아나면 `privacy.test.mjs`가 막는다.
+- **스토어 답안 일치** - KAN-174(Play 데이터 안전)와 KAN-175(App Store 라벨)의 답이 게시하는 본문과 맞아야 한다.
 
 ### 근거 장부
 
-본문의 문장 하나하나가 어떤 코드·티켓·결정을 근거로 삼았는지, 코드가 바뀌면 본문의 어디를
+본문의 문장 하나하나가 어떤 코드, 티켓, 결정을 근거로 삼았는지, 코드가 바뀌면 본문의 어디를
 고쳐야 하는지는 [`docs/wiki/privacy-policy.md`](../../docs/wiki/privacy-policy.md)에 있다.
 자리표시자 목록의 행 번호와 스토어 신고 대조표도 그쪽이다.

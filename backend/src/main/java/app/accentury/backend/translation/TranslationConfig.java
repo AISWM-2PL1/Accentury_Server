@@ -12,10 +12,12 @@ import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import tools.jackson.databind.ObjectMapper;
 
-import java.util.LinkedHashMap;
+import java.util.EnumMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Set;
 
 /**
  * 번역 LLM 호출의 배선 (KAN-266).
@@ -35,7 +37,7 @@ class TranslationConfig {
     static DialectTranslator unconfigured(String model) {
         return new DialectTranslator() {
             @Override
-            public Reply translate(String text) {
+            public Reply translate(String text, TranslationDirection direction) {
                 throw new Unavailable("API 키 없음");
             }
 
@@ -55,26 +57,38 @@ class TranslationConfig {
             log.warn("번역 API 키가 없다 - 번역은 전부 503 TRANSLATION_UNAVAILABLE (SSM ACCENTURY_TRANSLATION_APIKEY, KAN-266)");
             return unconfigured(translation.model());
         }
-        String systemInstruction = TranslationHarness.systemInstruction(vocabulary(words), sentences(intonation));
-        log.info("번역 LLM model={} timeout={} 참고 어휘와 대사로 지시문 {}자", translation.model(), translation.timeout(),
-                systemInstruction.length());
+        Map<TranslationDirection, String> systemInstructions = systemInstructions(vocabulary(words), sentences(intonation));
+        log.info("번역 LLM model={} timeout={} 참고 어휘와 대사로 지시문 toDialect {}자, toStandard {}자", translation.model(),
+                translation.timeout(), systemInstructions.get(TranslationDirection.TO_DIALECT).length(),
+                systemInstructions.get(TranslationDirection.TO_STANDARD).length());
         return new GeminiDialectTranslator(translation.baseUrl(), Objects.requireNonNull(translation.apiKey()),
-                translation.model(), translation.timeout(), systemInstruction, objectMapper, meterRegistry);
+                translation.model(), translation.timeout(), systemInstructions, objectMapper, meterRegistry);
+    }
+
+    /** 방향별 시스템 프롬프트 - 같은 참고 어휘와 대사를 두 벌에 싣는다 (KAN-316). */
+    static Map<TranslationDirection, String> systemInstructions(List<TranslationHarness.VocabularyPair> vocabulary,
+                                                                List<String> sentences) {
+        Map<TranslationDirection, String> instructions = new EnumMap<>(TranslationDirection.class);
+        for (TranslationDirection direction : TranslationDirection.values()) {
+            instructions.put(direction, TranslationHarness.systemInstruction(direction, vocabulary, sentences));
+        }
+        return instructions;
     }
 
     /**
-     * 참고 어휘 - 단어 학습 발행본의 카드(표준어 뜻과 사투리 낱말)다. 같은 낱말이 여러 세트에 있으면 한 번만 싣는다.
+     * 참고 어휘 - 단어 학습 발행본의 카드(표준어 뜻과 사투리 낱말)다. 같은 쌍이 여러 세트에 있으면 한 번만 싣는다.
+     * 중복 판정은 (표준어, 사투리) 쌍이다 - 사투리 낱말만으로 거르면 뜻이 여럿인 낱말의 다른 뜻이 사라지고, 그 목록을
+     * 뒤집어 쓰는 {@code toStandard} 프롬프트가 한 뜻만 받는다 (PR #62 리뷰. wd-gn-2026.10.1에는 그런 낱말이 없다).
      * 발행본은 검수된 레벨테스트 어휘 풀이다 (KAN-276).
      */
     static List<TranslationHarness.VocabularyPair> vocabulary(WordLearningRegistry words) {
-        Map<String, TranslationHarness.VocabularyPair> pairs = new LinkedHashMap<>();
+        Set<TranslationHarness.VocabularyPair> pairs = new LinkedHashSet<>();
         for (WordLearningDefinition.Set set : words.current().definition().sets()) {
             for (WordLearningDefinition.Card card : set.cards()) {
-                pairs.putIfAbsent(card.dialect(),
-                        new TranslationHarness.VocabularyPair(card.standard(), card.dialect()));
+                pairs.add(new TranslationHarness.VocabularyPair(card.standard(), card.dialect()));
             }
         }
-        return List.copyOf(pairs.values());
+        return List.copyOf(pairs);
     }
 
     /** 참고 대사 - 억양 학습 발행본(검수된 레벨테스트 음성 풀)의 대사를 발행본 순서대로 {@value #REFERENCE_SENTENCES}개. */

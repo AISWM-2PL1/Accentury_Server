@@ -35,7 +35,7 @@ class TranslationServiceQuotaTest {
 
     private final TranslationService service = new TranslationService(new DialectTranslator() {
         @Override
-        public Reply translate(String text) {
+        public Reply translate(String text, TranslationDirection direction) {
             llmInputs.add(text);
             return llm.apply(text);
         }
@@ -107,7 +107,7 @@ class TranslationServiceQuotaTest {
     private TranslationResponse translate(String text) {
         AppUser user = mock(AppUser.class);
         when(user.id()).thenReturn(userId);
-        return service.translate(user, new TranslationRequest(text));
+        return service.translate(user, new TranslationRequest(text, null));
     }
 
     private static void assertCode(ErrorCode expected, Runnable call) {

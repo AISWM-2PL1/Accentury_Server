@@ -72,9 +72,8 @@ public record AccenturyProperties(Session session,
      *                             증폭하므로(§5.3 - 대기 체류 20배) 서버가 스스로 간격을 올린다 (KAN-24).
      * @param congestionThreshold  혼잡 판정 기준 - 전 인스턴스의 진행 중(PROCESSING) 분석 작업 수가
      *                             이 값 이상이면 {@code congestedPollAfterMs}를 반환한다 (KAN-167).
-     *                             기본 6은 AI의 1분 처리량이다 (실모델 1건 10초, KAN-57 c7i.xlarge) -
-     *                             그만큼 쌓이면 대기열이 1분을 넘기 시작한다 (KAN-172). 이전 30은
-     *                             워커 4개 전제라 대기열 5분이 쌓여야 켜졌다.
+     *                             기본 10은 AI 1대의 1분 처리량(약 11건, KAN-326 c7i.xlarge)보다
+     *                             조금 낮은 값이다 - 그만큼 쌓이면 대기열이 1분에 가까워진다.
      * @param congestionCacheTtl   혼잡 판정이 DB의 PROCESSING 건수를 다시 세지 않고 쓰는 시간
      *                             (KAN-167). 판정은 모든 상태 응답 경로에 놓이므로 폴링마다 세면
      *                             판정 자체가 폴링 증폭에 얹힌다. 기준 폴링 간격(800ms)과 같은
@@ -140,7 +139,7 @@ public record AccenturyProperties(Session session,
      */
     public record Analysis(@DefaultValue("800") long pollAfterMs,
                            @DefaultValue("3000") long congestedPollAfterMs,
-                           @DefaultValue("6") int congestionThreshold,
+                           @DefaultValue("10") int congestionThreshold,
                            @DefaultValue("1s") Duration congestionCacheTtl,
                            @DefaultValue("24h") Duration retention,
                            @DefaultValue("300s") Duration processingTimeout,
@@ -418,6 +417,10 @@ public record AccenturyProperties(Session session,
      *                                     AI 추론을 쓰고 레벨테스트와 같은 큐를 나눠 쓰므로 단어 학습보다 낮다 - 녹음과
      *                                     대기만으로 한 건에 10초 이상 걸려 정상 사용은 분당 수 건이다. 결과 조회는
      *                                     제한하지 않는다.
+     * @param intonationIpRateLimitPerMinute 억양 학습 녹음 업로드의 IP당 분당 허용 횟수 (§2.5, KAN-299). 계정 토큰 검사가
+     *                                       multipart 해석 뒤라 미인증 홍수도 본문을 받아 버리므로, 레벨테스트 업로드처럼
+     *                                       {@code UploadRateLimitFilter}가 해석 전에 IP로 먼저 끊는다. 학습은 계정이 키인
+     *                                       경로라 공유 Wi-Fi의 여러 계정이 한 IP로 뭉친다 - 레벨테스트의 30보다 높다.
      * @param intonationScoreVersion       억양 학습 점수 변환에 쓰는 점수 버전 (§3.19, 2026-10-10 결정) - 레벨테스트와
      *                                     같은 억양 전처리(구간 계수)를 이 버전의 seed에서 읽는다. AI 요청의
      *                                     {@code scoreVersion}과 시도 기록에도 이 값이 실린다. 발행된 버전이 아니면
@@ -428,6 +431,7 @@ public record AccenturyProperties(Session session,
      */
     public record Learning(@DefaultValue("60") int rateLimitPerMinute,
                            @DefaultValue("20") int intonationRateLimitPerMinute,
+                           @DefaultValue("60") int intonationIpRateLimitPerMinute,
                            @DefaultValue("sv-0.5") String intonationScoreVersion,
                            @DefaultValue("90") int perfectScoreThreshold) {
     }

@@ -115,8 +115,9 @@ public final class ServiceMetrics {
     // ---- 사투리 텍스트 번역 (translation 패키지, KAN-266) ----
 
     /**
-     * 번역 요청 수 - 태그 {@code result}는 {@code success} | {@code rejected} | {@code too_long} | {@code llm_failed}다
-     * (명세서 §3.18의 결과 종류와 같다). 400과 401은 세지 않는다.
+     * 번역 요청 수 - 태그 {@code result}는 {@code success} | {@code rejected} | {@code too_long} | {@code limited} |
+     * {@code llm_failed}(명세서 §3.18의 결과 종류와 같다), 태그 {@code direction}은 {@code toDialect} | {@code toStandard}다
+     * (KAN-316). 400과 401은 세지 않는다.
      */
     public static final String TRANSLATION_REQUESTS = "accentury.translation.requests";
 

@@ -12,12 +12,14 @@ import java.util.UUID;
  * <p>
  * {@code userId}는 기록 저장소가 대체 ID를 찾는 데만 쓰고 객체에는 싣지 않는다.
  *
+ * @param direction   번역 방향 (KAN-316). 객체의 {@code direction} 필드다 - 이 필드가 없는 2026-11 이전 레코드는 전부
+ *                    {@code toDialect}다
  * @param input       사용자가 보낸 문장 (원문 그대로, 앞뒤 공백 포함). {@link TranslationResult#TOO_LONG}이면 앞
  *                    {@value app.accentury.backend.common.AccenturyProperties.Translation#MAX_INPUT_LENGTH}자(코드 포인트)만이다 -
  *                    JSON 본문에는 크기 상한이 없어 수 MB 입력이 만료 없는 버킷과 기록 대기열에 그대로 쌓이지 않게 한다
  *                    (PR #34 리뷰 P2)
  * @param inputLength 보낸 문장 전체의 길이 (코드 포인트, 자르기 전 원문 기준)
- * @param output      응답으로 나간 사투리 문장. {@link TranslationResult#SUCCESS}가 아니면 null
+ * @param output      응답으로 나간 문장 (방향에 따라 사투리 또는 표준어). {@link TranslationResult#SUCCESS}가 아니면 null
  * @param llmMs       Gemini 호출에 걸린 시간(재시도 포함). 호출 전에 끝났으면 null
  * @param model       호출한(호출 전에 끝났으면 설정된) 모델 이름
  */
@@ -25,6 +27,7 @@ public record TranslationRecord(
         UUID requestId,
         Instant requestedAt,
         UUID userId,
+        TranslationDirection direction,
         String input,
         int inputLength,
         @Nullable String output,

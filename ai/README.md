@@ -5,10 +5,10 @@ BE(Spring Boot)만 호출하는 **사설망 전용** 분석 서버입니다 (API
 
 ## 지금 들어 있는 것
 
-점수는 실모델이 만들고(KAN-22), 원본 음성의 수명 관리는 라우트가 쥡니다 (KAN-27).
+점수는 실모델이 만들고, 원본 음성의 수명 관리는 라우트가 쥡니다.
 
 - `POST /internal/v0/analyze` (§4.1) - multipart(audio + meta)를 받아 §4.1 봉투로 응답합니다.
-  점수는 전달본 채점 모델이 만듭니다 (KAN-159의 트랙 1, 아래 "실모델 어댑터").
+  점수는 전달본 채점 모델이 만듭니다 (트랙 1, 아래 "실모델 어댑터").
 - 입력 오디오는 전용 임시 디렉터리에만 내려놓고, 응답을 돌려주는 즉시 지웁니다.
   성공, 판정 실패, 예외, 클라이언트 취소 어느 경로로 빠져나가도 같습니다.
 - 임시파일은 예측 불가능한 이름 + 0600, 디렉터리는 0700입니다.
@@ -16,20 +16,31 @@ BE(Spring Boot)만 호출하는 **사설망 전용** 분석 서버입니다 (API
   프레임워크가 큰 업로드를 디스크로 스풀해도 공용 임시 디렉터리로 새지 않습니다.
 - 추론에 상한(기본 75초)을 걸어 멈춘 요청이 임시파일을 무한정 붙들지 못하게 합니다. 초과하면 503입니다.
 - 본문 상한(2MB)을 multipart 파싱 전에 끊고, 오디오 파트 상한(1MB)을 다시 확인합니다. 초과하면 413입니다.
+- 분석 응답 코드는 아래가 전부입니다 (`app/analyze.py`, 401만 `app/auth.py`).
+
+  | 코드 | 언제 |
+  | --- | --- |
+  | 200 | 채점 성공 |
+  | 400 | meta 형식 오류 (BE 버그라 재전송하지 않습니다) |
+  | 401 | 내부 호출 토큰이 없거나 다릅니다 (아래 "내부 호출 인증과 준비 상태"). |
+  | 413 | 본문 또는 오디오 파트 상한 초과 |
+  | 422 | 판정 실패. §2.4 품질 코드와 불리언 `retryable`을 싣습니다. |
+  | 429 | 추론 전 거절. 차례를 기다리다 상한까지 남은 시간이 추론 1건에 모자랐습니다 (아래 `ACCENTURY_AI_INFERENCE_RESERVE_SECONDS`). |
+  | 500 | 엔진 예외. 워커 재적재 뒤에도 시간이 모자란 경우와, 호출자가 `acceptsVerdicts`에 `ANALYSIS_UNSCORABLE`을 싣지 않았는데 채점 불가가 난 경우도 여기입니다. |
+  | 503 | 추론 상한 초과, 또는 health의 워밍업 전 `STARTING` |
 - **디렉터리 하나는 프로세스 하나가 전용으로 씁니다.** 기동 정리가 남아 있던 파일을 전부 지우므로,
   `uvicorn --workers`로 여러 프로세스를 띄우려면 워커마다 다른 `ACCENTURY_AI_TEMP_DIR`를 줘야 합니다.
 - 기동 시 디렉터리에 남아 있던 파일은 나이와 무관하게 전부 지웁니다(앞선 프로세스의 잔여물뿐입니다).
 - 이후 청소 잡이 5분마다 돌면서 30분 이상 잔존한 파일을 지웁니다. 삭제는 멱등합니다.
-- `GET /internal/v0/metrics`가 잔존 파일 수와 최장 잔존 시간을 돌려줍니다 (KAN-38이 소비).
+- `GET /internal/v0/metrics`가 잔존 파일 수와 최장 잔존 시간을 돌려줍니다 (호스트 health 타이머가 소비).
 - `GET /internal/v0/metrics/stages`가 추론 단계별 소요 시간 표본을 돌려줍니다
-  (KAN-204, 아래 "추론 단계별 소요 시간"). **읽으면 비워집니다.**
+  (아래 "추론 단계별 소요 시간"). **읽으면 비워집니다.**
 - `GET /internal/v0/health` (§4.2) - 기동 중(워밍업 전)에는 503 `{"status": "STARTING"}`,
   준비가 끝나면 200 `{"status": "UP"}`입니다. BE는 200 + `UP`만 살아 있는 것으로 읽습니다.
 
-## 내부 호출 인증과 준비 상태 (KAN-36)
+## 내부 호출 인증과 준비 상태
 
-AI 서버는 backend와 다른 EC2에서 돕니다 (KAN-36 A단계). 같은 compose 네트워크라는 전제가
-사라졌으므로 두 가지가 더해졌습니다.
+AI 서버는 backend와 다른 EC2에서 돕니다. 같은 compose 네트워크 안이 아니므로 아래를 둡니다.
 
 - **공유 시크릿 헤더** `X-Accentury-Internal-Token` (`app/auth.py`). `ACCENTURY_AI_INTERNAL_TOKEN`이
   설정된 서버는 `/internal/v0/health`를 뺀 모든 요청에서 이 헤더를 설정값과 대조하고, 없거나
@@ -39,7 +50,7 @@ AI 서버는 backend와 다른 EC2에서 돕니다 (KAN-36 A단계). 같은 comp
   검사를 건너뛰고 기동 로그에 경고를 남깁니다 - 로컬 개발 편의이고 배포에서는 있을 수 없는 상태입니다.
 - **준비 상태 게이트**. 기동 직후 엔진의 `warm_up()`(있으면)을 백그라운드로 돌리고, 끝나야 health가
   UP이 됩니다. uvicorn은 lifespan이 끝나야 포트를 열므로 워밍업을 lifespan 안에서 기다리면 그동안은
-  503이 아니라 연결 거부입니다 - 그래서 뒤에서 돌립니다. 실모델(KAN-22)은 가중치 적재를 정확히 이
+  503이 아니라 연결 거부입니다 - 그래서 뒤에서 돌립니다. 실모델은 가중치 적재를 정확히 이
   이름의 `async def warm_up(self) -> None`(동기 `def`도 됩니다 - 스레드로 넘깁니다)에 두면 그동안
   backend의 회로 복구 프로브와 compose healthcheck가 503 `STARTING`을 보고 요청을 보내지 않습니다.
   이름이 다르면 조용히 건너뛰므로 기동 로그의 `warmUp=있음`으로 확인합니다. 워밍업이 실패하면
@@ -50,7 +61,7 @@ AI 서버는 backend와 다른 EC2에서 돕니다 (KAN-36 A단계). 같은 comp
 - **배포에서는 토큰이 없으면 기동하지 않습니다.** 운영 compose가 `ACCENTURY_AI_INTERNAL_TOKEN_REQUIRED=true`를
   주므로 SSM에서 토큰이 빠진 채 뜨는 fail-open 상태가 없습니다 (backend `DeploymentConfigGuard`와 대칭).
 
-## 분석 엔진 어댑터 (KAN-135)
+## 분석 엔진 어댑터
 
 점수를 만드는 일은 `app/engine.py`의 `AnalysisEngine` 뒤에 있습니다. 라우트는 엔진이
 무엇인지 모르고, 엔진은 오디오 파일 하나를 보고 결과를 말하는 일만 합니다.
@@ -66,8 +77,7 @@ AI 서버는 backend와 다른 EC2에서 돕니다 (KAN-36 A단계). 같은 comp
 - `modelVersion`은 설정이 아니라 엔진이 스스로 보고합니다. 실모델은 적재한 참조 stamp와
   코드 해시, Whisper 저장소가 들어간 `track1-...` 문자열을 냅니다. 비어 있으면 기동이
   실패합니다 - BE가 성공 응답을 계약 위반으로 끊고 회로 차단기를 세우기 때문입니다.
-- 실모델을 붙이면서 **라우트(`app/analyze.py`)는 한 줄도 고치지 않았습니다** (KAN-135의
-  경계가 지켜졌다는 증거입니다). 프로토콜만 맞추면 상속은 필요 없습니다 (`tests/conftest.py`의
+- 엔진을 바꿔도 **라우트(`app/analyze.py`)는 고치지 않습니다.** 프로토콜만 맞추면 상속은 필요 없습니다 (`tests/conftest.py`의
   `FakeEngine`이 그 예입니다).
 - `AnalysisOutcome`은 만들어지는 시점에 스스로를 검사합니다. 아래를 어기면 값 자체가
   존재하지 못합니다 - 그런 응답을 BE가 받으면 계약 위반으로 끊으면서 회로 차단기를
@@ -78,8 +88,8 @@ AI 서버는 backend와 다른 EC2에서 돕니다 (KAN-36 A단계). 같은 comp
     성공 경로의 코드는 BE가 검사 없이 저장하고 사용자에게도 내보냅니다.
   - 실패면 품질 코드가 §2.4 판정 코드여야 합니다. 허용 목록은 `AUDIO_TOO_QUIET`,
     `AUDIO_TOO_LONG`, `AUDIO_FORMAT_UNSUPPORTED`, `ANALYSIS_MISREAD`, `ANALYSIS_UNSCORABLE` 다섯입니다
-    (마지막 것은 KAN-272에서 더했습니다. 실모델 어댑터는 요청 meta의 `acceptsVerdicts`에 이 코드가
-    있을 때만 냅니다 - 배포가 AI 먼저라 이 코드를 모르는 옛 backend가 부르는 구간이 있습니다)
+    (실모델 어댑터는 마지막 것을 요청 meta의 `acceptsVerdicts`에 이 코드가 있을 때만 냅니다 -
+    배포가 AI 먼저라 이 코드를 모르는 옛 backend가 부르는 구간이 있습니다)
     (`engine.py`의 `JUDGED_QUALITY_CODES`). 기본값 `OK`도, 오타도, 지어낸 서술적 코드도
     거절됩니다 - BE의 `ErrorCode`에 없는 이름은 계약 위반이 되고 그 문항은 재시도 없이
     죽습니다. BE가 §2.4에 판정 코드를 더하면 이 집합에도 더합니다.
@@ -89,48 +99,48 @@ AI 서버는 backend와 다른 EC2에서 돕니다 (KAN-36 A단계). 같은 comp
     `numpy.float32`, `numpy.int64`면 거절됩니다 - 파이썬 `float`/`int`의 하위 타입이
     아니라서, 막지 않으면 응답 조립 시점에 500이 되고 BE가 재전송 예산을 태웁니다.
     엔진은 파이썬 기본 타입으로 변환해서 냅니다.
-- 스텁 엔진은 2026-09-05에 제거했습니다 (KAN-22). 실모델은 개발 기계(arm64)와 CI 러너에서
-  돌릴 수 없어 로컬 풀스택과 E2E가 함께 사라졌는데, 그러자 앱과 웹의 완주 확인이 돌릴 스택을
-  통째로 잃었습니다 (PR #87 리뷰). 그래서 `fake` 엔진(`app/fake.py`)을 두었습니다 -
+- 스텁 엔진은 없습니다. 실모델은 개발 기계(arm64)와 CI 러너에서 돌릴 수 없어서, 앱과 웹의
+  완주 확인이 돌릴 스택으로 `fake` 엔진(`app/fake.py`)을 둡니다 (경위는 `docs/wiki/infra-decisions.md`) -
   `ACCENTURY_AI_ANALYSIS_ENGINE=fake`로 명시해야 켜지고, 점수는 `correlationId`의 해시라
   추론이 아니며(`modelVersion`이 `fake-0.1`로 나가 정체가 드러납니다), 배포 compose가 켜는
   `ACCENTURY_AI_INTERNAL_TOKEN_REQUIRED=true`와는 양립하지 않아 운영에서는 기동이 거부됩니다.
   루트 `docker-compose.yml`의 `ai`가 이 엔진으로 뜹니다 (`ai/Dockerfile.fake`, slim 이미지).
 
-### 실모델 어댑터 (KAN-22)
+### 실모델 어댑터
 
 모델은 우리 코드가 아니라 **베이스 이미지 안**에 있습니다 (ECR `accentury/ai-model`,
-모델 해시 태그. KAN-159, KAN-173). `ai/Dockerfile`의 `FROM`이 그 이미지를 가리키고, 우리는
+모델 해시 태그). `ai/Dockerfile`의 `FROM`이 그 이미지를 가리키고, 우리는
 그 위에 FastAPI 앱과 어댑터(`app/track1.py`)만 얹습니다. 참조 분포와 Whisper 가중치, MFA
 음향 모델, 문장 목록이 전부 이미지 안이라 운영 컨테이너가 인터넷과 S3에 닿지 않아도 됩니다.
 
 **어댑터는 워커 프로세스를 하나 띄웁니다.**
 
-- 전달본의 `Track1Scorer.score()`는 동기이고 14~30초입니다 (08-30 실측). 스레드로 넘기면
+- 전달본의 `Track1Scorer.score()`는 동기이고 c7i.xlarge에서 1건 P95 11.1초입니다. 스레드로 넘기면
   엔진 계약 2번("취소가 실제로 닿아야 한다")을 지킬 수 없습니다 - 파이썬에는 스레드를
   밖에서 멈추는 수단이 없어서, 라우트가 503을 내고 임시파일을 지운 뒤에도 그 스레드는
   계속 돕니다. 그래서 워커를 별도 세션으로 띄우고 취소 때 **프로세스 그룹째** 죽입니다
   (MFA가 워커의 자식이라 그룹째가 아니면 정렬만 살아남습니다).
 - 워커는 기동 시 한 번 뜨고 모델을 한 번만 적재합니다. 요청은 stdin/stdout 파이프로 한 줄씩
-  오갑니다. 워커가 밖에서 죽으면(OOM 킬러 등) 다음 요청이 새 워커로 한 번 다시 시도합니다.
+  오갑니다. 워커가 밖에서 죽으면(OOM 킬러 등) 같은 요청 안에서 워커를 다시 적재하고 한 번만 다시
+  시도합니다. 재적재 뒤 남은 시간이 추론에 모자라면 시작하지 않고 500으로 끊고(429가 아닌 것은 추론이
+  이미 돌았을 수 있어서입니다), 두 번째도 워커가 죽으면 그대로 500입니다 (`app/track1.py`).
 - **취소의 대가는 재적재입니다.** 죽인 뒤 다음 분석은 가중치를 다시 올릴 때까지 기다립니다.
   그래서 `ACCENTURY_AI_ANALYSIS_TIMEOUT_SECONDS`는 정상 추론보다 넉넉해야 합니다 - 상한을
-  P95 근처로 조이면 정상 요청이 서로의 재적재를 기다리는 형태로 무너집니다 (KAN-172).
+  P95 근처로 조이면 정상 요청이 서로의 재적재를 기다리는 형태로 무너집니다.
 - 임시파일도 워커 몫이 있습니다. 자식에게 `TMPDIR`로 전용 임시 디렉터리를 넘겨 전달본이
   만드는 정렬 작업 폴더(그 안에 **오디오 사본**이 있습니다)까지 청소 잡과 잔존 지표가 닿게
   하고, 워커를 죽인 뒤에는 그 폴더를 어댑터가 지웁니다. MFA가 `MFA_ROOT_DIR`에 남기는 코퍼스
-  작업 폴더는 워커가 요청마다 지웁니다 (KAN-27 AC).
-- `scriptKey`는 KAN-182가 실어 보내는 문장 참조 키입니다 ("1|5" 형식). 모델은 이 키로만
+  작업 폴더는 워커가 요청마다 지웁니다.
+- `scriptKey`는 BE가 실어 보내는 문장 참조 키입니다 ("1|5" 형식). 모델은 이 키로만
   문장을 찾습니다 - 문항 번호로는 못 찾습니다. 값이 없거나 서비스 문장이 아니면 **비재전송
-  판정 실패(422 `ANALYSIS_MISREAD`, `retryable=false`)**입니다 (2026-09-05 결정). 무시하고
+  판정 실패(422 `ANALYSIS_MISREAD`, `retryable=false`)**입니다. 무시하고
   분석하면 대본 없이 채점한 점수가 정상값처럼 나가고, 재전송 가능으로 내면 정의가 바뀌지
   않는 한 결과가 같은 요청을 BE가 예산이 마를 때까지 반복합니다.
 
-### 추론 단계별 소요 시간 (KAN-204)
+### 추론 단계별 소요 시간
 
-문항 하나가 10초대(TTS 발화 실측 9.9\~11.1초)인데 그 시간이 어느 단계에 쓰였는지가 로그에도
-지표에도 없었습니다. GPU 전환(KAN-57)은 Whisper만 줄이고 MFA는 CPU 작업이라 그대로인데 두
-단계의 비율을 모르면 그 판단이 추정으로 남습니다.
+문항 하나의 추론 시간이 어느 단계에 쓰였는지를 로그와 지표로 남깁니다. GPU 전환(KAN-57)은 Whisper만
+줄이고 MFA는 CPU 작업이라 그대로라서, 두 단계의 비율을 알아야 그 판단이 추정으로 남지 않습니다.
 
 라우트가 수첩(`app/stages.py`의 `StageRecord`)을 하나 만들어 `AnalysisRequest`에 실어 보내고
 어댑터가 채웁니다. 추적 ID와 같은 성격입니다 - **라우트가 쥐고 있어야** 시간 초과처럼 결과가
@@ -144,41 +154,87 @@ AI 서버는 backend와 다른 EC2에서 돕니다 (KAN-36 A단계). 같은 comp
 | `transcribe` `gate` `align` `f0` `scoring` | 전사, 내용 게이트, 정렬, F0 추출, 거리와 채점 | 전달본 |
 | `total` | 엔진 호출 전체 (합계) | 라우트 |
 
-**전달본 몫은 봉투의 `detail.stageMs`에서 받습니다** (KAN-293). `score()` 안쪽은 어댑터에서 잴 수
-없어 워커 결과 JSON의 `stageMs`(단계 이름 -> ms)로 받기로 했는데(KAN-204), 2026-10-24 ECR
-`ai-model:26ac67a`의 `serve.py`를 꺼내 보니 전달본은 이미 `detail.stageMs = {"stt", "mfa", "score"}`를
-싣고 있었고 어댑터는 최상위 `stageMs`만 보고 있어 그 값을 전부 버리고 있었습니다. 그래서 워커
-(`_stage_ms`)가 최상위가 없으면 `detail.stageMs`를 읽고, 옛 이름을 `stt` -> `transcribe`,
+**전달본 몫은 봉투의 `detail.stageMs`에서 받습니다.** `score()` 안쪽은 어댑터에서 잴 수
+없어 워커 결과 JSON의 단계 시간(단계 이름 -> ms)으로 받습니다. 워커(`_stage_ms`)는 최상위 `stageMs`가
+없으면 `detail.stageMs`를 읽고, 옛 이름을 `stt` -> `transcribe`,
 `mfa` -> `align`, `score` -> `scoring`으로 옮겨 부모에게 넘깁니다. 둘 다 있으면 최상위가 우선입니다.
 옛 `score`는 F0 추출(`extract_utterance`)까지 합친 값이라 `scoring`에 F0가 섞여 있고, `gate`와 `f0`는
 비어 있습니다. 목록에 없는 이름은 버립니다 - 이름이 곧 CloudWatch 차원 값이고 조합 하나가 월 0.30달러입니다.
 
-모델 태그 `f77011c`(KAN-293, `ai/Dockerfile`의 `MODEL_TAG`)부터는 전달본이 다섯 이름으로 직접 싣습니다.
+모델 태그 `f77011c`부터는 전달본이 다섯 이름으로 직접 싣습니다.
 이 태그는 `26ac67a` 위에 `src/scoring/serve.py`와 `bench_server.py`만 바꿔 얹은 얇은 층이고(`transcribe`는
 Whisper, `gate`는 `align_transcript`, `align`은 MFA, `f0`는 `extract_utterance`, `scoring`은 `score_extracted`),
 가중치와 참조 분포와 패키지는 `26ac67a`와 같습니다. 모델 레포의 커밋 해시가 아니라
 `sha256("base=26ac67a" + 두 파일)[:7]`이라, 같은 패치가 모델 레포에 들어가 정식 해시로 올라오면 그 태그로
-바꿉니다. `modelVersion`은 `track1-v3.4-2026-08-31b+f77011c+whisper-large-v3+bfloat16`으로 나옵니다.
+바꿉니다. 지금 쓰는 태그는 `e382764`이고 `modelVersion`은 `track1-v3.4-2026-08-31b+e382764+whisper-large-v3+ov-int8`로 나옵니다.
 
-콜드/웜은 **그 워커에서 MFA가 처음 실제로 돈 요청까지인가**입니다 (KAN-293). 가중치는 워밍업에서
-이미 올라와 있어도 전달본 안쪽의 지연 초기화가 첫 채점에서 한 번 일어납니다 - staging 첫 호출 22.9초와
-그 뒤 10초대의 차이가 그것입니다 (KAN-172 실측). 그 실체는 MFA 첫 실행이라(KAN-293 실측 `align` 17.5초,
-그 뒤 4~6초) 게이트 탈락처럼 MFA 전에 끝난 요청은 콜드를 소비하지 않고, 전달본이 돌려준 단계 시간에
+콜드/웜은 **그 워커에서 MFA가 처음 실제로 돈 요청까지인가**입니다. 가중치는 워밍업에서
+이미 올라와 있어도 전달본 안쪽의 지연 초기화가 첫 채점에서 한 번 일어나고, 그 실체는 MFA 첫 실행입니다
+(측정치는 `docs/wiki/infra-history.md`의 첫 호출 콜드 실측과 MFA 첫 실행 실측 항목). 그래서 게이트 탈락처럼 MFA 전에 끝난 요청은 콜드를 소비하지 않고, 전달본이 돌려준 단계 시간에
 `align`이 처음 있는 요청까지 콜드입니다. 전달본이 단계 시간을 돌려주지 않으면 첫 채점에서 웜이 됩니다.
 
 값은 두 곳으로 나갑니다.
 
-- 요청 종료 로그 한 줄 - `... warm=cold stages=lockWait:3,model:22901,total:22904`
+- 요청 종료 로그 한 줄 - `분석 종료 ... status=... quality=<품질 코드> ... warm=cold stages=lockWait:3,model:22901,transcribe:...,align:...,total:22904`
 - `GET /internal/v0/metrics/stages` - 호스트 타이머가 1분마다 훑어 CloudWatch
   `accentury/ai` `StageDuration`으로 올립니다 (차원 `env`, `stage`, `warm`).
   **읽으면 비워집니다** - 소비자가 그 타이머 하나라는 전제이고, 그 회차의 발행이 실패하면 그
   1분의 표본은 사라집니다. 표본을 접지 않고 낱개로 올리는 이유는 CloudWatch가 그래야 p50과
   p95를 계산하기 때문입니다.
 
+### MFA 상주화와 OpenVINO int8
+
+지금 모델 태그 `e382764`(`ai/Dockerfile`의 `MODEL_TAG`)는 `f77011c`에 아래를 더한 이미지입니다.
+
+| 항목 | 내용 |
+| --- | --- |
+| MFA | 상주 프로세스가 요청마다 fork한 자식이 정렬합니다. |
+| Whisper | OpenVINO int8로 추론합니다. 스레드는 `ACCENTURY_WHISPER_OV_THREADS=2`입니다. |
+| 제거 | 기존 Whisper 가중치와 기본 파이썬 torch를 뺐습니다. |
+
+원본 파일은 `model-patch/`에 있습니다. `model-patch/build.sh`로 다시 만들고, 태그는 `sha256("base=f77011c" + 빌드 입력 파일)[:7]`입니다.
+OpenVINO 패키지는 `ov.lock`(해시 포함)으로 설치합니다. 패키지를 바꿀 때는 `ov.requirements`와 `ov.constraints`를 고친 뒤 아래 명령으로
+잠금 파일을 다시 만듭니다. OpenVINO IR은 ECR의 `ai-model:6415e0d`에서 가져오고, IR을 새로 만들 때는 `model-patch/export_ir.py`를 씁니다.
+
+```bash
+cd ai/model-patch
+uv pip compile ov.requirements -c ov.constraints --generate-hashes --python-version 3.12 \
+  --python-platform x86_64-manylinux_2_28 --extra-index-url https://download.pytorch.org/whl/cpu \
+  --index-strategy unsafe-best-match -o ov.lock
+```
+
+**MFA 상주화.** 워밍업 때 `mfa_one.py --serve`를 띄워 import, librosa 예열, 발음 사전 FST 생성을 끝내 둡니다. 요청은 이 프로세스를
+fork한 자식이 정렬합니다. 한 프로세스에서 연달아 정렬하면 둘째 건부터 경계와 묵음 칸이 달라지기 때문입니다.
+
+| 상황 | 동작 |
+| --- | --- |
+| 상주 프로세스가 죽었거나 30초 안에 답하지 않음 | 그 요청은 한 번짜리 정렬로 처리하고 다음 요청에서 다시 띄웁니다. |
+| 상주 프로세스 기동 실패 | 사유를 로그에 남기고 300초 동안 상주 모드를 쉽니다 (`ACCENTURY_MFA_RESIDENT_COOLDOWN`). 그동안 요청은 한 번짜리 정렬로 처리합니다. |
+| 정렬 자식이 크래시 | 입력 탓이 아니므로 한 번짜리 정렬로 다시 시도합니다. |
+| 정렬 자체가 실패 | `mfa align`으로 한 번 더 갑니다. |
+| 200건마다 | 상주 프로세스를 새로 띄웁니다 (`ACCENTURY_MFA_RESIDENT_RECYCLE`). 새 프로세스는 뒤에서 뜨므로 다음 요청이 기동을 기다리지 않습니다. |
+| 취소 | 상주 프로세스는 워커와 같은 프로세스 그룹이라 함께 거둬지고, 새 워커가 워밍업 때 다시 띄웁니다. |
+
+**OpenVINO int8.** OpenVINO 패키지는 transformers 5.5가 필요해 모델 파이썬(4.57)에 섞지 않고 `/opt/venv-ov`에 둡니다. 워커의
+`track2_asr.py`가 이 환경의 `ov_asr.py`를 상주 프로세스로 띄워 파이프로 음성을 넘깁니다. 상주 프로세스는 워커가 죽으면 같이 죽습니다. 반대로 상주 프로세스가 죽으면 그 요청은 실패하고 워커가 내려가며, 다음 요청이 새로 적재합니다.
+`INFERENCE_NUM_THREADS`를 3이나 4로 쓰려면 `ENABLE_HYPER_THREADING`도 켜야 하는데, c7i.xlarge(물리 코어 2개)에서는 2보다 느립니다.
+
+프로세스 RSS 합계는 약 4.8GiB이고 그중 약 1.8GiB가 모델 파일 매핑입니다. `docker stats`는 비활성 파일 캐시를 빼고 보여 주므로
+메모리를 비교할 때는 프로세스 RSS를 봅니다.
+
+**롤백.** 이미지에 torch 경로가 없어서 아래 순서로 되돌립니다.
+
+1. 한 PR에서 `ai/Dockerfile`의 `MODEL_TAG`를 `f77011c`로, `application.yml`의 `congestion-threshold`를 6으로 바꿉니다.
+2. 같은 PR에서 `scale_out_threshold`를 6으로, `analysis_backlog_threshold`를 12로 바꿉니다.
+3. 병합과 배포 뒤 두 환경에 Terraform을 apply합니다.
+
+옛 이미지는 1대 처리량이 분당 약 6건이라 임계값을 그대로 두면 대기가 약 2배가 됩니다. MFA 상주화만 끄려면
+컨테이너에 `ACCENTURY_MFA_MODE=align_one`을 줍니다. `modelVersion`의 코드 해시와 `ov-int8`로 이 이미지가 채점한 결과를 가를 수 있습니다.
+
 ### 엔진 쪽 계약
 
 라우트가 거는 보장(추론 상한, 임시파일 삭제)은 엔진이 다음 둘을 지킬 때만 성립합니다.
-편의가 아니라 계약이고, 지켰는지는 아래 계약 적합성 스위트가 봅니다 (KAN-137).
+편의가 아니라 계약이고, 지켰는지는 아래 계약 적합성 스위트가 봅니다.
 
 1. **이벤트 루프를 막지 않습니다.** `asyncio.timeout`은 `await` 지점에서만 발화하므로,
    동기 추론을 `async def` 안에서 그대로 돌리면 상한이 걸리지 않습니다. 블로킹 추론은
@@ -187,43 +243,45 @@ Whisper, `gate`는 `align_transcript`, `align`은 MFA, `f0`는 `extract_utteranc
 2. **취소가 실제로 닿아야 합니다.** `asyncio.to_thread`에 넘긴 작업은 취소되지 않아서,
    라우트가 503을 내고 임시파일을 지운 뒤에도 워커가 계속 돌며 이미 사라진 파일을 봅니다.
 
-### 계약 적합성 스위트 (KAN-137)
+### 계약 적합성 스위트
 
-`tests/contract`는 **엔진 구현을 모르는** 테스트입니다. 이 스위트의 통과가 실모델(KAN-22)의
+`tests/contract`는 **엔진 구현을 모르는** 테스트입니다. 이 스위트의 통과가 실모델의
 인수 조건입니다.
 
 | 항목 | 근거 |
 | --- | --- |
 | 응답 봉투가 §4.1과 일치합니다 (필드 집합과 타입) | BE `RestAiAnalysisClient`가 필드로 역직렬화합니다 |
 | 억양 점수가 0~100입니다 | §4.3 스케일 |
-| 동일 입력 반복 분석 오차가 ±2점 이내입니다 | KAN-19 AC |
+| 동일 입력 반복 분석 오차가 ±2점 이내입니다 | 점수 재현성 요구 |
 | 오디오가 같으면 추적 ID가 달라도 점수가 같습니다 | 점수는 오디오에서 나와야 합니다 |
 | 예산을 넘기면 503입니다 | §4.1. 엔진이 이벤트 루프를 막으면 여기가 200으로 떨어집니다 |
 | 오디오 상한을 넘기면 413입니다 | §3.3과 같은 1MB. 계약값을 직접 쓰고 서버 설정이 그 값인지도 봅니다 - 설정에서 유도하면 어긋난 상한이 그대로 통과합니다 |
 | meta 형식 오류는 400입니다 | 계약 위반은 BE 버그이고, 5xx로 내면 재전송을 부릅니다 |
 | `scoreVersion`을 그대로 에코백합니다 | §5.4 불일치 가드의 전제 |
 | 판정 실패가 §2.4 코드와 불리언 `retryable`을 냅니다 | BE `ErrorCode`에 없는 이름은 문항을 죽입니다 |
-| `scriptKey` 없는 meta를 비재전송으로 거절합니다 | KAN-182 계약, 2026-09-05 결정 |
-| 모든 종료 경로 뒤에 오디오가 남지 않습니다 | KAN-27 AC-1 |
+| `scriptKey` 없는 meta를 비재전송으로 거절합니다 | 대본 없이 채점한 점수가 정상값처럼 나가면 안 됩니다 (위 "실모델 어댑터") |
+| 모든 종료 경로 뒤에 오디오가 남지 않습니다 | 원본 음성은 응답 즉시 지웁니다 |
 
-엔진 프로파일 표(`ENGINE_PROFILES`)와 `--contract-engine` 옵션은 스텁이 사라지면서 접었습니다
-(KAN-22) - 고를 엔진이 하나면 표는 목적을 잃습니다. 항목마다 무엇을 기대하는지는 이제 테스트
-본문에 그대로 적혀 있습니다.
+스위트가 보는 엔진은 실모델 하나라 엔진 프로파일 표(`ENGINE_PROFILES`)나 `--contract-engine` 옵션을 두지 않습니다.
+항목마다 무엇을 기대하는지는 테스트 본문에 그대로 적혀 있습니다.
 
 이 스위트는 **전달본이 들어 있는 이미지 안에서만** 돕니다. 전달본 모듈이 없는 개발 기계에서는
 사유와 함께 건너뜁니다 - 조용히 통과시키지 않습니다.
 
 ```bash
-# 레포 루트에서. 베이스가 모델 이미지라 ECR 로그인이 먼저 필요합니다 (infra/README.md "모델 교체").
+# 레포 루트에서. 베이스가 모델 이미지라 ECR 로그인이 먼저 필요합니다 (docs/ops/deploy.md "모델 교체 (KAN-22)").
 docker build --platform linux/amd64 -t accentury-ai:dev ai
 docker run --rm --platform linux/amd64 -v "$PWD/ai:/src" -w /src \
     -e ACCENTURY_AI_ANALYSIS_TIMEOUT_SECONDS=600 accentury-ai:dev \
-    sh -c "pip install -q --user pytest httpx && \
+    sh -c "pip install -q --user pytest httpx2 && \
            python -m pytest tests/contract --contract-audio=/src/samples/1-5.wav"
 ```
 
 운영 이미지에는 pytest가 없어서 컨테이너 안에서 `--user`로 한 번 깔고 돕니다 (비루트라 시스템
-site-packages에는 못 씁니다). 마운트한 체크아웃의 `app/`이 임포트되므로 지금 고치고 있는 코드가
+site-packages에는 못 씁니다). `TestClient`의 HTTP 클라이언트는 `httpx2`입니다 - 잠금 파일의 starlette 1.7.0은
+`httpx2`를 먼저 찾고, 없으면 `httpx`로 돌되 폐기 경고를 냅니다 (`requirements-dev.txt`가 둘 다 두는 이유).
+`ai/samples/`는 레포에 없습니다 - 아래 조건에 맞는 WAV를 직접 `ai/samples/1-5.wav`로 넣고 돌립니다
+(`.gitignore`가 막지 않으니 커밋하지 않도록 주의합니다). 마운트한 체크아웃의 `app/`이 임포트되므로 지금 고치고 있는 코드가
 검사 대상이고, 모델과 참조는 이미지의 `/app/src`에서 옵니다. 상한을 600초로 올린 것은 x86
 에뮬레이션(애플 실리콘)에서 추론 1건이 40초대이기 때문입니다 - 실제 x86 호스트에서는 기본값이면 됩니다.
 
@@ -233,8 +291,8 @@ site-packages에는 못 씁니다). 마운트한 체크아웃의 `app/`이 임�
   판정 실패로 끊고, 그러면 성공 경로 항목이 통째로 오탐합니다. 녹음은 스위트가 쓰는
   `scriptKey`("1|5")의 대본을 읽은 것이어야 합니다.
 - `ACCENTURY_AI_ANALYSIS_TIMEOUT_SECONDS`가 정상 추론과 워커 재적재보다 넉넉해야
-  합니다. 기본값 75초는 c7i.xlarge 기준(KAN-172, 배포 중 backend 태스크 6개분과 워커 재적재를 덮는 값)이라 느린 기계(에뮬레이션 등)에서는 올립니다. 스위트는 나머지 설정도
-  `Settings.from_env()`로 읽습니다 (내부 토큰만 끕니다 - 인증은 KAN-36의 전용 테스트가 봅니다).
+  합니다. 기본값 75초는 c7i.xlarge 기준(한 호스트에 겹친 호출 6건(전달 워커 3 x 롤링 배포 중 태스크 2)과 워커 재적재를 덮는 값)이라 느린 기계(에뮬레이션 등)에서는 올립니다. 스위트는 나머지 설정도
+  `Settings.from_env()`로 읽습니다 (내부 토큰만 끕니다 - 인증은 전용 테스트 `tests/test_internal_token.py`가 봅니다).
 
 503 항목은 서버를 하나 더 띄우지 않고 그 항목 동안만 `app.state.settings`의 상한을 바꿉니다
 (`conftest.budget`). 두 번째 `TestClient`는 자기 이벤트 루프를 돌리는데 실모델 엔진은 워커
@@ -246,11 +304,10 @@ site-packages에는 못 씁니다). 마운트한 체크아웃의 `app/`이 임�
 | 항목 | 담당 |
 | --- | --- |
 | `GET /internal/v0/models` (모델 버전) | 미정 - 지금은 응답의 `modelVersion`이 같은 값을 싣습니다 |
-| 지연 예산 재확정 (P95) | KAN-57 판정, KAN-172 재조정. 08-30 실측은 1건 14~30초입니다 |
 | GPU 전환 | KAN-57 판정 후 |
 
-`correlationId` 기반 멱등 캐시는 **범위 밖입니다** (2026-09-01 정정). BE가 일시 장애 뒤 같은
-`correlationId`로 재전송하는 설계이고(KAN-24, KAN-28), AI는 무상태이며 오디오를 남기지
+`correlationId` 기반 멱등 캐시는 **범위 밖입니다**. BE가 일시 장애 뒤 같은
+`correlationId`로 재전송하는 설계이고, AI는 무상태이며 오디오를 남기지
 않으므로 자체 멱등 저장소를 두지 않습니다.
 
 ## 실행
@@ -269,10 +326,10 @@ pytest                               # 계약 스위트는 전달본이 없으�
 
 ```bash
 ACCENTURY_AI_ANALYSIS_ENGINE=fake .venv/bin/uvicorn app.main:app --port 8000
-# 또는 루트에서 docker compose up -d --build  (DB + 가짜 AI + BE)
+# 또는 루트에서 docker compose up -d --build  (DB + Redis + 가짜 AI + BE)
 ```
 
-## 의존성 잠금 (KAN-246)
+## 의존성 잠금
 
 서비스 계층의 의존성은 파일 세 개로 관리합니다.
 
@@ -293,7 +350,7 @@ ACCENTURY_AI_ANALYSIS_ENGINE=fake .venv/bin/uvicorn app.main:app --port 8000
 ```bash
 cd ai
 
-# 1. 모델 태그를 바꿨을 때만 - 전달본의 패키지 목록을 다시 받습니다 (ECR 로그인 필요, infra/README.md "모델 교체")
+# 1. 모델 태그를 바꿨을 때만 - 전달본의 패키지 목록을 다시 받습니다 (ECR 로그인 필요, docs/ops/deploy.md "모델 교체 (KAN-22)")
 docker run --rm --platform linux/amd64 --entrypoint pip \
   325771561913.dkr.ecr.ap-northeast-2.amazonaws.com/accentury/ai-model:<MODEL_TAG> freeze \
   | grep -v ' @ ' > model-base.constraints     # 머리말 주석은 다시 붙입니다
@@ -311,8 +368,21 @@ pytest
 가리지 않는 잠금이라 로컬(arm64)과 CI(amd64)가 같은 파일로 빌드합니다. 잠금 파일이 바뀐 PR은 staging 배포의
 스모크와 계약 적합성 스위트로 실모델 위에서 확인합니다 - 전달본과의 궁합은 거기서만 드러납니다.
 
-CI(`test.yml`의 `ai-test`)는 `ai/`가 바뀐 PR마다 잠금 파일을 `pip-audit`로 검사합니다. 테스트 자체는
-`requirements-dev.txt`의 범위로 설치한 환경에서 돕니다.
+파이썬 버전은 이 잠금 파일과 모델 전달본에 묶여 있어서 `Dockerfile.fake`의 베이스만 올릴 수 없습니다. 잠긴 휠이
+없는 버전(예: `pydantic-core`의 cp315 휠)으로 올리면 pip이 소스 빌드로 떨어져 `docker build`가 `linker cc not
+found`로 실패합니다. 그래서 Dependabot은 `python` 이미지의 minor/major 상승 PR을 만들지 않고 digest 갱신만
+올립니다(`.github/dependabot.yml`의 `ignore`). 영구 고정은 아니고, Python 3.12 보안 지원이 끝나는 2028-10 전에
+풉니다. 파이썬을 올릴 때 함께 바꿀 곳은 다음 네 군데입니다.
+
+| 위치 | 바꿀 것 |
+| --- | --- |
+| 위 명령의 `--python-version` | 새 버전으로 잠금 파일을 다시 만듭니다. |
+| `Dockerfile.fake`의 `FROM python:<버전>-slim@<digest>` | 태그와 digest |
+| `.github/dependabot.yml`의 `ignore` | 새 버전에 맞춰 풀거나 유지합니다. |
+| `.github/workflows/test.yml` `ai-test`의 `python-version` | 이미지와 같은 버전 |
+
+CI(`test.yml`의 `ai-test`)는 `ai/`가 바뀐 PR마다 잠금 파일을 `pip-audit`로 검사하고 `Dockerfile.fake`를
+빌드합니다. 테스트 자체는 `requirements-dev.txt`의 범위로 설치한 환경(이미지와 같은 파이썬 3.12)에서 돕니다.
 
 ## 설정 (환경 변수)
 
@@ -321,8 +391,8 @@ CI(`test.yml`의 `ai-test`)는 `ai/`가 바뀐 PR마다 잠금 파일을 `pip-au
 | `ACCENTURY_AI_TEMP_DIR` | `<시스템 임시 디렉터리>/accentury-ai-tmp` | 임시파일 전용 디렉터리 |
 | `ACCENTURY_AI_TEMP_RETENTION_SECONDS` | `1800` | 잔존 파일 삭제 기준 (30분) |
 | `ACCENTURY_AI_SWEEP_INTERVAL_SECONDS` | `300` | 청소 잡 주기 |
-| `ACCENTURY_AI_ANALYSIS_TIMEOUT_SECONDS` | `75` | 분석 1건의 상한 (lock 대기와 재적재 대기 포함) - 넘기면 503이고 워커가 죽습니다 (재적재가 뒤따릅니다). backend의 읽기 타임아웃 85초보다 짧아야 합니다 (KAN-172) |
-| `ACCENTURY_AI_INFERENCE_RESERVE_SECONDS` | `15` | 추론을 시작하려면 위 상한까지 남아 있어야 하는 시간 (KAN-272). 차례를 기다린 요청이 lock을 잡았을 때 남은 시간이 이보다 적으면 추론을 시작하지 않고 429(추론 전 거절)를 돌려줍니다 - 시작해 놓고 추론 도중 상한에 걸리면 멀쩡한 워커가 죽기 때문입니다. 상한보다 작아야 하고(아니면 기동을 거부합니다) `0`이면 검사를 끕니다 |
+| `ACCENTURY_AI_ANALYSIS_TIMEOUT_SECONDS` | `75` | 분석 1건의 상한 (lock 대기와 재적재 대기 포함) - 넘기면 503이고 워커가 죽습니다 (재적재가 뒤따릅니다). backend의 읽기 타임아웃 85초보다 짧아야 합니다 |
+| `ACCENTURY_AI_INFERENCE_RESERVE_SECONDS` | `15` | 추론을 시작하려면 위 상한까지 남아 있어야 하는 시간. 차례를 기다린 요청이 lock을 잡았을 때 남은 시간이 이보다 적으면 추론을 시작하지 않고 429(추론 전 거절)를 돌려줍니다 - 시작해 놓고 추론 도중 상한에 걸리면 멀쩡한 워커가 죽기 때문입니다. 상한보다 작아야 하고(아니면 기동을 거부합니다) `0`이면 검사를 끕니다 |
 | `ACCENTURY_AI_MAX_AUDIO_BYTES` | `1048576` | 오디오 파트 상한 (§3.3과 동일) |
 | `ACCENTURY_AI_MAX_REQUEST_BYTES` | `2097152` | 요청 본문 전체 상한 - multipart 파싱 전에 끊습니다 |
 | `ACCENTURY_AI_ANALYSIS_ENGINE` | `track1` | 붙일 분석 엔진 - `track1`(실모델) 또는 `fake`(개발 기계용, 해시 점수). 모르는 이름이면 기동이 실패합니다 |
@@ -334,6 +404,6 @@ CI(`test.yml`의 `ai-test`)는 `ai/`가 바뀐 PR마다 잠금 파일을 `pip-au
 | `ACCENTURY_AI_TRACK1_SENTENCES` | (없음) | 서비스 문장 목록. 비우면 전달본의 기본값 |
 | `ACCENTURY_AI_TRACK1_DEVICE` | `auto` | Whisper를 올릴 장치 (`auto`면 cuda, mps, cpu 순) |
 | `ACCENTURY_AI_TRACK1_LOAD_TIMEOUT_SECONDS` | `600` | 가중치 적재의 상한 - 넘기면 워밍업 실패로 health가 `STARTING`에 머뭅니다 |
-| `ACCENTURY_AI_INTERNAL_TOKEN` | (없음) | backend와 나눠 갖는 내부 호출 시크릿 (KAN-36). 있으면 health를 뺀 모든 요청에 `X-Accentury-Internal-Token` 헤더를 요구합니다 |
+| `ACCENTURY_AI_INTERNAL_TOKEN` | (없음) | backend와 나눠 갖는 내부 호출 시크릿. 있으면 health를 뺀 모든 요청에 `X-Accentury-Internal-Token` 헤더를 요구합니다 |
 | `ACCENTURY_AI_LOG_LEVEL` | `INFO` | 앱 로그 수준. 기동 로그(`warmUp=있음`, 모델 버전)와 요청 종료 줄이 INFO입니다 |
-| `ACCENTURY_AI_INTERNAL_TOKEN_REQUIRED` | `false` | `true`면 위 토큰이 없을 때 기동이 실패합니다 (KAN-36). 운영 compose가 켭니다 |
+| `ACCENTURY_AI_INTERNAL_TOKEN_REQUIRED` | `false` | `true`면 위 토큰이 없을 때 기동이 실패합니다. 운영 compose가 켭니다 |

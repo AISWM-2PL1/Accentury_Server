@@ -10,8 +10,9 @@ import tools.jackson.databind.ObjectMapper;
 /**
  * {@link UploadRateLimitFilter} 등록 (KAN-23).
  * <p>
- * 서블릿 URL 패턴은 경로 중간 와일드카드를 지원하지 않으므로 {@code /v0/sessions/*}로
- * 걸고 정확한 매칭(voice-items recording POST)은 필터가 MVC와 같은 {@code PathPattern}으로 한다.
+ * 서블릿 URL 패턴은 경로 중간 와일드카드를 지원하지 않으므로 {@code /v0/sessions/*}와
+ * {@code /v0/learning/*}(억양 학습 업로드, KAN-299)로 걸고 정확한 매칭(음성 업로드 두 경로의 POST)은
+ * 필터가 MVC와 같은 {@code PathPattern}으로 한다.
  */
 @Configuration
 class UploadRateLimitFilterConfig {
@@ -21,7 +22,7 @@ class UploadRateLimitFilterConfig {
             RateLimits rateLimits, ClientIps clientIps, ObjectMapper objectMapper) {
         FilterRegistrationBean<UploadRateLimitFilter> registration =
                 new FilterRegistrationBean<>(new UploadRateLimitFilter(rateLimits, clientIps, objectMapper));
-        registration.addUrlPatterns("/v0/sessions/*");
+        registration.addUrlPatterns("/v0/sessions/*", "/v0/learning/*");
         return registration;
     }
 }

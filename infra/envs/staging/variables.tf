@@ -62,7 +62,7 @@ variable "training_bucket_enabled" {
 
 variable "ai_ami_id" {
   type        = string
-  description = "AI 호스트의 AMI ID (KAN-246, KAN-285). ai-ami 파이프라인이 구운 사전 적재 AMI(accentury-ai-host-<빌드 날짜>, AL2023 x86_64 + docker + compose + 활성 ai 이미지)다. 월 1회 파이프라인을 돌려 staging, prod 순으로 새 값으로 바꾼다 (README \"AI 호스트 AMI 갱신\"). 맨 AL2023 AMI를 넣어도 user_data가 같은 호스트를 만들지만 첫 부팅이 약 2분 30초 길다."
+  description = "AI 호스트의 AMI ID (KAN-246, KAN-285). ai-ami 파이프라인이 구운 사전 적재 AMI(accentury-ai-host-<빌드 날짜>, AL2023 x86_64 + docker + compose + 활성 ai 이미지)다. 월 1회 파이프라인을 돌려 staging, prod 순으로 새 값으로 바꾼다 (docs/ops/ai-host.md \"AMI 갱신과 무중단 교체 (KAN-246)\"). 맨 AL2023 AMI를 넣어도 user_data가 같은 호스트를 만들지만 첫 부팅이 약 2분 30초 길다."
 }
 
 variable "ai_ami_pipeline_enabled" {
@@ -106,17 +106,17 @@ variable "waf_enforce" {
 
 variable "waf_rate_limit" {
   type        = number
-  description = "WAF rate-based rule: IP당 5분 창의 세션 생성 + 음성 업로드 허용 수 (KAN-149). 산정 근거는 README 'WAF 웹 ACL'."
+  description = "WAF rate-based rule: IP당 5분 창의 세션 생성 + 음성 업로드(레벨테스트와 억양 학습) + 후기 허용 수 (KAN-149). 산정 근거는 docs/ops/waf-edge.md 'rate limit 임계값의 근거'."
 }
 
 variable "waf_auth_rate_limit" {
   type        = number
-  description = "WAF rate-based rule: IP당 5분 창의 로그인 + refresh 허용 수 (KAN-244). 근거는 README 'WAF 웹 ACL'."
+  description = "WAF rate-based rule: IP당 5분 창의 로그인 + refresh 허용 수 (KAN-244). 근거는 docs/ops/waf-edge.md '인증 경로 rate 규칙 (KAN-244)'."
 }
 
 variable "waf_admin_rate_limit" {
   type        = number
-  description = "WAF rate-based rule: IP당 5분 창의 관리자 경로 요청 허용 수 (KAN-244). 근거는 README 'WAF 웹 ACL'."
+  description = "WAF rate-based rule: IP당 5분 창의 관리자 경로 요청 허용 수 (KAN-244). 근거는 docs/ops/waf-edge.md '관리자 경로 rate 규칙 (KAN-244)'."
 }
 
 variable "waf_ip_reputation_enforce" {
@@ -146,14 +146,17 @@ variable "github_owner_id" {
   default = 295795156
 }
 
-# 배포 역할을 맡는 저장소 목록 (KAN-221 레포 분리). Server는 이미지 배포와 스모크, App은 웹 배포.
-# 분리 전 저장소 Accentury(id 1308814203, 지금은 Accentury_Prototype)는 아카이브라 뺐다.
-variable "github_repositories" {
-  type = list(object({ name = string, id = number }))
-  default = [
-    { name = "Accentury_Server", id = 1380964825 },
-    { name = "Accentury_App", id = 1380964859 },
-  ]
+# 배포 역할을 맡는 저장소 (KAN-221 레포 분리, KAN-306 역할 분리). Server는 이미지 배포 역할(github-deploy)로
+# 이미지 배포와 스모크를, App은 웹 배포 역할(github-web-deploy)로 웹 번들 업로드만 한다. 두 역할은 서로의
+# 레포 토큰을 받지 않는다. 분리 전 저장소 Accentury(id 1308814203, 지금은 Accentury_Prototype)는 아카이브라 없다.
+variable "github_server_repository" {
+  type    = object({ name = string, id = number })
+  default = { name = "Accentury_Server", id = 1380964825 }
+}
+
+variable "github_app_repository" {
+  type    = object({ name = string, id = number })
+  default = { name = "Accentury_App", id = 1380964859 }
 }
 
 variable "alert_email" {

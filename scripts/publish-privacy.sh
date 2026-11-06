@@ -11,8 +11,8 @@
 # 번들과 다르므로 게시 경로도 나눈다. `.well-known`이 같은 이유로 이미 이 모양이다
 # (scripts/publish-well-known.sh).
 #
-# 웹 배포와 서로를 지우지 않는다: web-deploy.yml은 `aws s3 sync`를 `--delete` 없이 쓰고, 배포
-# 역할에는 `s3:DeleteObject` 자체가 없다 (infra/modules/deploy/main.tf). 그래서 여기서 올린
+# 웹 배포와 서로를 지우지 않는다: web-deploy.yml은 `aws s3 sync`를 `--delete` 없이 쓰고, 웹 배포
+# 역할(github-web-deploy)에는 `s3:DeleteObject` 자체가 없다 (infra/modules/deploy/main.tf). 그래서 여기서 올린
 # privacy.html은 이후의 웹 배포에 살아남고, 이 스크립트는 그 키 하나만 `cp`하므로 웹 번들을
 # 건드리지 않는다. 몇 번을 돌려도 같은 결과다 (멱등).
 #

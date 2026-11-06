@@ -53,7 +53,7 @@ variable "analysis_processing_timeout" {
 
 variable "analysis_dispatch_concurrency" {
   type        = number
-  description = "분석 전달 워커 수 (accentury.analysis.dispatch-concurrency). AI 호스트 최대 대수(ai_max_size 3)와 같은 값이다 (KAN-272, 2026-10-06 - 그 전에는 1이라 AI를 늘려도 태스크 하나가 한 번에 1건만 보내 처리량이 늘지 않았다). AI는 호스트마다 추론을 한 번에 하나만 돌리고 8GB에서 2건이면 OOM이라(KAN-57) AI가 1대면 뒤의 호출은 AI 안에서 차례를 기다리고, 2대 이상이면 내부 ALB가 나눈다. 태스크 여러 개가 동시에 뜨면 그만큼 더 겹친다 - main.tf의 표와 README 참고. 코드 기본값과 같다."
+  description = "분석 전달 워커 수 (accentury.analysis.dispatch-concurrency). AI 호스트 최대 대수(ai_max_size 3)와 같은 값이다 (KAN-272, 2026-10-06 - 그 전에는 1이라 AI를 늘려도 태스크 하나가 한 번에 1건만 보내 처리량이 늘지 않았다). AI는 호스트마다 추론을 한 번에 하나만 돌리고 8GB에서 2건이면 OOM이라(KAN-57) AI가 1대면 뒤의 호출은 AI 안에서 차례를 기다리고, 2대 이상이면 내부 ALB가 나눈다. 태스크 여러 개가 동시에 뜨면 그만큼 더 겹친다 - main.tf의 표와 docs/ops/ai-host.md \"분석 시간 예산 (KAN-172 확정)\" 참고. 코드 기본값과 같다."
   default     = 3
 
   validation {

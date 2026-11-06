@@ -1,7 +1,7 @@
 # AI 호스트 AMI 사전 적재 파이프라인 (KAN-285). EC2 Image Builder가 최신 AL2023 위에 docker, compose 플러그인,
 # 그 순간의 활성 accentury/ai 이미지를 깔아 AMI로 남긴다. ai 호스트의 첫 부팅(2026-10-14 prod 실측 3분 22초)에서
-# docker 설치 40초와 이미지 pull 1분 53초가 매번 같은 일이라 미리 해 두는 것이다. 구운 AMI는 두 환경 tfvars
-# ai_ami_id에 적어 쓴다 (README "AI 호스트 AMI 갱신") - 파이프라인은 AMI ID를 Terraform에 돌려주지 않는다.
+# docker 설치 40초와 이미지 pull 1분 53초가 매번 같은 일이라 미리 해 두는 것이다. 구운 AMI는 지금 쓰지 않는다(KAN-285 실측에서
+# 미채택, docs/ops/ai-host.md "사전 적재 AMI는 쓰지 않는다 (KAN-285)"). 다시 쓰게 되면 두 환경 tfvars ai_ami_id에 적는다 - 파이프라인은 AMI ID를 Terraform에 돌려주지 않는다.
 # 돌려받아 자동으로 쓰면 빌드가 끝날 때마다 손대지 않은 plan에 인스턴스 교체가 끼어들기 때문이다 (KAN-246과 같은 이유).
 #
 # 파이프라인은 prod 스택이 가진다 (tfvars ai_ami_pipeline_enabled). 계정에 기본 VPC가 없어 빌드 인스턴스를 띄울
@@ -78,17 +78,16 @@ data "aws_iam_policy_document" "build" {
   # AmazonSSMManagedInstanceCore가 ssm:GetParameter와 GetParameters를 리소스 *에 허용한다 (2026-10-14 정책 문서 확인,
   # Codex 리뷰 P2). 위 Allow만으로는 경계가 서지 않는다 - 빌드 인스턴스에서 도는 코드가 두 환경의 내부 호출 토큰,
   # 관리자 토큰, JWT 시크릿 같은 /accentury/* 파라미터를 전부 읽을 수 있다. Deny는 Allow를 이기므로 IMAGE_TAG 하나를
-  # 뺀 모든 파라미터 읽기를 막는다. SSM 에이전트와 Image Builder 워크플로는 파라미터를 읽지 않으므로(에이전트는
-  # GetManifest, GetDocument만) 빌드에 영향이 없다 - 있다면 빌드가 AccessDenied로 시끄럽게 실패한다.
+  # 뺀 모든 파라미터 읽기를 막는다. 이 빌드에 쓰는 Image Builder 컴포넌트와 SSM 문서는 {{ssm:...}} 파라미터 참조를 쓰지
+  # 않아 빌드에 영향이 없다 - 있다면 빌드가 AccessDenied로 시끄럽게 실패한다. 액션은 ssm:GetParameter* 하나로 적는다
+  # (GetParameter, GetParameters, GetParametersByPath, GetParameterHistory, KAN-305).
+  #
+  # 같이 고칠 것: modules/ai-host/main.tf의 DenyOtherParameters(KAN-305)가 같은 문장이다 (not_resources만 다르다). 한쪽을
+  # 바꾸면 다른 쪽도 맞춘다.
   statement {
-    sid    = "DenyOtherParameters"
-    effect = "Deny"
-    actions = [
-      "ssm:GetParameter",
-      "ssm:GetParameters",
-      "ssm:GetParametersByPath",
-      "ssm:GetParameterHistory",
-    ]
+    sid           = "DenyOtherParameters"
+    effect        = "Deny"
+    actions       = ["ssm:GetParameter*"]
     not_resources = [local.image_tag_parameter_arn]
   }
 }
@@ -264,7 +263,7 @@ resource "aws_imagebuilder_image_pipeline" "ai" {
     image_tests_enabled = false
   }
 
-  # 일정 없음 - README "AI 호스트 AMI 갱신"의 수동 실행이다.
+  # 일정 없음 - docs/ops/ai-host.md "사전 적재 AMI는 쓰지 않는다 (KAN-285)"의 수동 실행이다.
 
   # provider 5.74.0부터 필수다 - 없으면 레시피 교체 때 파이프라인이 옛 레시피를 붙든 채 destroy가 의존성 오류로 멈춘다.
   lifecycle {

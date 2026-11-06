@@ -3,16 +3,18 @@
 # 이 레포는 GitHub Actions를 commit SHA로, Dockerfile의 베이스 이미지를 digest로 고정한다. 고정한 값은 저절로
 # 움직이지 않으므로 갱신 PR을 올려 줄 주체가 없으면 보안 패치가 들어오지 않는다. 그 역할을 Dependabot이 맡는다.
 #
-# 주기는 월 1회이고 생태계마다 PR 하나로 묶는다 (2026-10-05 결정). AI 호스트 AMI 갱신(infra/README.md
-# "AI 호스트 AMI 갱신")과 같은 주기라 한 번에 본다. 대상 브랜치는 기본 브랜치(Dev)다.
+# 주기는 월 1회이고 생태계마다 PR 하나로 묶는다 (2026-10-05 결정). AI 호스트 AMI 갱신(docs/ops/ai-host.md
+# "AMI 갱신과 무중단 교체 (KAN-246)")과 같은 주기라 한 번에 본다. 대상 브랜치는 기본 브랜치(Dev)다.
 #
 # Dependabot PR의 브랜치명은 dependabot/...으로 고정이라 브랜치 네이밍 검사에 예외가 있다 (branch-name.yml).
 #
 # 손이 닿지 않는 곳:
 #   - ai/Dockerfile의 베이스(accentury/ai-model)는 ARG로 조립하는 ECR 불변 태그라 대상이 아니다. 모델 교체가 곧
-#     그 줄을 바꾸는 일이다 (infra/README.md "모델 교체").
+#     그 줄을 바꾸는 일이다 (docs/ops/deploy.md "모델 교체 (KAN-22)").
 #   - ai/requirements.lock은 Dependabot이 알아보는 이름이 아니라 갱신되지 않는다. 사람이 다시 만든다
 #     (ai/README.md "의존성 잠금"). pip 항목은 requirements.txt의 범위가 새 버전을 막게 됐을 때만 PR을 올린다.
+#   - python 베이스(ai/Dockerfile.fake)는 digest 갱신만 받고 minor/major 상승은 막는다(docker 항목의 ignore).
+#     이유와 올릴 때 함께 바꿀 곳은 ai/README.md "의존성 잠금"이 정본이다.
 version: 2
 updates:
   - package-ecosystem: github-actions
@@ -32,6 +34,14 @@ updates:
     groups:
       docker:
         patterns: ["*"]
+    ignore:
+      # python:3.12-slim의 minor/major 상승 PR을 막는다. 같은 태그 안의 digest 갱신은 그대로 받는다.
+      # directories 항목은 디렉터리별 ignore가 없어서 /backend, /ai의 모든 python 이미지에 걸린다.
+      # 영구 고정이 아니다 - Python 3.12 보안 지원이 끝나는 2028-10 전에 잠금 파일 재생성과 함께 푼다
+      # (ai/README.md "의존성 잠금"). ai-test(test.yml)가 Dockerfile.fake를 빌드하므로 베이스와 잠금
+      # 파일이 어긋나면 이 ignore와 무관하게 PR에서 잡힌다.
+      - dependency-name: python
+        update-types: ["version-update:semver-minor", "version-update:semver-major"]
 
   - package-ecosystem: pip
     directory: /ai

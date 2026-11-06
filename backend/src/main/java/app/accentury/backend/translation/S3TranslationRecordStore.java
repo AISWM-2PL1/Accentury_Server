@@ -91,12 +91,13 @@ class S3TranslationRecordStore implements TranslationRecordStore {
         }
     }
 
-    /** 객체 본문 - 필드 순서는 명세서 §3.18 표와 같다. 계정 ID는 싣지 않는다. */
+    /** 객체 본문 - 필드 순서는 명세서 §3.18 표와 같다. 계정 ID는 싣지 않는다. {@code direction}은 KAN-316부터다. */
     static Map<String, Object> body(TranslationRecord record, @Nullable UUID subjectId) {
         Map<String, Object> body = new LinkedHashMap<>();
         body.put("requestId", record.requestId().toString());
         body.put("requestedAt", record.requestedAtKst());
         body.put("subjectId", subjectId != null ? subjectId.toString() : null);
+        body.put("direction", record.direction().apiValue());
         body.put("input", record.input());
         body.put("inputLength", record.inputLength());
         body.put("output", record.output());

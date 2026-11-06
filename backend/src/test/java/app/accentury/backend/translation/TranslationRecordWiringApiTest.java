@@ -63,7 +63,7 @@ class TranslationRecordWiringApiTest extends IntegrationTest {
         DialectTranslator fakeTranslator() {
             return new DialectTranslator() {
                 @Override
-                public Reply translate(String text) {
+                public Reply translate(String text, TranslationDirection direction) {
                     return Reply.translated("밥 뭇나?");
                 }
 
@@ -122,7 +122,7 @@ class TranslationRecordWiringApiTest extends IntegrationTest {
                 subjects, objectMapper, Clock.systemUTC(), Runnable::run, meterRegistry);
         TranslationService service = new TranslationService(translator, quota, store, Clock.systemUTC(), meterRegistry);
 
-        TranslationResponse response = service.translate(user(), new TranslationRequest("밥 먹었어?"));
+        TranslationResponse response = service.translate(user(), new TranslationRequest("밥 먹었어?", null));
 
         assertEquals("밥 뭇나?", response.dialect());
     }

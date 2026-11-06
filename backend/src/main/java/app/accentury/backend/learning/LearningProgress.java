@@ -2,6 +2,15 @@ package app.accentury.backend.learning;
 
 import org.jspecify.annotations.Nullable;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Isolation;
+import org.springframework.transaction.annotation.Transactional;
+
+import java.time.Instant;
+import java.time.LocalDate;
+import java.time.YearMonth;
+import java.util.ArrayList;
+import java.util.Comparator;
+import java.util.LinkedHashMap;
 
 import java.util.HashMap;
 import java.util.HashSet;
@@ -67,6 +76,103 @@ public class LearningProgress {
         return new LearningHomeResponse(record.isPresent(),
                 record.map(LearningHomeResponse.LevelTest::from).orElse(null), courseId, setId,
                 attendance.streak(userId));
+    }
+
+    /**
+     * 홈 앱바 달력 시트 (KAN-314, §3.20) - 출석 날짜({@link LearningAttendance#calendar})에 그날 마친 학습 항목을 붙인다.
+     * <p>
+     * 항목은 시도 기록에서 읽는다 - 출석 표에는 날짜만 남기기 때문이다 (V16 결정). 날짜는 각 완료 시각을 KST로 바꾼 날이라
+     * 출석을 남길 때와 같은 기준이다. 단어 세트는 완료한 시도마다 1건(정답 수 / 문항 수), 억양 코스는 그날 채점을 마친
+     * 카드를 코스로 묶어 1건(그날 카드 수 / 코스 카드 수), 레벨테스트는 최근 완주 1건만 남아 있어 그날에만 1건이다. 제목은
+     * 시도가 고정한 발행본에서 찾고, 발행본이나 세트와 카드가 없으면(데이터 오염) 그 항목은 건너뛴다. 네 문장을 REPEATABLE
+     * READ 읽기 트랜잭션 하나로 묶는다 - PostgreSQL은 이 격리에서 첫 문장의 스냅샷을 끝까지 쓰므로 출석과 시도가 같은
+     * 시점을 본다 (기본 READ COMMITTED는 문장마다 새 스냅샷이다, PR #61 리뷰).
+     */
+    @Transactional(readOnly = true, isolation = Isolation.REPEATABLE_READ)
+    MonthlyAttendanceResponse attendance(UUID userId, YearMonth month) {
+        LearningAttendance.Calendar calendar = attendance.calendar(userId, month);
+        Instant from = month.atDay(1).atStartOfDay(LearningAttendance.ZONE).toInstant();
+        Instant to = month.plusMonths(1).atDay(1).atStartOfDay(LearningAttendance.ZONE).toInstant();
+
+        Map<LocalDate, List<TimedItem>> itemsByDay = new LinkedHashMap<>();
+        for (LocalDate day : calendar.days()) {
+            itemsByDay.put(day, new ArrayList<>());
+        }
+        // 세트 - 완료한 시도마다 1건. 출석이 없는 날의 시도(기록 실패)는 붙일 자리가 없어 건너뛴다.
+        for (WordSetAttempt attempt : wordAttempts.findCompletedBetween(userId, from, to)) {
+            Instant completedAt = Objects.requireNonNull(attempt.completedAt());
+            List<TimedItem> items = itemsByDay.get(LearningAttendance.attendanceDate(completedAt));
+            if (items == null) {
+                continue;
+            }
+            wordRegistry.find(attempt.contentVersion())
+                    .map(published -> published.sets().get(attempt.setId()))
+                    .ifPresent(set -> items.add(new TimedItem(completedAt, new MonthlyAttendanceResponse.Item(
+                            MonthlyAttendanceResponse.Kind.SET, attempt.id(), set.setId(), set.title(),
+                            Objects.requireNonNullElse(attempt.correctCount(), 0), attempt.itemCount()))));
+        }
+        // 코스 - 그날 채점을 마친 카드를 (발행본, 코스)로 묶는다. 코스와 카드 id는 발행본마다 매기므로 발행본이 다르면 다른
+        // 코스다 (Codex 리뷰). 같은 카드를 두 번 마쳐도 한 장이고, 항목의 시각은 그날 마지막으로 마친 카드의 시각이다.
+        Map<LocalDate, Map<CourseKey, CourseProgress>> coursesByDay = new LinkedHashMap<>();
+        for (IntonationAttempt attempt : intonationAttempts.findCompletedBetween(userId, from, to)) {
+            Instant finishedAt = Objects.requireNonNull(attempt.finishedAt());
+            LocalDate day = LearningAttendance.attendanceDate(finishedAt);
+            if (!itemsByDay.containsKey(day)) {
+                continue;
+            }
+            intonationRegistry.find(attempt.contentVersion())
+                    .flatMap(published -> published.courseOf(attempt.cardId()))
+                    .ifPresent(course -> coursesByDay.computeIfAbsent(day, d -> new LinkedHashMap<>())
+                            .computeIfAbsent(new CourseKey(attempt.contentVersion(), course.courseId()),
+                                    key -> new CourseProgress(course))
+                            .add(attempt.cardId(), finishedAt));
+        }
+        coursesByDay.forEach((day, byCourse) -> byCourse.forEach((key, progress) -> itemsByDay.get(day)
+                .add(new TimedItem(progress.lastFinishedAt, new MonthlyAttendanceResponse.Item(
+                        MonthlyAttendanceResponse.Kind.COURSE, key.contentVersion() + ":" + key.courseId(),
+                        progress.course.courseId(), progress.course.title(), progress.cards.size(),
+                        progress.course.cards().size())))));
+        // 레벨테스트 - 최근 완주 1건만 남는다 (§3.20). 그날이 이 달이면 붙인다.
+        levelTestRecords.find(userId).ifPresent(entry -> {
+            List<TimedItem> items = itemsByDay.get(LearningAttendance.attendanceDate(entry.completedAt()));
+            if (items != null) {
+                items.add(new TimedItem(entry.completedAt(), new MonthlyAttendanceResponse.Item(
+                        MonthlyAttendanceResponse.Kind.LEVEL_TEST, entry.testVersion(), entry.testVersion(),
+                        entry.tierName(), 1, 1)));
+            }
+        });
+
+        List<MonthlyAttendanceResponse.Day> days = new ArrayList<>();
+        itemsByDay.forEach((day, items) -> days.add(new MonthlyAttendanceResponse.Day(day,
+                items.stream().sorted(Comparator.comparing(TimedItem::at)).map(TimedItem::item).toList())));
+        return new MonthlyAttendanceResponse(month.getYear(), month.getMonthValue(), days, days.size(),
+                calendar.lastMonthCount(), calendar.streak(), calendar.today());
+    }
+
+    /** 하루 안의 항목은 마친 시각 순으로 늘어놓는다 - 종류별로 모았다가 마지막에 섞어 정렬한다. */
+    private record TimedItem(Instant at, MonthlyAttendanceResponse.Item item) {
+    }
+
+    /** 코스는 발행본 안에서만 유일하다. */
+    private record CourseKey(String contentVersion, String courseId) {
+    }
+
+    /** 하루에 한 코스에서 마친 카드와 마지막으로 마친 시각. */
+    private static final class CourseProgress {
+        private final IntonationLearningDefinition.Course course;
+        private final Set<String> cards = new HashSet<>();
+        private Instant lastFinishedAt = Instant.MIN;
+
+        private CourseProgress(IntonationLearningDefinition.Course course) {
+            this.course = course;
+        }
+
+        private void add(String cardId, Instant finishedAt) {
+            cards.add(cardId);
+            if (finishedAt.isAfter(lastFinishedAt)) {
+                lastFinishedAt = finishedAt;
+            }
+        }
     }
 
     private IntonationCourseListResponse courses(UUID userId, @Nullable Integer rank) {

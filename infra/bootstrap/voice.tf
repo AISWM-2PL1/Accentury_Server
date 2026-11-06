@@ -12,7 +12,7 @@
 #   - force_destroy도 없다. 비어 있지 않은 버킷은 destroy가 실패한다.
 #
 # 적용 순서: 이 스택(bootstrap)이 먼저다. 버킷이 생긴 뒤에 envs/staging, envs/prod를 apply해야 backend가 없는 버킷에
-# 쓰려다 실패하지 않는다 (README "음성 전용 S3" 절).
+# 쓰려다 실패하지 않는다 (docs/ops/secrets-ssm.md "음성 전용 S3 (KAN-269)" 절).
 
 variable "voice_reader_principal_arns" {
   type        = list(string)

@@ -5,7 +5,7 @@
 - 계약·저장: `backend/src/main/java/app/accentury/backend/feedback/`, `V1__baseline.sql`의 `session_feedback` 절(옛 V12, KAN-220 재베이스라인으로 합쳐짐)
 - 화면: `web/src/feedback/`, `web/src/result/ResultScreen.tsx`
 - 방침 반영과 그 근거: [`privacy-policy.md`](privacy-policy.md) (1·4·5·6·11·12항)
-- 계측 규칙: [`analytics.md`](analytics.md) · 슬랙 값 주입: `infra/README.md` 「이용 후기 슬랙 알림」
+- 계측 규칙: [`analytics.md`](analytics.md), 슬랙 값 주입: `docs/ops/secrets-ssm.md` 「이용 후기 슬랙 알림 (KAN-211)」
 - E2E: [`browser-e2e.md`](browser-e2e.md), `web/e2e/feedback.spec.ts`
 
 ## 1. 왜 GA4가 아니라 자체 API인가
@@ -123,7 +123,7 @@ staging과 prod가 채널을 나누지 않는다 — 구분은 메시지 머리�
   슬랙 응답 시간을 본다. 버려진 알림의 후기는 DB에 그대로 있다.
 
 URL 주입 절차(SSM SecureString `ACCENTURY_FEEDBACK_SLACKWEBHOOKURL`, apply 뒤 `put-parameter`)는
-`infra/README.md`의 「이용 후기 슬랙 알림」 절이 정본이다. WAF 경로 규칙도 2단계에서 들어왔다
+`docs/ops/secrets-ssm.md`의 「이용 후기 슬랙 알림 (KAN-211)」 절이 정본이다. WAF 경로 규칙도 2단계에서 들어왔다
 (`infra/modules/waf/main.tf`의 `feedback_path_regex`).
 
 ## 6. 웹 시트 (3단계)

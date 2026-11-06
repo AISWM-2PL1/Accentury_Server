@@ -7,6 +7,7 @@ import org.springframework.data.jpa.repository.Modifying;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 
+import java.time.Instant;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
@@ -34,6 +35,17 @@ public interface WordSetAttemptRepository extends JpaRepository<WordSetAttempt, 
             """)
     List<WordSetAttempt> findCompletedNewestFirst(@Param("userId") UUID userId,
                                                   @Param("contentVersion") String contentVersion);
+
+    /**
+     * 출석 달력 (KAN-314, §3.20) - 이 계정이 [from, to) 사이에 완료한 시도. 한 달 범위로 부른다. 순서는 호출부가 하루
+     * 안에서 다시 정하므로 여기서 정렬하지 않는다.
+     */
+    @Query("""
+            select a from WordSetAttempt a
+             where a.userId = :userId and a.completedAt >= :from and a.completedAt < :to
+            """)
+    List<WordSetAttempt> findCompletedBetween(@Param("userId") UUID userId, @Param("from") Instant from,
+                                              @Param("to") Instant to);
 
     /**
      * 탈퇴 때 계정의 시도를 전부 지운다 (§3.14). 답안은 FK {@code on delete cascade}로 함께 지워진다.

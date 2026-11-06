@@ -5,5 +5,5 @@ output "web_acl_arn" {
 
 output "log_group_name" {
   value       = aws_cloudwatch_log_group.waf.name
-  description = "us-east-1의 WAF 로그 그룹. Count 관찰과 차단 확인은 여기서 한다 (README 'WAF 웹 ACL')."
+  description = "us-east-1의 WAF 로그 그룹. Count 관찰과 차단 확인은 여기서 한다 (docs/ops/waf-edge.md 'Count 관찰 후 Block 전환')."
 }

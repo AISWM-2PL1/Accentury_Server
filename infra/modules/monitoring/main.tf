@@ -45,7 +45,7 @@ resource "aws_sns_topic" "alerts" {
 
 # 이메일 구독은 Terraform이 확인까지 해 줄 수 없다. apply 직후 상태는 PendingConfirmation이고
 # 수신자가 AWS가 보낸 메일의 확인 링크를 눌러야 활성화된다. 누르기 전에는 경보가 울려도
-# 메일이 오지 않으므로, 환경을 새로 지을 때마다 이 단계를 먼저 확인한다 (README '경보와 알림').
+# 메일이 오지 않으므로, 환경을 새로 지을 때마다 이 단계를 먼저 확인한다 (docs/ops/alarms.md '수신 주소와 구독 확인').
 #
 # destroy 시에도 미확인 구독은 AWS에서 지워지지 않고 state에서만 빠진다. 다만 토픽을 지우면
 # 딸린 구독이 함께 사라지므로 실제로 잔존물이 남지는 않는다.
@@ -478,9 +478,9 @@ resource "aws_cloudwatch_metric_alarm" "ai_temp_residue" {
 # 혼잡 판정을 DB로 옮긴 것과 같은 이유다. 태스크가 여럿이면 이 지표는 태스크마다 같은 값을 올리므로
 # Maximum으로 읽는다 (합이 아니다 - 합하면 태스크 수만큼 부풀려진다).
 #
-# 임계치 12는 폴링 혼잡 임계치(congestion-threshold 6, application.yml - KAN-172)의 두 배다. 6에서는 서버가
+# 임계치 20은 폴링 혼잡 임계치(congestion-threshold 10, application.yml - KAN-326)의 두 배다. 10에서는 서버가
 # 폴링 간격을 올려 스스로 압력을 빼는 것으로 충분하고, 그 조치에도 두 배로 쌓였다면 사람이 볼 일이다.
-# AI가 1건 10초라(KAN-57) 12건은 대기열 2분이다.
+# AI 1대가 분당 약 11건이라 20건은 대기열 약 2분이다.
 # 5분 연속을 요구해 업로드가 몰린 순간(다섯 문항 연속 제출)으로는 서지 않는다.
 #
 # treat_missing_data = "notBreaching": backend가 죽으면 지표가 끊기는데 그것은 no-healthy-target이 잡는다.
@@ -578,7 +578,7 @@ resource "aws_cloudwatch_metric_alarm" "analysis_timeouts_high" {
 # 응시자 전원이 재녹음을 되풀이하는데 다른 경보는 아무것도 울지 않는다 (검증자 리뷰 P2).
 #
 # 임계치 5는 5분에 5건이다 (analysis-timeouts-high와 같은 선). 2026-10-05부터 이틀간 prod에서는 분석의
-# 약 5%가 이 경우였고, AI 1대의 처리량(분당 6~7건)에서 그것은 5분에 2건 안팎이다. 5건을 넘으면 평소
+# 약 5%가 이 경우였고, AI 1대의 처리량(분당 약 11건, KAN-326)에서 그것은 5분에 3건 안팎이다. 5건을 넘으면 평소
 # 비율이 아니다. 한 사람이 음성 문항 전부에서 걸리고 다시 녹음해 또 걸리면 넘을 수 있는데, 그것도 사람이
 # 볼 일이다. 원인은 AI 로그의 "채점 불가 ... fields="와 backend 로그의 "채점 불가 판정 ... scriptKey="로 찾는다.
 #

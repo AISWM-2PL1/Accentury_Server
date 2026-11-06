@@ -14,6 +14,7 @@ import org.springframework.http.MediaType;
 import org.springframework.http.server.RequestPath;
 import org.springframework.web.filter.OncePerRequestFilter;
 import org.springframework.web.util.ServletRequestPathUtils;
+import org.jspecify.annotations.Nullable;
 import org.springframework.web.util.pattern.PathPattern;
 import org.springframework.web.util.pattern.PathPatternParser;
 import tools.jackson.databind.ObjectMapper;
@@ -42,6 +43,9 @@ class UploadRateLimitFilter extends OncePerRequestFilter {
 
     private static final PathPattern RECORDING_PATH =
             PathPatternParser.defaultInstance.parse("/v0/sessions/*/voice-items/*/recording");
+    /** 억양 학습 녹음 업로드 (§3.19, KAN-299) - 계정 토큰 검사가 multipart 해석 뒤라 여기서 IP로 먼저 끊는다. */
+    private static final PathPattern INTONATION_RECORDING_PATH =
+            PathPatternParser.defaultInstance.parse("/v0/learning/intonation-cards/*/recordings");
 
     private final RateLimits rateLimits;
     private final ClientIps clientIps;
@@ -56,27 +60,39 @@ class UploadRateLimitFilter extends OncePerRequestFilter {
     @Override
     protected void doFilterInternal(HttpServletRequest request, HttpServletResponse response,
                                     FilterChain filterChain) throws ServletException, IOException {
-        if ("POST".equals(request.getMethod()) && matchesRecordingPath(request)) {
-            try {
-                rateLimits.check(RateLimits.Scope.VOICE_UPLOAD_IP, clientIps.resolve(request));
-            } catch (ApiException e) {
-                writeRateLimited(response, e);
-                return;
+        if ("POST".equals(request.getMethod())) {
+            RateLimits.Scope scope = uploadScope(request);
+            if (scope != null) {
+                try {
+                    rateLimits.check(scope, clientIps.resolve(request));
+                } catch (ApiException e) {
+                    writeRateLimited(response, e);
+                    return;
+                }
             }
         }
         filterChain.doFilter(request, response);
     }
 
     /**
+     * 요청이 음성 업로드 경로면 그 경로의 IP 축, 아니면 null. 레벨테스트와 억양 학습은 통이 다르다 -
+     * 같은 IP의 학습 홍수가 레벨테스트 업로드를 막지 않게 한다 (KAN-299).
+     * <p>
      * MVC 라우팅과 같은 정규화(세그먼트 디코딩, matrix 파라미터 제거)로 매칭한다 -
      * raw URI 정규식은 {@code %72ecording}, {@code ;x=1} 같은 변형으로 컨트롤러에는
      * 닿으면서 제한만 피해 갈 수 있다 (Codex sol 리뷰 P1).
      */
-    private static boolean matchesRecordingPath(HttpServletRequest request) {
+    private static RateLimits.@Nullable Scope uploadScope(HttpServletRequest request) {
         RequestPath path = ServletRequestPathUtils.hasParsedRequestPath(request)
                 ? ServletRequestPathUtils.getParsedRequestPath(request)
                 : ServletRequestPathUtils.parseAndCache(request);
-        return RECORDING_PATH.matches(path.pathWithinApplication());
+        if (RECORDING_PATH.matches(path.pathWithinApplication())) {
+            return RateLimits.Scope.VOICE_UPLOAD_IP;
+        }
+        if (INTONATION_RECORDING_PATH.matches(path.pathWithinApplication())) {
+            return RateLimits.Scope.INTONATION_UPLOAD_IP;
+        }
+        return null;
     }
 
     /** 429 + Retry-After + 공통 오류 봉투 - GlobalExceptionHandler의 429 응답과 같은 형태다. */

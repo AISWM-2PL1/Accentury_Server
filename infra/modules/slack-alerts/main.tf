@@ -14,10 +14,10 @@
 # channel_configs_enabled인 환경(prod) 하나가 채널 설정을 모두 갖는다. #infra-alerts 설정에는 자기 토픽과 함께
 # infra_alerts_peer_envs(staging)의 토픽을 이름 규칙으로 조립해 붙인다. 그 환경은 토픽, 규칙, 경보만 만든다.
 # 피어 환경을 새로 지어 토픽이 다시 생기면 구독이 끊긴다. 토픽 ARN은 이름 규칙이라 그대로여서 이 환경의 plan은 변경 없음으로
-# 나온다 - 채널 설정을 -replace로 다시 만들어야 구독이 다시 붙는다 (README "슬랙 알림", Codex 리뷰 반영).
+# 나온다 - 채널 설정을 -replace로 다시 만들어야 구독이 다시 붙는다 (docs/ops/alarms.md "staging을 다시 지은 뒤", Codex 리뷰 반영).
 #
 # 슬랙 워크스페이스 승인(OAuth)은 Terraform이 못 한다 - 콘솔에서 사람이 한 번 하고 그 ID를 slack_team_id로 받는다
-# (README "슬랙 알림"). 채널에 Chatbot 앱을 초대하는 것도 사람이다.
+# (docs/ops/alarms.md "처음 한 번 사람이 하는 일"). 채널에 Chatbot 앱을 초대하는 것도 사람이다.
 
 terraform {
   required_providers {

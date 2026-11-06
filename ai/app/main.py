@@ -99,7 +99,7 @@ def create_app(settings: Settings | None = None, engine: AnalysisEngine | None =
             with suppress(asyncio.CancelledError):
                 await sweeper
             # 엔진이 프로세스 밖에 쥔 것을 놓게 한다 (KAN-22의 워커 프로세스). 놓지 않으면
-            # 워커가 별도 세션이라 부모를 따라 죽지 않고 RSS 7GB대짜리 고아로 남는다
+            # 워커가 별도 세션이라 부모를 따라 죽지 않고 RSS 5GB대짜리 고아로 남는다
             await _close_engine(resolved_engine)
             tempfile.tempdir = previous_tempdir
 

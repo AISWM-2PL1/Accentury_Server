@@ -8,6 +8,7 @@ import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatusCode;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.MethodArgumentNotValidException;
+import org.springframework.web.bind.MissingServletRequestParameterException;
 import jakarta.servlet.http.HttpServletResponse;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
@@ -123,9 +124,12 @@ public class GlobalExceptionHandler extends ResponseEntityExceptionHandler {
         }
 
         ErrorCode code = mapFrameworkStatus(statusCode);
-        String message = (ex instanceof MethodArgumentNotValidException manv)
-                ? firstFieldError(manv)
-                : code.defaultMessage();
+        // 필수 쿼리 파라미터 누락은 형식 오류(handleTypeMismatch)와 같이 어느 파라미터인지 담는다 (PR #61 리뷰).
+        String message = switch (ex) {
+            case MethodArgumentNotValidException manv -> firstFieldError(manv);
+            case MissingServletRequestParameterException missing -> missing.getParameterName() + ": 필수 값이 없습니다.";
+            default -> code.defaultMessage();
+        };
         // headers()는 빌더 내부로 복사하므로, 프레임워크가 넘긴 헤더를 건드리지 않고 지시자를 얹는다.
         return ResponseEntity.status(statusCode).headers(headers).cacheControl(NO_STORE)
                 .body(envelope(code, message));
