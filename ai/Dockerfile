@@ -17,12 +17,12 @@
 # 이 서버는 임시 디렉터리 하나를 프로세스 하나가 전용으로 쓴다는 전제 위에 서 있다(KAN-27).
 # uvicorn --workers로 여러 프로세스를 한 디렉터리에 띄우면, 기동 시 도는 잔여물 정리가
 # 형제 워커가 지금 처리 중인 오디오를 지운다. 워커를 늘려야 하면 반드시 워커마다 다른
-# ACCENTURY_AI_TEMP_DIR를 준다. 어차피 모델이 RSS 7GB대라 프로세스 1개가 전제다(KAN-36).
+# ACCENTURY_AI_TEMP_DIR를 준다. 어차피 모델이 RSS 5GB대라 프로세스 1개가 전제다(KAN-36).
 ARG MODEL_REGISTRY=325771561913.dkr.ecr.ap-northeast-2.amazonaws.com
-# f77011c = 26ac67a 위에 KAN-293 단계 시간 패치(serve.py, bench_server.py)만 얹은 얇은 층이다. 가중치, 참조
-# 분포, 패키지는 26ac67a와 같다. 태그는 모델 레포 커밋이 아니라 sha256("base=26ac67a" + 두 파일)[:7]이고,
-# 같은 패치가 모델 레포에 들어가 정식 해시로 올라오면 그 태그로 바꾼다 (README.md "추론 단계별 소요 시간").
-ARG MODEL_TAG=f77011c
+# 6415e0d = f77011c 위에 MFA 상주화(KAN-296)와 OpenVINO int8 Whisper(KAN-303)를 얹고 기존 Whisper 가중치와 기본 파이썬
+# torch를 뺀 이미지다. 만드는 법은 model-patch/다. 이미지에 torch 경로가 없으므로 되돌리려면 이 줄을 f77011c로 바꿔
+# 다시 배포한다 (README.md "MFA 상주화와 OpenVINO int8").
+ARG MODEL_TAG=6415e0d
 FROM ${MODEL_REGISTRY}/accentury/ai-model:${MODEL_TAG} AS runtime
 
 # PYTHONDONTWRITEBYTECODE - 비루트 사용자가 소스 디렉터리에 .pyc를 못 써서 나는 잡음을 없앤다.
@@ -52,9 +52,8 @@ COPY app app
 #   /app       HOME이다. 라이브러리가 ~/.cache에 쓴다
 #   /opt/mfa   MFA_ROOT_DIR - 정렬 작업 폴더가 여기 생긴다 (약 60MB, pretrained_models 포함)
 #
-# HF_HOME(/opt/hf)은 일부러 두고 온다. Whisper 가중치 2.8GB가 있는 곳이라 소유자를 바꾸면
-# 그 2.8GB가 우리 이미지의 레이어로 통째로 복사된다. 오프라인 모드(HF_HUB_OFFLINE=1)라 읽기만
-# 하면 되고, 그래도 잠금 파일을 만들려는 경로가 있어 그 디렉터리 하나만 미리 내준다.
+# HF_HOME(/opt/hf)은 오프라인 모드(HF_HUB_OFFLINE=1)라 읽기만 한다. 잠금 파일을 만들려는 경로가 있어 그 디렉터리
+# 하나만 미리 내준다.
 RUN groupadd --system --gid 10001 accentury \
  && useradd --system --uid 10001 --gid accentury --home-dir /app --shell /usr/sbin/nologin accentury \
  && mkdir -p /opt/hf/hub/.locks \

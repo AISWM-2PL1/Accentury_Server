@@ -114,7 +114,7 @@ Route 53 호스팅 영역 ── Porkbun에서 NS 위임 ── ACM 인증서 2�
          │   │   ▼
          │   │  ┌──────────────────────────────────────────────────────┐
          │   │  │ ai 호스트 EC2 c7i.xlarge x86, ASG min 1 max 3            │
-         │   │  │   PROCESSING >= 6 이면 +1, <= 1 이면 -1                │
+         │   │  │   PROCESSING >= 10 이면 +1, <= 1 이면 -1               │
          │   │  │   루트 40GiB, ai 컨테이너 mem_limit 7g                 │
          │   │  │   iptables DOCKER-USER: 컨테이너 → VPC 밖 egress DROP  │
          │   │  │   IMDSv2 hop limit 1, health 타이머 → CloudWatch       │

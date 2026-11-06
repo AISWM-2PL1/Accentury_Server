@@ -1,7 +1,7 @@
 """개발 기계용 가짜 엔진 - 실모델 없이 스택을 띄우는 유일한 길 (KAN-22, PR #87 리뷰 반영).
 
 실모델(:mod:`app.track1`)은 베이스 이미지의 전달본이 있어야만 돌고, 그 이미지는 linux/amd64에
-RSS 7GB대라 개발 기계와 CI 러너에서 뜨지 않는다. 스텁을 지운 것은 2026-09-05의 팀 결정이지만
+RSS 5GB대라 개발 기계와 CI 러너에서 뜨지 않는다. 스텁을 지운 것은 2026-09-05의 팀 결정이지만
 그 결과 앱과 웹의 로컬 완주 확인(에뮬레이터, ``web/e2e``의 ``full-run``, ``retake``)이 돌릴
 스택을 잃었다. 이 엔진은 그 자리만 메운다 - ``ACCENTURY_AI_ANALYSIS_ENGINE=fake``로 명시해야
 켜지고, 배포 compose가 켜는 ``ACCENTURY_AI_INTERNAL_TOKEN_REQUIRED=true``와는 양립하지 않아

@@ -56,7 +56,7 @@ AI 호스트가 내부 ALB 뒤에 있으므로(KAN-201) "받아 줄 healthy AI�
 
 | 경보 | 지표 | 조건 | 동작 |
 | --- | --- | --- | --- |
-| `ai-scale-out` | `accentury.analysis.processing.value` (Maximum) | 1분 최대 >= 6이 1회 | +1 (워밍업 300초 동안 재확대 안 함) |
+| `ai-scale-out` | `accentury.analysis.processing.value` (Maximum) | 1분 최대 >= 10이 1회 | +1 (워밍업 300초 동안 재확대 안 함) |
 | `ai-scale-in` | `accentury.analysis.processing.value` (Maximum) | 1분 최대 <= 1이 15회 연속 | -1 (min까지) |
 
 ### backend 오토스케일링 경보 (2개, AWS 생성)

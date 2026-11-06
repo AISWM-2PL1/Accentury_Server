@@ -140,7 +140,7 @@ public record AccenturyProperties(Session session,
      */
     public record Analysis(@DefaultValue("800") long pollAfterMs,
                            @DefaultValue("3000") long congestedPollAfterMs,
-                           @DefaultValue("6") int congestionThreshold,
+                           @DefaultValue("10") int congestionThreshold,
                            @DefaultValue("1s") Duration congestionCacheTtl,
                            @DefaultValue("24h") Duration retention,
                            @DefaultValue("300s") Duration processingTimeout,
