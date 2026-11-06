@@ -70,8 +70,8 @@ class AnalysisDispatchConfigTest {
 
     @Test
     void 기본_큐_용량은_큐_유실_한도_안에_소진되는_크기다() {
-        // AI 1대가 1건 10초(KAN-57)로 비우므로 큐 30건 = 5분 = queued-timeout (워커 수와 무관하다 - AI가
-        // 한 번에 하나만 추론한다. AI가 2대 이상이면 더 빨리 빈다, KAN-272). 그 뒤는 스위퍼가 정리하니
+        // AI 1대가 1건 약 6초(KAN-326)로 비우므로 큐 30건은 약 3분이라 queued-timeout 5분 안이다 (워커 수와 무관하다 -
+        // AI가 한 번에 하나만 추론한다. AI가 2대 이상이면 더 빨리 빈다, KAN-272). 그 뒤는 스위퍼가 정리하니
         // 접수 시점에 503으로 미는 편이 낫다 (KAN-172).
         AccenturyProperties.Analysis analysis = PropertiesFixture.analysis();
         ThreadPoolTaskExecutor executor = new AnalysisDispatchConfig().analysisExecutor(
