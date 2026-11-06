@@ -120,6 +120,14 @@ class _ResidentMFA:
         self._next: tuple[threading.Thread, dict] | None = None
         self.timeout = float(os.environ.get("ACCENTURY_MFA_RESIDENT_TIMEOUT", "30"))
         self.recycle = int(os.environ.get("ACCENTURY_MFA_RESIDENT_RECYCLE", "200"))
+        self.cooldown = float(os.environ.get("ACCENTURY_MFA_RESIDENT_COOLDOWN", "300"))
+        self._off_until = 0.0
+
+    def disable(self, error: BaseException) -> None:
+        """기동에 실패했다. 요청마다 기동을 기다리지 않게 잠시 상주 모드를 쉰다."""
+        self._off_until = time.monotonic() + self.cooldown
+        print(f"상주 MFA 기동 실패, {self.cooldown:.0f}초 쉰다: {type(error).__name__}: {str(error)[:300]}",
+              file=sys.stderr, flush=True)
 
     def start(self) -> None:
         self._take_next()
@@ -136,6 +144,8 @@ class _ResidentMFA:
             res = self._ask({"op": "ping", "dic": str(MFA_DICT), "acoustic": MFA_ACOUSTIC}, max(self.timeout, 60.0), p)
             if not res.get("ok"):
                 raise RuntimeError(f"상주 MFA 기동 실패: {res.get('error', '')}")
+            if not all(res.get("warm", {}).values()):
+                print(f"상주 MFA 예열 일부 실패 {res.get('warm')}", file=sys.stderr, flush=True)
         except BaseException:
             _close_proc(p)
             raise
@@ -186,12 +196,18 @@ class _ResidentMFA:
         답했는데 실패했으면 한 번짜리 `align_one` 도 같은 입력에서 같은 이유로 실패하므로 호출한 쪽은
         그것을 건너뛰고 `align` 으로 간다 (현행 `align_one` 실패와 같은 길). 답하지 못했으면 한 번짜리로 간다.
         """
+        if time.monotonic() < self._off_until:
+            return None, "상주 MFA 기동 실패 뒤 쉬는 중이다", False
         aligned.mkdir(parents=True, exist_ok=True)
         out = aligned / "u.TextGrid"
         try:
             self._take_next()
             if self.proc is None or self.proc.poll() is not None or self.jobs >= self.recycle:
-                self.start()
+                try:
+                    self.start()
+                except Exception as e:  # noqa: BLE001 - 기동 실패만 쉰다. 정렬 중 실패는 다음 요청이 다시 띄운다
+                    self.disable(e)
+                    raise
             res = self._ask({"op": "align", "wav": str(lab / "u.wav"), "txt": str(lab / "u.txt"),
                              "dic": str(MFA_DICT), "acoustic": MFA_ACOUSTIC, "out": str(out)}, self.timeout)
             self.jobs += 1
@@ -201,7 +217,7 @@ class _ResidentMFA:
         if self.jobs >= self.recycle:        # 이번 건의 TextGrid 는 이미 나왔다. 다음 요청을 기다리게 하지 않도록 지금 갈아 둔다
             self.close()
             self._prepare_next()
-        return (out if res.get("ok") and out.exists() else None), res.get("error", ""), True
+        return (out if res.get("ok") and out.exists() else None), res.get("error", ""), not res.get("crashed")
 
     def close(self) -> None:
         """기다리지 않고 바로 죽인다. 정렬 중이던 자손까지 먼저 죽인다.
@@ -365,7 +381,8 @@ class Track1Scorer:
             # 기동 때 띄워 import 비용을 워밍업에 넣는다 (KAN-296). 실패해도 첫 요청에서 다시 띄우므로 기동은 막지 않는다
             try:
                 _RESIDENT.start()
-            except Exception:  # noqa: BLE001
+            except Exception as e:  # noqa: BLE001
+                _RESIDENT.disable(e)
                 _RESIDENT.close()
 
     def ref(self, key: str):
