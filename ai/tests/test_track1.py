@@ -74,7 +74,9 @@ class Track1Scorer:
                           "set": {{"대본": "직렬화할 수 없는 값이 섞이는 문장"}},
                           "legacy": {{"대본": "단계 시간이 detail에 옛 이름으로 있는 문장"}},
                           "both": {{"대본": "단계 시간이 최상위와 detail에 둘 다 있는 문장"}},
-                          "gatefail": {{"대본": "게이트에서 탈락해 MFA까지 가지 않는 문장"}}}}
+                          "gatefail": {{"대본": "게이트에서 탈락해 MFA까지 가지 않는 문장"}},
+                          "sttgone": {{"대본": "전사 상주 프로세스가 죽은 문장"}},
+                          "sttpipe": {{"대본": "전사 상주 프로세스에 쓰다가 끊긴 문장"}}}}
 
     def score(self, wav, script_key, transcript=None, with_feedback=True):
         if script_key not in self.sentences:
@@ -82,6 +84,10 @@ class Track1Scorer:
         if script_key == "broken":
             # 전달본 내부의 dict 조회 실패를 흉내 낸다 - 서비스 문장인데 참조가 빠진 경우
             raise KeyError("reference_1|7")
+        if script_key == "sttgone":
+            raise RuntimeError("OpenVINO 프로세스가 끝났다 returncode=-9")
+        if script_key == "sttpipe":
+            raise BrokenPipeError(32, "Broken pipe")
         if script_key == "slow":
             # 정렬 작업 폴더를 만들어 둔 채 오래 돈다 - 취소되면 이것이 남는다
             workdir = Path(tempfile.mkdtemp(prefix="track1-"))
@@ -557,6 +563,32 @@ def test_워커가_죽으면_다음_요청이_새_워커로_간다(tmp_path, tra
 
     first, second, outcome = asyncio.run(scenario())
 
+    assert second != first
+    assert outcome.status == "OK"
+
+
+@pytest.mark.parametrize("script_key", ["sttgone", "sttpipe"])
+def test_전사_상주_프로세스가_죽으면_워커를_내려_다음_요청이_새로_적재한다(tmp_path, transfer, script_key):
+    # 전사 상주 프로세스만 죽고 워커가 남으면 health는 UP인 채 전 요청이 실패한다
+    settings = _settings(tmp_path, transfer)
+    engine = Track1Engine(settings)
+
+    async def scenario():
+        await engine.warm_up()
+        first = engine._process.pid  # noqa: SLF001
+        try:
+            with pytest.raises(RuntimeError, match="트랙 1 추론 실패"):
+                await engine.analyze(_request(settings, script_key=script_key))
+            code = await asyncio.wait_for(engine._process.wait(), timeout=10)  # noqa: SLF001
+            outcome = await engine.analyze(_request(settings))
+            second = engine._process.pid  # noqa: SLF001
+        finally:
+            await engine.close()
+        return first, second, code, outcome
+
+    first, second, code, outcome = asyncio.run(scenario())
+
+    assert code == 1
     assert second != first
     assert outcome.status == "OK"
 

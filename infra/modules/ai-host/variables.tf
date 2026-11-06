@@ -51,7 +51,7 @@ variable "compose_version" {
 
 variable "root_volume_size" {
   type        = number
-  description = "루트 볼륨 GiB. 스텁 20, 실모델(KAN-36 B단계) tfvars 40 - ai 이미지 7GB x SHA 태그 2개 공존 + pull 임시 공간 (근거는 envs tfvars 주석). 값을 바꾸면 시작 템플릿이 새 버전이 되어 인스턴스가 교체된다."
+  description = "루트 볼륨 GiB. 스텁 20, 실모델(KAN-36 B단계) tfvars 40 - ai 이미지 약 6GB x SHA 태그 2개 공존 + pull 임시 공간 (근거는 envs tfvars 주석). 값을 바꾸면 시작 템플릿이 새 버전이 되어 인스턴스가 교체된다."
   default     = 20
 }
 
@@ -115,7 +115,7 @@ variable "max_size" {
 
 variable "health_check_grace_period" {
   type        = number
-  description = "ASG가 새 인스턴스의 대상 그룹 상태 검사 결과를 무시하는 시간(초, KAN-201). 첫 부팅(docker 설치 + 이미지 7GB pull + 모델 적재, 실측 3분 22초. 사전 적재 AMI를 넣으면 EBS 지연 로딩으로 최대 5분 34초)을 덮어야 한다 - 짧으면 워밍업 중인 새 인스턴스를 종료해 교체가 무한히 돈다. 파이프라인의 원격 healthy 대기(600초)와 pull 시간을 더한 값이고, staging 실측(2026-09-11, docs/wiki/infra-history.md의 KAN-201 항목)으로 확정한다."
+  description = "ASG가 새 인스턴스의 대상 그룹 상태 검사 결과를 무시하는 시간(초, KAN-201). 첫 부팅(docker 설치 + 이미지 약 6GB pull + 모델 적재, 실측 3분 22초. 사전 적재 AMI를 넣으면 EBS 지연 로딩으로 최대 5분 34초)을 덮어야 한다 - 짧으면 워밍업 중인 새 인스턴스를 종료해 교체가 무한히 돈다. 파이프라인의 원격 healthy 대기(600초)와 pull 시간을 더한 값이고, staging 실측(2026-09-11, docs/wiki/infra-history.md의 KAN-201 항목)으로 확정한다."
   default     = 900
 }
 
@@ -143,8 +143,8 @@ variable "scaling_metric_namespace" {
 
 variable "scale_out_threshold" {
   type        = number
-  description = "진행 중 분석이 이 건수 이상인 분이 1번 나오면 +1 (KAN-201. 판정은 KAN-272에서 2분 연속에서 1분으로 줄였다). backend의 폴링 혼잡 임계치(congestion-threshold 6, KAN-172)와 같은 값 - 서버가 폴링 간격을 올려 압력을 빼는 것과 같은 지점에서 처리량도 늘린다. AI가 1건 10초라 6건은 대기열 1분이다."
-  default     = 6
+  description = "진행 중 분석이 이 건수 이상인 분이 1번 나오면 +1 (KAN-201. 판정은 KAN-272에서 2분 연속에서 1분으로 줄였다). backend의 폴링 혼잡 임계치(congestion-threshold)와 같은 값 - 서버가 폴링 간격을 올려 압력을 빼는 것과 같은 지점에서 처리량도 늘린다. AI 1대가 분당 약 11건을 처리해 10건은 대기열 1분 안쪽이다 (KAN-326)."
+  default     = 10
 }
 
 variable "scale_in_threshold" {

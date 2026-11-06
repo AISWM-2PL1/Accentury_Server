@@ -478,9 +478,9 @@ resource "aws_cloudwatch_metric_alarm" "ai_temp_residue" {
 # 혼잡 판정을 DB로 옮긴 것과 같은 이유다. 태스크가 여럿이면 이 지표는 태스크마다 같은 값을 올리므로
 # Maximum으로 읽는다 (합이 아니다 - 합하면 태스크 수만큼 부풀려진다).
 #
-# 임계치 12는 폴링 혼잡 임계치(congestion-threshold 6, application.yml - KAN-172)의 두 배다. 6에서는 서버가
+# 임계치 20은 폴링 혼잡 임계치(congestion-threshold 10, application.yml - KAN-326)의 두 배다. 10에서는 서버가
 # 폴링 간격을 올려 스스로 압력을 빼는 것으로 충분하고, 그 조치에도 두 배로 쌓였다면 사람이 볼 일이다.
-# AI가 1건 10초라(KAN-57) 12건은 대기열 2분이다.
+# AI 1대가 분당 약 11건이라 20건은 대기열 약 2분이다.
 # 5분 연속을 요구해 업로드가 몰린 순간(다섯 문항 연속 제출)으로는 서지 않는다.
 #
 # treat_missing_data = "notBreaching": backend가 죽으면 지표가 끊기는데 그것은 no-healthy-target이 잡는다.

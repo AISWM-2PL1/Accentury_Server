@@ -161,12 +161,12 @@ AI 서버는 backend와 다른 EC2에서 돕니다. 같은 compose 네트워크 
 옛 `score`는 F0 추출(`extract_utterance`)까지 합친 값이라 `scoring`에 F0가 섞여 있고, `gate`와 `f0`는
 비어 있습니다. 목록에 없는 이름은 버립니다 - 이름이 곧 CloudWatch 차원 값이고 조합 하나가 월 0.30달러입니다.
 
-모델 태그 `f77011c`(`ai/Dockerfile`의 `MODEL_TAG`)부터는 전달본이 다섯 이름으로 직접 싣습니다.
+모델 태그 `f77011c`부터는 전달본이 다섯 이름으로 직접 싣습니다.
 이 태그는 `26ac67a` 위에 `src/scoring/serve.py`와 `bench_server.py`만 바꿔 얹은 얇은 층이고(`transcribe`는
 Whisper, `gate`는 `align_transcript`, `align`은 MFA, `f0`는 `extract_utterance`, `scoring`은 `score_extracted`),
 가중치와 참조 분포와 패키지는 `26ac67a`와 같습니다. 모델 레포의 커밋 해시가 아니라
 `sha256("base=26ac67a" + 두 파일)[:7]`이라, 같은 패치가 모델 레포에 들어가 정식 해시로 올라오면 그 태그로
-바꿉니다. `modelVersion`은 `track1-v3.4-2026-08-31b+f77011c+whisper-large-v3+bfloat16`으로 나옵니다.
+바꿉니다. 지금 쓰는 태그는 `6415e0d`이고 `modelVersion`은 `track1-v3.4-2026-08-31b+6415e0d+whisper-large-v3+ov-int8`로 나옵니다.
 
 콜드/웜은 **그 워커에서 MFA가 처음 실제로 돈 요청까지인가**입니다. 가중치는 워밍업에서
 이미 올라와 있어도 전달본 안쪽의 지연 초기화가 첫 채점에서 한 번 일어나고, 그 실체는 MFA 첫 실행입니다
@@ -181,6 +181,40 @@ Whisper, `gate`는 `align_transcript`, `align`은 MFA, `f0`는 `extract_utteranc
   **읽으면 비워집니다** - 소비자가 그 타이머 하나라는 전제이고, 그 회차의 발행이 실패하면 그
   1분의 표본은 사라집니다. 표본을 접지 않고 낱개로 올리는 이유는 CloudWatch가 그래야 p50과
   p95를 계산하기 때문입니다.
+
+### MFA 상주화와 OpenVINO int8
+
+지금 모델 태그 `6415e0d`(`ai/Dockerfile`의 `MODEL_TAG`)는 `f77011c`에 아래를 더한 이미지입니다.
+
+| 항목 | 내용 |
+| --- | --- |
+| MFA | 상주 프로세스가 요청마다 fork한 자식이 정렬합니다. |
+| Whisper | OpenVINO int8로 추론합니다. 스레드는 `ACCENTURY_WHISPER_OV_THREADS=2`입니다. |
+| 제거 | 기존 Whisper 가중치와 기본 파이썬 torch를 뺐습니다. |
+
+원본 파일은 `model-patch/`에 있습니다. `model-patch/build.sh`로 다시 만들 수 있고, 태그는 `sha256("base=f77011c" + 빌드 입력 파일)[:7]`이라
+`6415e0d`와 다른 값이 나옵니다. 이 태그는 같은 내용을 단계별로 쌓아 만든 이미지입니다. OpenVINO IR은 ECR의 `ai-model:6415e0d`에서
+가져오고, IR을 새로 만들 때는 `model-patch/export_ir.py`를 씁니다.
+
+**MFA 상주화.** 워밍업 때 `mfa_one.py --serve`를 띄워 import, librosa 예열, 발음 사전 FST 생성을 끝내 둡니다. 요청은 이 프로세스를
+fork한 자식이 정렬합니다. 한 프로세스에서 연달아 정렬하면 둘째 건부터 경계와 묵음 칸이 달라지기 때문입니다.
+
+| 상황 | 동작 |
+| --- | --- |
+| 상주 프로세스가 죽었거나 30초 안에 답하지 않음 | 그 요청은 한 번짜리 정렬로 처리하고 다음 요청에서 다시 띄웁니다. |
+| 정렬 자체가 실패 | `mfa align`으로 한 번 더 갑니다. |
+| 200건마다 | 상주 프로세스를 새로 띄웁니다 (`ACCENTURY_MFA_RESIDENT_RECYCLE`). 새 프로세스는 뒤에서 뜨므로 다음 요청이 기동을 기다리지 않습니다. |
+| 취소 | 상주 프로세스는 워커와 같은 프로세스 그룹이라 함께 거둬지고, 새 워커가 워밍업 때 다시 띄웁니다. |
+
+**OpenVINO int8.** OpenVINO 패키지는 transformers 5.5가 필요해 모델 파이썬(4.57)에 섞지 않고 `/opt/venv-ov`에 둡니다. 워커의
+`track2_asr.py`가 이 환경의 `ov_asr.py`를 상주 프로세스로 띄워 파이프로 음성을 넘깁니다. 상주 프로세스는 워커가 죽으면 같이 죽습니다. 반대로 상주 프로세스가 죽으면 그 요청은 실패하고 워커가 내려가며, 다음 요청이 새로 적재합니다.
+`INFERENCE_NUM_THREADS`를 3이나 4로 쓰려면 `ENABLE_HYPER_THREADING`도 켜야 하는데, c7i.xlarge(물리 코어 2개)에서는 2보다 느립니다.
+
+프로세스 RSS 합계는 약 4.8GiB이고 그중 약 1.8GiB가 모델 파일 매핑입니다. `docker stats`는 비활성 파일 캐시를 빼고 보여 주므로
+메모리를 비교할 때는 프로세스 RSS를 봅니다.
+
+**롤백.** 이미지에 torch 경로가 없어서 `ai/Dockerfile`의 `MODEL_TAG`를 `f77011c`로 바꿔 다시 배포합니다. MFA 상주화만 끄려면
+컨테이너에 `ACCENTURY_MFA_MODE=align_one`을 줍니다. `modelVersion`의 코드 해시와 `ov-int8`로 이 이미지가 채점한 결과를 가를 수 있습니다.
 
 ### 엔진 쪽 계약
 

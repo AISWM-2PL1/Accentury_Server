@@ -42,13 +42,13 @@ backend 목표 추적 경보 2개는 이름이 `TargetTracking-`로 시작해 pr
 | 경보 | 지표 | 조건 | 결측 처리 |
 | --- | --- | --- | --- |
 | `ai-temp-residue` | `accentury/ai` `TempFiles` (차원 env) | 5분 최대 >= 20이 2회 연속 | `notBreaching` |
-| `analysis-backlog-high` | `accentury/backend` `accentury.analysis.processing.value` | 1분 최대 >= 12가 5회 연속 (`analysis_backlog_threshold` 기본 12) | `notBreaching` |
+| `analysis-backlog-high` | `accentury/backend` `accentury.analysis.processing.value` | 1분 최대 >= 20이 5회 연속 (`analysis_backlog_threshold` 기본 20) | `notBreaching` |
 | `analysis-timeouts-high` | `accentury.analysis.timeouts.count`의 두 사유(stuck, lost) 합 | 5분 합계 > 5 | `notBreaching` |
 | `analysis-unscorable-high` (KAN-272) | `accentury.analysis.judged.count`의 `reason=unscorable` | 5분 합계 > 5 | `notBreaching` |
 | `translation-quota-exhausted` (KAN-266) | `accentury.translation.llm.calls.count`의 `outcome=rate_limited` | 5분 합계 > 0 (`translation_quota_exhausted_threshold` 기본 0, 한 번이라도 오면 운다) | `notBreaching` |
 | `result-wait-high` (KAN-284) | `accentury.result.wait.percentile.value` (`phi=0.95`, 단위 ms) | 1분 최대 >= 30초가 3회 연속 (`result_wait_threshold_seconds`) | `notBreaching` |
 
-`analysis-backlog-high`의 12는 폴링 혼잡 임계치(`congestion-threshold` 6, KAN-172)의 두 배다. 임계를 다시 보는 시점은
+`analysis-backlog-high`의 20은 폴링 혼잡 임계치(`congestion-threshold` 10, KAN-326)의 두 배다. 임계를 다시 보는 시점은
 wiki의 "임계치를 언제 다시 보는가"에 있다.
 
 `analysis-unscorable-high`가 울면: AI가 분석 결과에 NaN을 내는 경우(`ANALYSIS_UNSCORABLE`)는 계약대로 온 판정이라 회로에 실패로

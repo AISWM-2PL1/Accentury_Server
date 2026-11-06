@@ -457,7 +457,7 @@ resource "aws_autoscaling_group" "ai" {
   target_group_arns = [aws_lb_target_group.ai.arn]
 
   # 대상 그룹 상태 검사(/internal/v0/health 200)를 본다 (KAN-201). EC2 상태 검사만 보던 KAN-36과 달리 컨테이너가
-  # 준비 상태를 잃은 인스턴스도 교체된다. 유예는 첫 부팅(docker 설치 + 이미지 7GB pull + 모델 적재)을 덮는
+  # 준비 상태를 잃은 인스턴스도 교체된다. 유예는 첫 부팅(docker 설치 + 이미지 약 6GB pull + 모델 적재)을 덮는
   # 값이다 - 짧으면 아직 워밍업 중인 새 인스턴스를 unhealthy로 보고 종료해 교체가 무한히 돈다 (variables.tf).
   health_check_type         = "ELB"
   health_check_grace_period = var.health_check_grace_period
@@ -512,8 +512,8 @@ resource "aws_autoscaling_group" "ai" {
 # ---- 오토스케일링 정책 (KAN-201) ----
 
 # 기준은 backend가 CloudWatch에 올리는 전 인스턴스의 PROCESSING 작업 수(accentury.analysis.processing, KAN-167)다.
-# 큐가 없는 구조라 그 값이 곧 AI에 걸린 압력이고, 폴링 혼잡 판정(congestion-threshold 6, KAN-172)과 같은 지표다.
-# CPU는 쓰지 않는다 - 추론 1건이 10초라 CPU가 오르는 시점에는 이미 대기열이 있다. 새 인스턴스는 부팅에 수 분이
+# 큐가 없는 구조라 그 값이 곧 AI에 걸린 압력이고, 폴링 혼잡 판정(congestion-threshold, KAN-172)과 같은 지표다.
+# CPU는 쓰지 않는다 - 추론 1건이 약 6초라 CPU가 오르는 시점에는 이미 대기열이 있다. 새 인스턴스는 부팅에 수 분이
 # 걸리므로(docker 설치 + 이미지 pull + 모델 적재) 확대는 그 시간을 워밍업으로 잡아 그동안 또 늘리지 않는다.
 # backend 태스크가 여럿이면 지표는 태스크마다 같은 값이라 Maximum으로 읽는다 (monitoring 모듈 analysis-backlog-high와
 # 같다). 지표 이름의 .value 접미사는 Micrometer CloudWatch 레지스트리가 게이지에 붙이는 것이다.
@@ -545,9 +545,9 @@ resource "aws_autoscaling_policy" "scale_in" {
 }
 
 # 혼잡 임계치 이상이 1분이면 +1 (KAN-272, 2026-10-06 - 그 전에는 2분 연속). 2분을 요구한 것은 한 사람이 문항을
-# 연달아 제출한 순간에 늘리지 않기 위해서였는데, 그 경우는 진행 중이 5건을 넘지 않아 임계치 6에 닿지 않는다.
-# 6건이면 이미 두 사람 이상이 겹친 것이고 대기열이 1분이다. 2026-10-06 prod에서는 부하 시작(14:52)부터 2번째
-# 인스턴스 기동(14:56)까지 4분이 걸렸고 그 사이 진행 중이 19건까지 쌓였다 - 판정에서 1분을 줄인다.
+# 연달아 제출한 순간에 늘리지 않기 위해서였는데, 한 사람의 음성은 3건이라 임계치 10에 닿지 않는다.
+# 10건이면 3~4명이 겹친 것이고 AI 1대 기준 대기열이 1분 안쪽이다 (KAN-326). 2026-10-06 prod에서는 부하 시작(14:52)부터
+# 2번째 인스턴스 기동(14:56)까지 4분이 걸렸고 그 사이 진행 중이 19건까지 쌓였다 - 판정에서 1분을 줄인다.
 # treat_missing_data = notBreaching: backend가 죽어 지표가 끊긴 것은 no-healthy-target(monitoring)이 잡는다.
 resource "aws_cloudwatch_metric_alarm" "scale_out" {
   alarm_name        = "${local.name}-scale-out"

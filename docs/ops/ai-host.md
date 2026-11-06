@@ -36,7 +36,7 @@ backend는 이 호스트에 없다. KAN-165 전의 backend 호스트(`accentury-
 | | ai 호스트 `accentury-{env}-ai` |
 | --- | --- |
 | 인스턴스 | ASG min 1 max 3 (tfvars `ai_max_size`), `c7i.xlarge` 두 환경 동일 (tfvars `ai_instance_type`). 8GB 메모리를 이 컨테이너 혼자 쓴다 (실모델 RSS 최대 6.2GB) |
-| 루트 볼륨 | 40GiB gp3 암호화 (tfvars `ai_root_volume_size`). 이미지 7GB x 2 공존 + pull 임시 공간 |
+| 루트 볼륨 | 40GiB gp3 암호화 (tfvars `ai_root_volume_size`). 이미지 약 6GB x 2 공존 + pull 임시 공간 |
 | 컨테이너 메모리 상한 | `mem_limit: 7g`. 호스트 7.6GiB에서 OS와 에이전트 몫 0.6GiB를 뺀 값이다. 근거는 `docker-compose.ai.yml` 주석 |
 | 보안 그룹 | ai-sg (ai-alb-sg만 8000. ALB는 backend-sg만 8000) |
 | 컨테이너 | ai (호스트 8000, 내부 ALB만 닿는다) |
@@ -57,8 +57,8 @@ backend가 부르는 이름 `ai.accentury.internal`은 내부 ALB(`accentury-{en
 | 상태 검사 | `GET /internal/v0/health` 200, 15초 x 정상 2회 / 비정상 3회 | 워밍업 전(503 STARTING)에는 트래픽이 가지 않는다. 토큰 불필요. |
 | ALB idle timeout | 90초 | backend 읽기 타임아웃(ai-timeout 85초)보다 길어야 한다. 기본 60초면 긴 추론이 504로 끊긴다. |
 | 등록 해제 지연 | 90초 | 빠지는 인스턴스의 진행 중 추론(AI 상한 75초)이 끝날 시간이다. |
-| ASG 상태 검사 | ELB, 유예 900초 | 첫 부팅(docker 설치 + 이미지 7GB pull + 모델 적재)이 실측 약 3분 22초다. 파이프라인의 healthy 대기(600초)에 pull을 더한 여유다. |
-| 확대 | `accentury.analysis.processing.value` Maximum >= 6, 1분 x 1회 -> +1, 워밍업 300초 | backend의 폴링 혼잡 임계치와 같은 지점이다. CPU는 추론 1건이 10초라 밀림보다 늦다. 한 사람이 문항을 연달아 올려도 6에 닿지 않는다. 워밍업은 prod 실측 부팅(시작에서 healthy까지) 약 3분 + 경보 해제 지연 1~2분이다. |
+| ASG 상태 검사 | ELB, 유예 900초 | 첫 부팅(docker 설치 + 이미지 약 6GB pull + 모델 적재)이 실측 약 3분 22초다. 파이프라인의 healthy 대기(600초)에 pull을 더한 여유다. |
+| 확대 | `accentury.analysis.processing.value` Maximum >= 10, 1분 x 1회 -> +1, 워밍업 300초 | backend의 폴링 혼잡 임계치와 같은 지점이다. CPU는 추론 1건이 약 6초라 밀림보다 늦다. 한 사람의 음성은 3건이라 연달아 올려도 10에 닿지 않는다. 워밍업은 prod 실측 부팅(시작에서 healthy까지) 약 3분 + 경보 해제 지연 1~2분이다. |
 | 축소 | 같은 지표 <= 1, 1분 x 15회 -> -1, 그 뒤 ALARM이 유지되는 동안 약 3분마다 다시 -1 (min까지) | 늘어난 인스턴스는 늘어난 동안만 과금이라 확대보다 훨씬 느리게 접는다. 실측 3에서 2가 16분, 2에서 1이 19분이다. |
 | SG | backend-sg -> ai-alb-sg -> ai-sg (8000) | backend 태스크가 호스트에 직접 닿는 길은 없다. |
 
@@ -257,8 +257,8 @@ P95 11.1초, 콜드 스타트 31초, 호스트당 동시 처리 1건)이다.
 | `ai/ACCENTURY_AI_ANALYSIS_TIMEOUT_SECONDS` | `75` | AI 자신의 상한 (lock 대기와 워커 재적재 대기 포함). backend보다 짧아야 AI가 먼저 끊고 503을 돌려준다. 한 호스트에 겹친 호출 6건(태스크당 전달 워커 3개 x 롤링 배포 중 태스크 2개)의 6 x P95 11초 = 67초와 워커 재적재 31초 + 추론 11초 = 42초를 각각 덮는 값이다. 짧으면(25초, 40초) 추론 중인 요청을 끊어 멀쩡한 워커를 죽이고 재전송이 새 워커를 또 죽이는 연쇄가 된다. 두 시나리오의 합(97.6초)은 덮지 않는다 - 그때는 backend 회로 차단기가 연속 5회 실패에서 열려 호출을 멈추므로 연쇄가 자기수렴한다 (KAN-28). |
 
 같은 티켓의 관련 값: backend의 읽기 타임아웃은 재전송하지 않는다 (`ANALYSIS_TIMEOUT` 즉시 종결, 연결 실패와 5xx만 2회
-재전송). 폴링 혼잡 임계치는 6(AI 1분 처리량), 디스패처 큐 용량은 30(`queued-timeout` 5분 / 10초), AI compose
-`start_period`는 90초, `analysis-backlog-high` 경보 임계치는 혼잡 임계치의 두 배인 12다. **값을 바꿀 때는 위 관계를 함께
+재전송). 폴링 혼잡 임계치는 10(AI 1분 처리량 약 11건), 디스패처 큐 용량은 30(`queued-timeout` 5분 / 10초), AI compose
+`start_period`는 90초, `analysis-backlog-high` 경보 임계치는 혼잡 임계치의 두 배인 20이다. **값을 바꿀 때는 위 관계를 함께
 본다** - backend는 기동 시점에 이 관계를 검사하고 어긋나면 뜨지 않는다 (`AnalysisDispatchConfig`).
 
 **`dispatch-concurrency`는 전역 상한이 아니다.** 태스크 하나가 보내는 동시 호출만 묶으므로, backend 오토스케일링(최대
