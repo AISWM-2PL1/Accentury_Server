@@ -28,6 +28,7 @@ import pytest
 from app.config import Settings
 from app.engine import AnalysisRequest, EngineBusy
 from app.track1 import (
+    _STT_PROCESS_GONE,
     LOADING_MODEL_VERSION,
     Track1Engine,
     _is_service_sentence,
@@ -84,10 +85,14 @@ class Track1Scorer:
         if script_key == "broken":
             # 전달본 내부의 dict 조회 실패를 흉내 낸다 - 서비스 문장인데 참조가 빠진 경우
             raise KeyError("reference_1|7")
-        if script_key == "sttgone":
-            raise RuntimeError("OpenVINO 프로세스가 끝났다 returncode=-9")
-        if script_key == "sttpipe":
-            raise BrokenPipeError(32, "Broken pipe")
+        if script_key in ("sttgone", "sttpipe"):
+            # 전사 상주 프로세스는 처음 한 번만 죽는다 - 새 워커가 다시 띄운 뒤에는 정상이다
+            died = Path(wav).with_suffix(".stt-died")
+            if not died.exists():
+                died.touch()
+                if script_key == "sttgone":
+                    raise RuntimeError("OpenVINO 프로세스가 끝났다 returncode=-9")
+                raise BrokenPipeError(32, "Broken pipe")
         if script_key == "slow":
             # 정렬 작업 폴더를 만들어 둔 채 오래 돈다 - 취소되면 이것이 남는다
             workdir = Path(tempfile.mkdtemp(prefix="track1-"))
@@ -568,7 +573,7 @@ def test_워커가_죽으면_다음_요청이_새_워커로_간다(tmp_path, tra
 
 
 @pytest.mark.parametrize("script_key", ["sttgone", "sttpipe"])
-def test_전사_상주_프로세스가_죽으면_워커를_내려_다음_요청이_새로_적재한다(tmp_path, transfer, script_key):
+def test_전사_상주_프로세스가_죽으면_새_워커로_같은_요청을_다시_시도한다(tmp_path, transfer, script_key):
     # 전사 상주 프로세스만 죽고 워커가 남으면 health는 UP인 채 전 요청이 실패한다
     settings = _settings(tmp_path, transfer)
     engine = Track1Engine(settings)
@@ -577,20 +582,23 @@ def test_전사_상주_프로세스가_죽으면_워커를_내려_다음_요청�
         await engine.warm_up()
         first = engine._process.pid  # noqa: SLF001
         try:
-            with pytest.raises(RuntimeError, match="트랙 1 추론 실패"):
-                await engine.analyze(_request(settings, script_key=script_key))
-            code = await asyncio.wait_for(engine._process.wait(), timeout=10)  # noqa: SLF001
-            outcome = await engine.analyze(_request(settings))
+            outcome = await engine.analyze(_request(settings, script_key=script_key))
             second = engine._process.pid  # noqa: SLF001
         finally:
             await engine.close()
-        return first, second, code, outcome
+        return first, second, outcome
 
-    first, second, code, outcome = asyncio.run(scenario())
+    first, second, outcome = asyncio.run(scenario())
 
-    assert code == 1
     assert second != first
     assert outcome.status == "OK"
+
+
+def test_전사_프로세스_사망_문구는_전달본_코드와_같다():
+    # 어댑터는 전달본이 내는 예외 문구로 사망을 가른다. 문구가 바뀌면 감지가 조용히 꺼지므로 원본과 대조한다
+    source = Path(__file__).parents[1] / "model-patch" / "track2_asr.py"
+
+    assert _STT_PROCESS_GONE in source.read_text(encoding="utf-8")
 
 
 def _alive(pid: int) -> bool:

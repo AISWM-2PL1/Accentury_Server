@@ -705,6 +705,12 @@ def _worker_main(argv: list[str]) -> int:
             # 예외 문자열에 실릴 수 있고, 부모는 이 값을 예외로 다시 던져 스택트레이스와
             # 함께 컨테이너 로그에 남긴다 - 그 경로로 발화 내용이 로그에 고이는 자리다
             # (Codex sol 리뷰 P1). 종류만으로도 어느 단계에서 깨졌는지는 좁혀진다
+            if _stt_process_gone(error):
+                # 전사 상주 프로세스는 워커가 띄운다. 그것이 죽었는데 워커가 남으면 health는 UP인 채
+                # 모든 요청이 실패한다. 응답 없이 끝내야 부모가 워커 사망으로 보고 새로 적재해 이 요청을
+                # 한 번 다시 시도한다
+                print("전사 프로세스가 끝나 워커를 내린다", file=sys.stderr, flush=True)
+                return 1
             _send(
                 channel,
                 {
@@ -714,11 +720,6 @@ def _worker_main(argv: list[str]) -> int:
                     "message": type(error).__name__,
                 },
             )
-            if _stt_process_gone(error):
-                # 전사 상주 프로세스는 워커가 띄운다. 그것이 죽었는데 워커가 남으면 health는 UP인 채
-                # 모든 요청이 실패하므로, 워커를 내려 다음 요청이 새로 적재하게 한다
-                print("전사 프로세스가 끝나 워커를 내린다", file=sys.stderr, flush=True)
-                return 1
         else:
             # 응답보다 먼저 지운다 - 부모가 이 줄을 읽는 순간 라우트는 응답을 만들 수 있고,
             # "응답 반환 후 남지 않는다"(KAN-27 AC)가 그 순간 성립해야 한다 (Codex sol 리뷰 P2).

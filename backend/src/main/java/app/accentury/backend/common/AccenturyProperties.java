@@ -72,9 +72,8 @@ public record AccenturyProperties(Session session,
      *                             증폭하므로(§5.3 - 대기 체류 20배) 서버가 스스로 간격을 올린다 (KAN-24).
      * @param congestionThreshold  혼잡 판정 기준 - 전 인스턴스의 진행 중(PROCESSING) 분석 작업 수가
      *                             이 값 이상이면 {@code congestedPollAfterMs}를 반환한다 (KAN-167).
-     *                             기본 6은 AI의 1분 처리량이다 (실모델 1건 10초, KAN-57 c7i.xlarge) -
-     *                             그만큼 쌓이면 대기열이 1분을 넘기 시작한다 (KAN-172). 이전 30은
-     *                             워커 4개 전제라 대기열 5분이 쌓여야 켜졌다.
+     *                             기본 10은 AI 1대의 1분 처리량(약 11건, KAN-326 c7i.xlarge)보다
+     *                             조금 낮은 값이다 - 그만큼 쌓이면 대기열이 1분에 가까워진다.
      * @param congestionCacheTtl   혼잡 판정이 DB의 PROCESSING 건수를 다시 세지 않고 쓰는 시간
      *                             (KAN-167). 판정은 모든 상태 응답 경로에 놓이므로 폴링마다 세면
      *                             판정 자체가 폴링 증폭에 얹힌다. 기준 폴링 간격(800ms)과 같은

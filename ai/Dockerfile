@@ -21,7 +21,7 @@
 ARG MODEL_REGISTRY=325771561913.dkr.ecr.ap-northeast-2.amazonaws.com
 # 6415e0d = f77011c 위에 MFA 상주화(KAN-296)와 OpenVINO int8 Whisper(KAN-303)를 얹고 기존 Whisper 가중치와 기본 파이썬
 # torch를 뺀 이미지다. 만드는 법은 model-patch/다. 이미지에 torch 경로가 없으므로 되돌리려면 이 줄을 f77011c로 바꿔
-# 다시 배포한다 (README.md "MFA 상주화와 OpenVINO int8").
+# 다시 배포하고, 처리량이 줄어드는 만큼 임계값도 함께 되돌린다 (README.md "MFA 상주화와 OpenVINO int8").
 ARG MODEL_TAG=6415e0d
 FROM ${MODEL_REGISTRY}/accentury/ai-model:${MODEL_TAG} AS runtime
 

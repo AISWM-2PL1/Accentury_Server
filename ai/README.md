@@ -213,7 +213,13 @@ fork한 자식이 정렬합니다. 한 프로세스에서 연달아 정렬하면
 프로세스 RSS 합계는 약 4.8GiB이고 그중 약 1.8GiB가 모델 파일 매핑입니다. `docker stats`는 비활성 파일 캐시를 빼고 보여 주므로
 메모리를 비교할 때는 프로세스 RSS를 봅니다.
 
-**롤백.** 이미지에 torch 경로가 없어서 `ai/Dockerfile`의 `MODEL_TAG`를 `f77011c`로 바꿔 다시 배포합니다. MFA 상주화만 끄려면
+**롤백.** 이미지에 torch 경로가 없어서 아래 순서로 되돌립니다.
+
+1. 한 PR에서 `ai/Dockerfile`의 `MODEL_TAG`를 `f77011c`로, `application.yml`의 `congestion-threshold`를 6으로 바꿉니다.
+2. 같은 PR에서 `scale_out_threshold`를 6으로, `analysis_backlog_threshold`를 12로 바꿉니다.
+3. 병합과 배포 뒤 두 환경에 Terraform을 apply합니다.
+
+옛 이미지는 1대 처리량이 분당 약 6건이라 임계값을 그대로 두면 대기가 약 2배가 됩니다. MFA 상주화만 끄려면
 컨테이너에 `ACCENTURY_MFA_MODE=align_one`을 줍니다. `modelVersion`의 코드 해시와 `ov-int8`로 이 이미지가 채점한 결과를 가를 수 있습니다.
 
 ### 엔진 쪽 계약
