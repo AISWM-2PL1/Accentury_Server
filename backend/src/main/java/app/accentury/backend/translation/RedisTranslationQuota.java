@@ -24,6 +24,9 @@ import java.util.UUID;
  * 재배포 때 0으로 돌아가 하루 5건이 지켜지지 않는다. 키는 {@code trq:{userId}:{yyyyMMdd}}(KST 날짜)이고 다음 날 KST
  * 01시에 만료된다 - 하루가 바뀌면 새 키로 세므로 만료는 정리용이고, 1시간 여유는 자정 직전에 잡은 칸을 자정 뒤에 돌려줄 때
  * 키가 이미 사라져 있지 않게 한다.
+ * <p>
+ * LLM 호출 수는 {@code trc:{userId}:{yyyyMMdd}}에 따로 센다 (KAN-322). 칸을 잡는 스크립트가 함께 늘리고 {@link #release}는
+ * 건드리지 않는다. 두 키를 한 스크립트에서 쓰므로 Redis 클러스터 모드로 옮기면 해시 태그가 필요하다 - 지금은 노드 하나다.
  */
 @Component
 class RedisTranslationQuota implements TranslationQuota {
@@ -32,15 +35,29 @@ class RedisTranslationQuota implements TranslationQuota {
 
     private static final ZoneId KST = ZoneId.of("Asia/Seoul");
     private static final String KEY = "trq:";
+    private static final String CALL_KEY = "trc:";
     private static final LocalTime EXPIRE_AT = LocalTime.of(1, 0);
 
-    /** 한 칸 잡기 - 넘으면 되돌리고 0. 판정과 쓰기가 스크립트 하나라 동시 요청이 함께 통과하지 못한다. */
+    /** {@link #ACQUIRE}가 호출 수 상한에 걸렸을 때의 답 - 성공 칸 소진(0)과 로그를 가른다. */
+    private static final long CALL_LIMIT_REACHED = -1;
+
+    /**
+     * 한 칸 잡기와 호출 수 세기 - 성공 칸이 없으면 0, 호출 수 상한이면 둘 다 되돌리고 -1이다. 호출 수에는 LLM을 실제로 부를
+     * 요청만 남는다. 판정과 쓰기가 스크립트 하나라 동시 요청이 함께 통과하지 못한다.
+     */
     private static final RedisScript<Long> ACQUIRE = RedisScript.of("""
             local n = redis.call('INCR', KEYS[1])
             redis.call('PEXPIREAT', KEYS[1], ARGV[2])
             if n > tonumber(ARGV[1]) then
               redis.call('DECR', KEYS[1])
               return 0
+            end
+            local c = redis.call('INCR', KEYS[2])
+            redis.call('PEXPIREAT', KEYS[2], ARGV[2])
+            if c > tonumber(ARGV[3]) then
+              redis.call('DECR', KEYS[2])
+              redis.call('DECR', KEYS[1])
+              return -1
             end
             return n
             """, Long.class);
@@ -70,18 +87,24 @@ class RedisTranslationQuota implements TranslationQuota {
     @Override
     public Slot acquire(UUID userId) {
         LocalDate today = LocalDate.now(clock.withZone(KST));
-        String key = KEY + userId + ":" + today.format(DateTimeFormatter.BASIC_ISO_DATE);
+        String day = today.format(DateTimeFormatter.BASIC_ISO_DATE);
+        String key = KEY + userId + ":" + day;
+        String callKey = CALL_KEY + userId + ":" + day;
         long expireAt = today.plusDays(1).atTime(EXPIRE_AT).atZone(KST).toInstant().toEpochMilli();
         Long used;
         try {
-            used = redis.execute(ACQUIRE, List.of(key),
-                    String.valueOf(AccenturyProperties.Translation.DAILY_LIMIT), String.valueOf(expireAt));
+            used = redis.execute(ACQUIRE, List.of(key, callKey),
+                    String.valueOf(AccenturyProperties.Translation.DAILY_LIMIT), String.valueOf(expireAt),
+                    String.valueOf(AccenturyProperties.Translation.DAILY_CALL_LIMIT));
         } catch (DataAccessException e) {
             // 연결 실패, 타임아웃, 스크립트 오류가 전부 여기로 온다 (Spring Data Redis의 예외 변환).
             log.error("번역 한도 저장소(Redis) 호출 실패 - {}", e.getClass().getSimpleName());
             throw new StoreUnavailable(e.getClass().getSimpleName());
         }
-        if (used == null || used == 0) {
+        if (used != null && used == CALL_LIMIT_REACHED) {
+            log.warn("번역 일일 호출 상한 도달 - 성공 칸이 남았는데 LLM 호출을 다 썼다");
+        }
+        if (used == null || used <= 0) {
             throw new Exhausted();
         }
         return new Slot(key, used.intValue());

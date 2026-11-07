@@ -451,13 +451,16 @@ public record AccenturyProperties(Session session,
      *                     빈도 대체 ID도 만들어지지 않는다</b> - staging, 로컬, 테스트가 이 상태다. SSM
      *                     {@code ACCENTURY_TRANSLATION_RECORDBUCKET}이 prod에만 있다. 빈 문자열은 설정 실수로 보고 기동을 세운다.
      * @param region       그 버킷의 리전. 비우면 SDK 기본 체인이다 ({@link Training#region()}과 같다).
+     * @param rateLimitPerMinute 계정당 분당 번역 요청 허용 횟수 (§2.5, KAN-322). Gemini 무료 등급 RPM 15가 프로젝트 전체 몫이라
+     *                     그 절반 미만으로 둔다. 정상 사용은 분당 1~2건이다.
      */
     public record Translation(@Nullable String apiKey,
                               @DefaultValue(Translation.DEFAULT_MODEL) String model,
                               @DefaultValue("https://generativelanguage.googleapis.com") String baseUrl,
                               @DefaultValue("10s") Duration timeout,
                               @Nullable String recordBucket,
-                              @Nullable String region) {
+                              @Nullable String region,
+                              @DefaultValue("6") int rateLimitPerMinute) {
 
         /** 2026-10-08 결정 모델 - 구글 모델 문서가 속도와 비용이 중요한 단순 텍스트 작업에 권장하는 최신 모델이다. */
         public static final String DEFAULT_MODEL = "gemini-3.5-flash-lite";
@@ -470,6 +473,14 @@ public record AccenturyProperties(Session session,
          * (prod RPD 500)를 한 사람이 다 쓰지 못하게 한다. 오류 메시지에 박혀 있는 값이라 설정이 아니라 상수다.
          */
         public static final int DAILY_LIMIT = 5;
+
+        /**
+         * 계정당 하루 LLM 호출 상한 - 결과와 상관없이 세고 돌려주지 않는다 (명세서 §2.5, §3.18, KAN-322). {@link #DAILY_LIMIT}은
+         * 성공만 세어 LLM이 거절하는 문장을 반복하면 걸리지 않고, 한 계정이 프로젝트 몫 RPD 500을 다 쓰면 그날 모든 사용자의
+         * 번역이 503이 된다. 20은 성공 5건의 4배라 번역 불가가 섞인 정상 사용을 막지 않으면서 어느 계정도 RPD의 4%를 넘지
+         * 못한다. Gemini 재시도 1회는 한 번으로 센다 - 연결 실패, 5xx, 시간 초과에서만 일어나 사용자가 고를 수 없다.
+         */
+        public static final int DAILY_CALL_LIMIT = 20;
 
         /** 키가 들어 있는가 - 비었거나 자리 표시 값이면 번역은 503이다. */
         public boolean apiKeyConfigured() {

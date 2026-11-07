@@ -357,8 +357,14 @@ HTTPS 443을 이미 전체로 열어 두어(`modules/network`의 `backend_https_
 
 **한도.** Gemini 무료 등급 한도는 RPM 15, RPD 500이고 프로젝트 전체 몫이다 (2026-10-15 AI Studio 확인). 한 계정이 다 쓰지
 못하게 backend가 성공한 번역을 계정당 하루 5건까지만 받고 6번째부터 LLM 없이 429 `TRANSLATION_DAILY_LIMIT_EXCEEDED`를
-돌려준다. 두 방향이 한 한도를 쓴다 (2026-11-04 결정 - 방향별로 나누면 계정당 10건이 되어 한도 산정 전제가 바뀐다). 카운터는 Redis 키 `trq:{userId}:{yyyyMMdd}`이고 한국 시각 자정에 바뀐다 (코드 상수 `DAILY_LIMIT`). Redis 장애면
-번역도 503 `TRANSLATION_UNAVAILABLE`이다. 분당 한도에 잠깐 닿는 정도를 허용하려면 monitoring 모듈의
+돌려준다. 두 방향이 한 한도를 쓴다 (2026-11-04 결정 - 방향별로 나누면 계정당 10건이 되어 한도 산정 전제가 바뀐다). 카운터는 Redis 키 `trq:{userId}:{yyyyMMdd}`이고 한국 시각 자정에 바뀐다 (코드 상수 `DAILY_LIMIT`).
+
+성공만 세면 LLM이 거절하는 문장의 반복이 걸리지 않으므로 LLM을 부른 호출 수도 계정당 하루 20번으로 막는다 (Redis 키
+`trc:{userId}:{yyyyMMdd}`, 코드 상수 `DAILY_CALL_LIMIT`, KAN-322). 결과가 422나 503이어도 호출 수는 돌려주지 않고, 넘으면
+같은 429다. 요청은 계정당 분당 6회까지이고 넘으면 429 `RATE_LIMITED`다 (`accentury.translation.rate-limit-per-minute`,
+태스크별로 세므로 태스크 3대면 분당 18회까지 풀린다). 엣지의 WAF 10번 규칙도 이 경로를 센다.
+
+Redis 장애면 번역도 503 `TRANSLATION_UNAVAILABLE`이다. 분당 한도에 잠깐 닿는 정도를 허용하려면 monitoring 모듈의
 `translation_quota_exhausted_threshold`를 올린다.
 
 **apply와 배포의 순서 제약이 없다.** 키는 가드 밖이라 키가 없거나 자리 표시 값인 backend는 번역만 503이고 기동 로그에
