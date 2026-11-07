@@ -5,6 +5,7 @@ import app.accentury.backend.RedisTestcontainer;
 import app.accentury.backend.auth.AppUser;
 import app.accentury.backend.auth.AppUserRepository;
 import app.accentury.backend.common.AccenturyProperties;
+import app.accentury.backend.common.RateLimits;
 import io.micrometer.core.instrument.MeterRegistry;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -94,6 +95,9 @@ class TranslationRecordWiringApiTest extends IntegrationTest {
     private TranslationQuota quota;
 
     @Autowired
+    private RateLimits rateLimits;
+
+    @Autowired
     private MeterRegistry meterRegistry;
 
     @Autowired
@@ -120,7 +124,8 @@ class TranslationRecordWiringApiTest extends IntegrationTest {
         // 실행기를 호출 스레드로 두어 저장 실패가 응답 경로 안에서 일어나게 한다 - 그래도 응답이 정상이어야 한다.
         S3TranslationRecordStore store = new S3TranslationRecordStore(failing, "accentury-translator-prompt-test",
                 subjects, objectMapper, Clock.systemUTC(), Runnable::run, meterRegistry);
-        TranslationService service = new TranslationService(translator, quota, store, Clock.systemUTC(), meterRegistry);
+        TranslationService service = new TranslationService(translator, quota, store, rateLimits, Clock.systemUTC(),
+                meterRegistry);
 
         TranslationResponse response = service.translate(user(), new TranslationRequest("밥 먹었어?", null));
 

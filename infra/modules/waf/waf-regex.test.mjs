@@ -28,6 +28,7 @@ function local(name) {
 const recording = local('recording_path_regex');
 const sessionCreate = local('session_create_path_regex');
 const feedback = local('feedback_path_regex');
+const translation = local('translation_path_regex');
 
 /** WAF의 URL_DECODE에 해당한다. NORMALIZE_PATH는 테스트 입력을 정규화된 형태로만 주는 것으로 대신한다. */
 function decoded(path) {
@@ -89,6 +90,20 @@ test('세션 생성과 후기 정규식은 자기 경로만 받는다', () => {
   assert.match('/v0/sessions/s_1/feedback', feedback);
   assert.doesNotMatch('/v0/sessions/s_1/feedback/x', feedback);
   assert.doesNotMatch('/v0/sessions/feedback', feedback);
+});
+
+test('번역 경로는 matrix 파라미터와 인코딩으로 집계를 비껴갈 수 없고 다른 경로는 잡지 않는다 (KAN-322)', () => {
+  assert.match('/v0/translations', translation);
+  assert.match('/v0;a=1/translations;b=2', translation);
+  assert.match(decoded('/v0/%74ranslations'), translation);
+  for (const path of ['/v0/translations/', '/v0/translations/x', '/v0/translation', '/v1/translations', '/translations']) {
+    assert.doesNotMatch(path, translation, path);
+  }
+});
+
+test('10번 규칙이 번역 경로를 집계한다 (KAN-322)', () => {
+  const uses = source.match(/regex_string\s*=\s*local\.translation_path_regex/g) || [];
+  assert.equal(uses.length, 1);
 });
 
 test('rate 규칙과 본문 규칙 예외가 같은 recording_path_regex를 쓴다', () => {

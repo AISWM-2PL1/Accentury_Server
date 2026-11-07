@@ -87,7 +87,12 @@ public class RateLimits {
          * 해석 전, {@code UploadRateLimitFilter})에서 집행하되 통은 따로다 - 같은 IP에서 학습 홍수가 레벨테스트
          * 업로드까지 막지 않게 한다.
          */
-        INTONATION_UPLOAD_IP("ip");
+        INTONATION_UPLOAD_IP("ip"),
+        /**
+         * 사투리 번역 요청 - 계정당 (§2.5, KAN-322). 한 계정의 연속 호출이 프로젝트 몫 Gemini RPM 15를 채워 다른 사용자의 429가
+         * 되는 것을 막는다. 다른 축처럼 태스크 수만큼 풀리므로 하루 총량은 이 축이 아니라 Redis 호출 수 상한이 맡는다.
+         */
+        TRANSLATION("user");
 
         private final String axis;
 
@@ -139,17 +144,18 @@ public class RateLimits {
 
     /** 설정에서 범위별 한도를 뽑는다 - 한도가 어느 설정 키에서 오는지가 여기 한 곳에 있다. */
     private static Map<Scope, Integer> limitsFrom(AccenturyProperties properties) {
-        return Map.of(
-                Scope.SESSION_CREATE, properties.session().rateLimitPerMinute(),
-                Scope.VOICE_UPLOAD_IP, properties.upload().rateLimitPerMinute(),
-                Scope.VOICE_UPLOAD_SESSION, properties.upload().sessionRateLimitPerMinute(),
-                Scope.VOCAB_ANSWER, properties.vocab().rateLimitPerMinute(),
-                Scope.COMPLETE, properties.completion().rateLimitPerMinute(),
-                Scope.FEEDBACK, properties.feedback().rateLimitPerMinute(),
-                Scope.AUTH, properties.auth().rateLimitPerMinute(),
-                Scope.WORD_LEARNING, properties.learning().rateLimitPerMinute(),
-                Scope.INTONATION_LEARNING, properties.learning().intonationRateLimitPerMinute(),
-                Scope.INTONATION_UPLOAD_IP, properties.learning().intonationIpRateLimitPerMinute());
+        return Map.ofEntries(
+                Map.entry(Scope.SESSION_CREATE, properties.session().rateLimitPerMinute()),
+                Map.entry(Scope.VOICE_UPLOAD_IP, properties.upload().rateLimitPerMinute()),
+                Map.entry(Scope.VOICE_UPLOAD_SESSION, properties.upload().sessionRateLimitPerMinute()),
+                Map.entry(Scope.VOCAB_ANSWER, properties.vocab().rateLimitPerMinute()),
+                Map.entry(Scope.COMPLETE, properties.completion().rateLimitPerMinute()),
+                Map.entry(Scope.FEEDBACK, properties.feedback().rateLimitPerMinute()),
+                Map.entry(Scope.AUTH, properties.auth().rateLimitPerMinute()),
+                Map.entry(Scope.WORD_LEARNING, properties.learning().rateLimitPerMinute()),
+                Map.entry(Scope.INTONATION_LEARNING, properties.learning().intonationRateLimitPerMinute()),
+                Map.entry(Scope.INTONATION_UPLOAD_IP, properties.learning().intonationIpRateLimitPerMinute()),
+                Map.entry(Scope.TRANSLATION, properties.translation().rateLimitPerMinute()));
     }
 
     /**

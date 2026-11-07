@@ -6,7 +6,7 @@
 # 리전이어야 WAF가 쓸 수 있다.
 #
 # 규칙은 일곱이다. 우선순위 숫자가 작을수록 먼저 평가된다.
-#   10  rate-limit-costly-posts   IP당 5분 창 요청 수 제한. 세션 생성, 음성 업로드(레벨테스트와 억양 학습), 후기만 센다.
+#   10  rate-limit-costly-posts   IP당 5분 창 요청 수 제한. 세션 생성, 음성 업로드(레벨테스트와 억양 학습), 후기, 번역만 센다.
 #   15  rate-limit-auth           IP당 5분 창 로그인과 refresh 수 제한 (KAN-244).
 #   16  rate-limit-admin          IP당 5분 창 관리자 경로 요청 수 제한 (KAN-244).
 #   20  aws-common                AWSManagedRulesCommonRuleSet. 본문 규칙 5개만 Count로 바꿔 라벨만 남긴다 (KAN-299).
@@ -22,13 +22,14 @@
 locals {
   name = "accentury-${var.env}"
 
-  # 세션 생성, 음성 업로드, 이용 후기 경로. 앱의 UploadClient.kt(PATH_VOICE_ITEMS)와 SessionClient.kt,
+  # 세션 생성, 음성 업로드, 이용 후기, 번역 경로. 앱의 UploadClient.kt(PATH_VOICE_ITEMS)와 SessionClient.kt,
   # IntonationUploadClient.kt(PATH_INTONATION_CARDS, iOS는 IntonationUploadClient.swift), 그리고 웹의
   # 후기 바텀시트가 만드는 경로다. 경로를 바꾸면 그 상수와 아래 정규식을 같이 고친다 (waf-regex.test.mjs가 잡는다).
   #   POST /v0/sessions                                             (KAN-9, 재응시 KAN-107)
   #   POST /v0/sessions/{sessionId}/voice-items/{itemId}/recording  (KAN-10, multipart 음성)
   #   POST /v0/learning/intonation-cards/{cardId}/recordings        (KAN-267, multipart 음성, 계정 필수)
   #   POST /v0/sessions/{sessionId}/feedback                        (KAN-211, 결과 화면 이용 후기)
+  #   POST /v0/translations                                         (KAN-266, 사투리 번역, 계정 필수)
   # rate 집계는 POST만 센다. GET, HEAD, OPTIONS는 backend가 405로 싸게 끝내는데 집계에 들어가면
   # 같은 공유 IP의 정상 세션 생성과 업로드까지 밀어낸다 (Codex 2차 P2, 2026-08-28). CommonRuleSet
   # 예외는 메서드를 보지 않는다 - 업로드 경로로 오는 요청은 메서드와 무관하게 본문 규칙에 걸릴
@@ -49,6 +50,7 @@ locals {
   session_create_path_regex = "^/v0(;[^/]*)?/sessions(;[^/]*)?$"
   recording_path_regex      = "^/v0(;[^/]*)?/(sessions(;[^/]*)?/[^/]+/voice-items(;[^/]*)?/[^/]+/recording|learning(;[^/]*)?/intonation-cards(;[^/]*)?/[^/]+/recordings)(;[^/]*)?$"
   feedback_path_regex       = "^/v0(;[^/]*)?/sessions(;[^/]*)?/[^/]+(;[^/]*)?/feedback(;[^/]*)?$"
+  translation_path_regex    = "^/v0(;[^/]*)?/translations(;[^/]*)?$"
 
   # 로그인과 refresh (KAN-223, AuthController의 /v0/auth/login, /v0/auth/refresh). 같은 정규화를 쓴다.
   auth_path_regex = "^/v0(;[^/]*)?/auth(;[^/]*)?/(login|refresh)(;[^/]*)?$"
@@ -110,6 +112,9 @@ resource "aws_wafv2_web_acl" "this" {
   # 그만큼 쌓이고, 그 테이블은 보존 기간이 1년이라(session_feedback) 24시간 뒤 정리되는 세션과
   # 달리 흔적이 오래 남는다. backend의 세션당 분당 10건 제한은 세션마다 새 카운터라 이 모양을
   # 막지 못하므로 IP 홍수는 엣지에서 끊는다. 정상 사용은 세션당 1건이라 임계값 근처에도 가지 않는다.
+  #
+  # 번역(KAN-322)도 센다. 요청 1건이 프로젝트 몫 Gemini 무료 한도를 쓰는 경로인데, backend의 제한은 계정 단위라
+  # 계정을 바꿔 가며 두드리는 IP 홍수를 막지 못한다. 정상 사용은 계정당 하루 5건이라 임계값은 그대로 둔다.
   #
   # 임계값(var.rate_limit)은 backend의 IP당 제한(세션 생성과 업로드는 각각 분당 30, 억양 학습 업로드는
   # 분당 60, application.yml)보다 위에 둔다. 보통의 초과는 backend가 먼저 잡아 정식 429 봉투를 내고,
@@ -211,6 +216,26 @@ resource "aws_wafv2_web_acl" "this" {
                 statement {
                   regex_match_statement {
                     regex_string = local.feedback_path_regex
+
+                    field_to_match {
+                      uri_path {}
+                    }
+
+                    text_transformation {
+                      priority = 0
+                      type     = "URL_DECODE"
+                    }
+
+                    text_transformation {
+                      priority = 1
+                      type     = "NORMALIZE_PATH"
+                    }
+                  }
+                }
+
+                statement {
+                  regex_match_statement {
+                    regex_string = local.translation_path_regex
 
                     field_to_match {
                       uri_path {}
