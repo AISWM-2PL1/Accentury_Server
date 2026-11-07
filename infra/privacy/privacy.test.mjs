@@ -687,6 +687,11 @@ test('사투리 번역기 절이 있고 구글 전송, 보관 항목, 장소, �
   assert.ok(translator.includes('서버 운영 로그에 남기지 않습니다'), '로그에 텍스트를 남기지 않는다는 말이 없다');
   assert.ok(translator.includes('Amazon S3') && translator.includes('ap-northeast-2'), '보관 장소가 없다');
   assert.ok(translator.includes('기간 제한 없이 보관'), '보유 기간이 없다 (만료 없음)');
+  // 횟수 제한 (KAN-322, RedisTranslationQuota). 호출 수는 번역이 안 된 요청까지 세므로 번역된 횟수만 적으면 거짓 고지다.
+  for (const item of ['하루 5번까지', '번역이 된 경우만', '하루 20번까지', '1분에 6번까지', '그날 번역 서버에 보낸 요청 횟수']) {
+    assert.ok(translator.includes(item), `사투리 번역기 절의 횟수 제한에 「${item}」이 없다`);
+  }
+  assert.ok(html.replace(/\s+/g, ' ').includes('그날 번역된 횟수, 그날 번역 서버에 보낸 요청 횟수</td>'), '1항 표에 호출 수 보관이 없다');
 
   const provision = section('<h2>2. 개인정보의 제3자 제공', '<h2>3. 개인정보 처리의 위탁').replace(/\s+/g, ' ');
   assert.ok(provision.includes('Google LLC (Gemini API)'), '2항에 Gemini API 제공이 없다');

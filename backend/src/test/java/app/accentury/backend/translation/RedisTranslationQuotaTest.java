@@ -33,6 +33,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 class RedisTranslationQuotaTest extends IntegrationTest {
 
     private static final int LIMIT = AccenturyProperties.Translation.DAILY_LIMIT;
+    private static final int CALL_LIMIT = AccenturyProperties.Translation.DAILY_CALL_LIMIT;
     private static final ZoneId KST = ZoneId.of("Asia/Seoul");
 
     @Autowired
@@ -145,6 +146,102 @@ class RedisTranslationQuotaTest extends IntegrationTest {
             pool.shutdown();
             assertTrue(pool.awaitTermination(5, TimeUnit.SECONDS));
         }
+    }
+
+    @Test
+    void 돌려준_칸의_호출_수는_남아_상한_다음은_소진이고_성공_칸은_그대로다() {
+        RedisTranslationQuota quota = quotaAt(today().atTime(12, 0));
+        UUID user = UUID.randomUUID();
+        TranslationQuota.Slot last = null;
+        for (int i = 0; i < CALL_LIMIT; i++) {
+            last = quota.acquire(user);
+            quota.release(last);
+        }
+
+        assertThrows(TranslationQuota.Exhausted.class, () -> quota.acquire(user));
+
+        assertEquals("0", redis.opsForValue().get(last.key()), "거절 호출은 성공 칸을 쓰지 않는다");
+        assertEquals(String.valueOf(CALL_LIMIT), redis.opsForValue().get(callKey(last)),
+                "상한에 걸린 요청은 LLM을 부르지 않으니 호출 수에 남지 않는다");
+    }
+
+    @Test
+    void 호출_상한에_걸리면_성공_칸을_되돌린다() {
+        RedisTranslationQuota quota = quotaAt(today().atTime(12, 0));
+        UUID user = UUID.randomUUID();
+        TranslationQuota.Slot held = quota.acquire(user);
+        for (int i = 1; i < CALL_LIMIT; i++) {
+            quota.release(quota.acquire(user));
+        }
+
+        assertThrows(TranslationQuota.Exhausted.class, () -> quota.acquire(user));
+
+        assertEquals("1", redis.opsForValue().get(held.key()), "먼저 잡은 칸만 남는다");
+    }
+
+    @Test
+    void 성공_칸이_없어_거절된_요청은_호출_수를_쓰지_않는다() {
+        RedisTranslationQuota quota = quotaAt(today().atTime(12, 0));
+        UUID user = UUID.randomUUID();
+        TranslationQuota.Slot last = null;
+        for (int i = 0; i < LIMIT; i++) {
+            last = quota.acquire(user);
+        }
+
+        assertThrows(TranslationQuota.Exhausted.class, () -> quota.acquire(user));
+
+        assertEquals(String.valueOf(LIMIT), redis.opsForValue().get(callKey(last)));
+    }
+
+    @Test
+    void 호출_수도_한국_시각_자정에_새_하루가_되고_같은_시각에_만료된다() {
+        UUID user = UUID.randomUUID();
+        RedisTranslationQuota beforeMidnight = quotaAt(today().atTime(23, 59));
+        RedisTranslationQuota afterMidnight = quotaAt(today().plusDays(1).atStartOfDay());
+        TranslationQuota.Slot last = null;
+        for (int i = 0; i < CALL_LIMIT; i++) {
+            last = beforeMidnight.acquire(user);
+            beforeMidnight.release(last);
+        }
+        assertThrows(TranslationQuota.Exhausted.class, () -> beforeMidnight.acquire(user));
+
+        assertEquals(1, afterMidnight.acquire(user).used());
+
+        Long slotTtl = redis.getExpire(last.key(), TimeUnit.MILLISECONDS);
+        Long callTtl = redis.getExpire(callKey(last), TimeUnit.MILLISECONDS);
+        assertTrue(Math.abs(slotTtl - callTtl) < 5_000, "성공 칸 " + slotTtl + "ms, 호출 수 " + callTtl + "ms");
+    }
+
+    @Test
+    void 동시에_몰려도_호출_수는_상한을_넘지_않는다() throws Exception {
+        RedisTranslationQuota quota = quotaAt(today().atTime(12, 0));
+        UUID user = UUID.randomUUID();
+        Callable<Boolean> attempt = () -> {
+            try {
+                quota.release(quota.acquire(user));
+                return true;
+            } catch (TranslationQuota.Exhausted e) {
+                return false;
+            }
+        };
+        ExecutorService pool = Executors.newFixedThreadPool(8);
+        try {
+            long passed = 0;
+            for (Future<Boolean> result : pool.invokeAll(Collections.nCopies(CALL_LIMIT * 3, attempt))) {
+                if (result.get()) {
+                    passed++;
+                }
+            }
+            assertEquals(CALL_LIMIT, passed);
+        } finally {
+            pool.shutdown();
+            assertTrue(pool.awaitTermination(5, TimeUnit.SECONDS));
+        }
+    }
+
+    /** 칸의 키에서 같은 날의 호출 수 키를 만든다. */
+    private static String callKey(TranslationQuota.Slot slot) {
+        return slot.key().replaceFirst("^trq:", "trc:");
     }
 
     /**

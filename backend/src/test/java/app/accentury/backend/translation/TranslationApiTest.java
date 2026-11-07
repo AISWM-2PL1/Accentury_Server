@@ -374,6 +374,26 @@ class TranslationApiTest extends IntegrationTest {
     }
 
     @Test
+    void 거절이_반복되면_호출_상한_다음은_LLM_없이_429이고_기록은_LIMITED다() throws Exception {
+        String access = signUp();
+        translator.script = text -> DialectTranslator.Reply.of(DialectTranslator.Kind.REFUSED);
+        for (int i = 0; i < AccenturyProperties.Translation.DAILY_CALL_LIMIT; i++) {
+            rejected(translate(access, "심한 욕설이 들어간 문장"));
+        }
+        translator.inputs.clear();
+        store.records.clear();
+
+        translate(access, "밥 먹었어?")
+                .andExpect(status().isTooManyRequests())
+                .andExpect(jsonPath("$.code").value("TRANSLATION_DAILY_LIMIT_EXCEEDED"))
+                .andExpect(jsonPath("$.retryable").value(false))
+                .andExpect(header().doesNotExist(HttpHeaders.RETRY_AFTER));
+
+        assertTrue(translator.inputs.isEmpty(), "상한 다음 요청은 LLM을 부르지 않는다");
+        assertEquals(TranslationResult.LIMITED, onlyRecord().result());
+    }
+
+    @Test
     void 한도는_계정마다_따로다() throws Exception {
         String first = signUp();
         for (int i = 0; i < AccenturyProperties.Translation.DAILY_LIMIT; i++) {
