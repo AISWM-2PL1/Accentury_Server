@@ -59,7 +59,7 @@ scripts/publish-share-assets.sh staging     # 또는 prod
 | --- | --- |
 | Dev 푸시 (`backend/**`, `ai/**`, `scripts/push-images.sh`, `scripts/e2e_smoke.py`, `.github/workflows/deploy.yml`) | `scripts/push-images.sh`로 두 이미지를 commit SHA 7자리 태그로 ECR에 push(이미 있으면 건너뜀) → staging 반영 → E2E 스모크 → `verified-<sha>` 표시 |
 | Release 푸시 (같은 paths) | 빌드 없음. merge commit의 2번째 부모(Dev 끝)부터 거슬러 **처음 만나는 빌드된 SHA**가 후보다. 그 SHA에 `verified-<sha>` 태그(staging 반영과 스모크 통과 표시)가 없으면 더 오래된 것으로 건너뛰지 않고 실패한다(서버 변경이 조용히 빠지는 것을 막는다). environment `prod`의 required reviewers 승인 대기 → prod 반영 → E2E 스모크(KAN-217) |
-| 수동 실행 | 환경과 `image_tag` 선택. 비우면 staging은 현재 커밋 빌드, prod는 위 승격 규칙. **롤백 = 이전 SHA를 `image_tag`에 넣는 것**(같은 절차, 재빌드 없음) |
+| 수동 실행 | 환경과 `image_tag` 선택. `image_tag`는 커밋 SHA 7자리 hex(소문자)만 받고, 다른 형식이면 AWS 호출 전에 "반영할 태그 결정" 단계에서 실패한다. ECR 대조는 고정 문자열 비교다. 비우면 staging은 현재 커밋 빌드, prod는 위 승격 규칙. **롤백 = 이전 SHA를 `image_tag`에 넣는 것**(같은 절차, 재빌드 없음) |
 
 ### 반영 순서
 
