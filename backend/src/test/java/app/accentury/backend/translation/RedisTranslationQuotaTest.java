@@ -23,6 +23,7 @@ import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -158,7 +159,8 @@ class RedisTranslationQuotaTest extends IntegrationTest {
             quota.release(last);
         }
 
-        assertThrows(TranslationQuota.Exhausted.class, () -> quota.acquire(user));
+        TranslationQuota.Exhausted exhausted = assertThrows(TranslationQuota.Exhausted.class, () -> quota.acquire(user));
+        assertTrue(exhausted.callLimit(), "성공 칸이 아니라 호출 수 상한이다");
 
         assertEquals("0", redis.opsForValue().get(last.key()), "거절 호출은 성공 칸을 쓰지 않는다");
         assertEquals(String.valueOf(CALL_LIMIT), redis.opsForValue().get(callKey(last)),
@@ -188,7 +190,8 @@ class RedisTranslationQuotaTest extends IntegrationTest {
             last = quota.acquire(user);
         }
 
-        assertThrows(TranslationQuota.Exhausted.class, () -> quota.acquire(user));
+        TranslationQuota.Exhausted exhausted = assertThrows(TranslationQuota.Exhausted.class, () -> quota.acquire(user));
+        assertFalse(exhausted.callLimit());
 
         assertEquals(String.valueOf(LIMIT), redis.opsForValue().get(callKey(last)));
     }
@@ -237,6 +240,20 @@ class RedisTranslationQuotaTest extends IntegrationTest {
             pool.shutdown();
             assertTrue(pool.awaitTermination(5, TimeUnit.SECONDS));
         }
+    }
+
+    @Test
+    void 남은_수는_호출_수가_먼저_바닥나면_그쪽을_따른다() {
+        RedisTranslationQuota quota = quotaAt(today().atTime(12, 0));
+        UUID user = UUID.randomUUID();
+        for (int i = 0; i < CALL_LIMIT - 3; i++) {
+            quota.release(quota.acquire(user));
+        }
+        TranslationQuota.Slot slot = quota.acquire(user);
+
+        // 성공 칸은 4개 남았지만 호출은 2번 남았다 - 그 둘이 다 성공해야 2건이다.
+        assertEquals(LIMIT - 1, slot.remaining(), "잡을 때의 값은 성공 칸만 본다");
+        assertEquals(2, quota.remaining(slot));
     }
 
     /** 칸의 키에서 같은 날의 호출 수 키를 만든다. */

@@ -103,6 +103,7 @@ class RedisTranslationQuota implements TranslationQuota {
         }
         if (used != null && used == CALL_LIMIT_REACHED) {
             log.warn("번역 일일 호출 상한 도달 - 성공 칸이 남았는데 LLM 호출을 다 썼다");
+            throw new Exhausted(true);
         }
         if (used == null || used <= 0) {
             throw new Exhausted();
@@ -121,13 +122,24 @@ class RedisTranslationQuota implements TranslationQuota {
 
     @Override
     public int remaining(Slot slot) {
-        String used;
+        List<String> counts;
         try {
-            used = redis.opsForValue().get(slot.key());
+            counts = redis.opsForValue().multiGet(List.of(slot.key(), callKeyOf(slot)));
         } catch (DataAccessException e) {
             log.warn("번역 한도 다시 읽기 실패 - 잡을 때의 값으로 답한다 ({})", e.getClass().getSimpleName());
             return slot.remaining();
         }
-        return used != null ? Slot.remainingAfter(Long.parseLong(used)) : slot.remaining();
+        if (counts == null || counts.size() != 2 || counts.get(0) == null) {
+            return slot.remaining();
+        }
+        int bySlots = Slot.remainingAfter(Long.parseLong(counts.get(0)));
+        String calls = counts.get(1);
+        return calls == null ? bySlots
+                : Math.min(bySlots, Slot.callsRemainingAfter(Long.parseLong(calls)));
+    }
+
+    /** 칸과 같은 날의 호출 수 키 - 두 키의 모양은 이 클래스만 안다. */
+    private static String callKeyOf(Slot slot) {
+        return CALL_KEY + slot.key().substring(KEY.length());
     }
 }

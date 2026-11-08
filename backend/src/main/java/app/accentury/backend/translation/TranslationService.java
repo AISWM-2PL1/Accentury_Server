@@ -40,6 +40,13 @@ class TranslationService {
 
     private static final Logger log = LoggerFactory.getLogger(TranslationService.class);
 
+    /**
+     * 호출 수 상한의 429 문구 - 코드는 성공 5건 한도와 같은 {@code TRANSLATION_DAILY_LIMIT_EXCEEDED}이고 문구만 다르다 (PR #66
+     * 리뷰). 성공이 5건 미만인 사용자에게 「5회를 다 썼다」고 하지 않는다. 앱과 웹은 서버 문구를 그대로 보여 준다.
+     */
+    static final String CALL_LIMIT_MESSAGE = "오늘 번역 요청 횟수(%d회)를 다 썼습니다. 내일 다시 시도해 주세요."
+            .formatted(AccenturyProperties.Translation.DAILY_CALL_LIMIT);
+
     private final DialectTranslator translator;
     private final TranslationQuota quota;
     private final TranslationRecordStore records;
@@ -111,7 +118,9 @@ class TranslationService {
             slot = quota.acquire(user.id());
         } catch (TranslationQuota.Exhausted e) {
             finish(attempt, TranslationResult.LIMITED, null, null);
-            throw new ApiException(ErrorCode.TRANSLATION_DAILY_LIMIT_EXCEEDED);
+            throw e.callLimit()
+                    ? new ApiException(ErrorCode.TRANSLATION_DAILY_LIMIT_EXCEEDED, CALL_LIMIT_MESSAGE)
+                    : new ApiException(ErrorCode.TRANSLATION_DAILY_LIMIT_EXCEEDED);
         } catch (TranslationQuota.StoreUnavailable e) {
             finish(attempt, TranslationResult.LLM_FAILED, null, null);
             throw new ApiException(ErrorCode.TRANSLATION_UNAVAILABLE);

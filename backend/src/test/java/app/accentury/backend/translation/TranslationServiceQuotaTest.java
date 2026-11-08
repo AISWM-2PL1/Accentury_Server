@@ -106,7 +106,9 @@ class TranslationServiceQuotaTest {
     @Test
     void 소진이면_LLM_없이_429이고_LIMITED로_기록한다() {
         quota.used = 5;
-        assertCode(ErrorCode.TRANSLATION_DAILY_LIMIT_EXCEEDED, () -> translate("밥 먹었어?"));
+        ApiException limited = assertThrows(ApiException.class, () -> translate("밥 먹었어?"));
+        assertEquals(ErrorCode.TRANSLATION_DAILY_LIMIT_EXCEEDED, limited.code());
+        assertEquals(ErrorCode.TRANSLATION_DAILY_LIMIT_EXCEEDED.defaultMessage(), limited.getMessage());
 
         assertTrue(llmInputs.isEmpty());
         assertEquals(TranslationResult.LIMITED, records.get(0).result());
@@ -122,7 +124,10 @@ class TranslationServiceQuotaTest {
         assertEquals(0, quota.used, "거절된 번역은 성공 칸을 쓰지 않는다");
         assertEquals(limit, quota.calls, "호출 수는 돌려주지 않는다");
 
-        assertCode(ErrorCode.TRANSLATION_DAILY_LIMIT_EXCEEDED, () -> translate("심한 욕설이 들어간 문장"));
+        ApiException limited = assertThrows(ApiException.class, () -> translate("심한 욕설이 들어간 문장"));
+        assertEquals(ErrorCode.TRANSLATION_DAILY_LIMIT_EXCEEDED, limited.code());
+        assertEquals("오늘 번역 요청 횟수(20회)를 다 썼습니다. 내일 다시 시도해 주세요.", limited.getMessage(),
+                "성공이 5건 미만이니 「5회를 다 썼다」고 하지 않는다");
 
         assertEquals(limit, llmInputs.size(), "상한 다음 요청은 LLM을 부르지 않는다");
         assertEquals(TranslationResult.LIMITED, records.getLast().result());
@@ -207,9 +212,11 @@ class TranslationServiceQuotaTest {
             if (down) {
                 throw new StoreUnavailable("down");
             }
-            if (used >= AccenturyProperties.Translation.DAILY_LIMIT
-                    || calls >= AccenturyProperties.Translation.DAILY_CALL_LIMIT) {
+            if (used >= AccenturyProperties.Translation.DAILY_LIMIT) {
                 throw new Exhausted();
+            }
+            if (calls >= AccenturyProperties.Translation.DAILY_CALL_LIMIT) {
+                throw new Exhausted(true);
             }
             acquired++;
             calls++;
@@ -224,7 +231,7 @@ class TranslationServiceQuotaTest {
 
         @Override
         public int remaining(Slot slot) {
-            return Slot.remainingAfter(used);
+            return Math.min(Slot.remainingAfter(used), Slot.callsRemainingAfter(calls));
         }
     }
 }
