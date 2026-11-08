@@ -5,7 +5,7 @@
 #
 #   Dev 푸시     -> build(현재 커밋 SHA로 두 이미지를 ECR에 push) -> deploy(staging, ai 호스트 -> backend 서비스) -> smoke -> verified 태그
 #   Release 푸시 -> deploy(prod): 재빌드 없이 Dev 이력에서 ECR에 실재하는 최신 SHA를 승격 -> smoke
-#   수동 실행    -> environment와 image_tag(커밋 SHA 7자리 hex)를 고른다. 롤백 = 이전 SHA를 image_tag에 넣고 같은 절차
+#   수동 실행    -> environment와 image_tag(커밋 SHA hex, 보통 7자리)를 고른다. 롤백 = 이전 SHA를 image_tag에 넣고 같은 절차
 #
 # 반영은 두 갈래다 (KAN-165). 먼저 SSM /accentury/{env}/IMAGE_TAG를 새 SHA로 바꾼다 - ai 호스트가 읽고,
 # Terraform이 backend 태스크 정의의 image로 읽는 정본이다 (infra/modules/fargate).
@@ -53,7 +53,7 @@ on:
         options: [staging, prod]
         default: staging
       image_tag:
-        description: 반영할 이미지 태그 (커밋 SHA 7자리 hex, 예 2e17688). 다른 형식은 실패한다. 비우면 staging은 현재 커밋을 빌드, prod는 Dev 이력의 최신 빌드를 승격. 롤백은 이전 SHA.
+        description: 반영할 이미지 태그 (커밋 SHA hex 7자에서 40자, 보통 7자리, 예 2e17688). 다른 형식은 실패한다. 비우면 staging은 현재 커밋을 빌드, prod는 Dev 이력의 최신 빌드를 승격. 롤백은 이전 SHA.
         required: false
         type: string
         default: ''
@@ -102,7 +102,7 @@ jobs:
           role-to-assume: ${{ vars.AWS_DEPLOY_ROLE_ARN }}
           aws-region: ${{ env.AWS_REGION }}
 
-      # 태그는 언제나 commit SHA 7자리다 (scripts/push-images.sh가 정본). 재실행으로 같은 SHA를 다시
+      # 태그는 commit SHA 7자리다 (scripts/push-images.sh가 정본, 앞자리가 겹치면 git이 더 길게 낸다). 재실행으로 같은 SHA를 다시
       # 만나면 IMMUTABLE 리포지토리가 push를 거부하므로, 두 이미지가 이미 있으면 빌드를 건너뛴다.
       - name: 이미지 빌드와 ECR push
         id: tag
@@ -179,6 +179,22 @@ jobs:
           done
           exit "$missing"
 
+      # 수동 입력은 커밋 SHA hex만 받는다 (KAN-307). 이 값은 ECR 대조를 지나 SSM IMAGE_TAG 값이 되고, apply.sh의 sed로
+      # remote.sh의 비인용 대입에 치환돼 ai 호스트에서 root로 실행된다. 그래서 자격 증명(STS 호출)을 포함한 어떤 AWS 호출보다
+      # 먼저 막는다 - job의 environment 승인 게이트(prod)보다는 뒤다. 하한 7자는 scripts/push-images.sh의
+      # `git rev-parse --short=7`이고, 앞자리가 겹치면 git이 더 길게 내므로 상한은 전체 SHA 40자다 (PR #67 리뷰).
+      # 범위식([0-9a-f])은 로캘에 따라 다른 문자를 받을 수 있어 글자를 하나씩 적는다. 받은 값은 로그에 찍지 않는다 -
+      # 줄바꿈과 ::가 섞이면 워크플로 명령으로 해석될 수 있다.
+      - name: 수동 입력 형식 확인
+        if: steps.gate.outputs.paused != 'true'
+        env:
+          INPUT_TAG: ${{ inputs.image_tag }}
+        run: |
+          if [ -n "$INPUT_TAG" ] && ! [[ "$INPUT_TAG" =~ ^[0123456789abcdef]{7,40}$ ]]; then
+            echo "::error::image_tag는 커밋 SHA hex 7자에서 40자(0-9, a-f 소문자)여야 합니다. 받은 값의 길이는 ${#INPUT_TAG}자입니다." >&2
+            exit 1
+          fi
+
       - uses: aws-actions/configure-aws-credentials@e1253824e5c10ff9df46874f81ed3ec929e19cfd # v6.3.0
         if: steps.gate.outputs.paused != 'true'
         with:
@@ -197,14 +213,7 @@ jobs:
           INPUT_TAG: ${{ inputs.image_tag }}
           BUILT_TAG: ${{ needs.build.outputs.image_tag }}
         run: |
-          # 수동 입력은 커밋 SHA 7자리 hex만 받는다 (KAN-307). 이 값은 아래 ECR 대조를 지나 SSM IMAGE_TAG 값이 되고,
-          # apply.sh의 sed로 remote.sh의 비인용 대입에 치환돼 ai 호스트에서 root로 실행된다. 그래서 어떤 AWS
-          # 호출보다 먼저 막는다. 범위식([0-9a-f])은 로캘에 따라 다른 문자를 받을 수 있어 글자를 하나씩 적는다.
-          # 받은 값은 로그에 찍지 않는다 - 줄바꿈과 ::가 섞이면 워크플로 명령으로 해석될 수 있다.
-          if [ -n "$INPUT_TAG" ] && ! [[ "$INPUT_TAG" =~ ^[0123456789abcdef]{7}$ ]]; then
-            echo "::error::image_tag는 커밋 SHA 7자리 hex(0-9, a-f 소문자)여야 합니다. 받은 값의 길이는 ${#INPUT_TAG}자입니다." >&2
-            exit 1
-          fi
+          # INPUT_TAG의 형식은 "수동 입력 형식 확인" 단계가 자격 증명보다 먼저 검사했다 (KAN-307).
           tags_backend=$(aws ecr describe-images --repository-name accentury/backend --query 'imageDetails[].imageTags[]' --output text | tr '\t' '\n')
           tags_ai=$(aws ecr describe-images --repository-name accentury/ai --query 'imageDetails[].imageTags[]' --output text | tr '\t' '\n')
           # 고정 문자열 대조(-F). 정규식(GNU BRE)이면 `abc1234\|x` 같은 입력이 교대 패턴으로 실재 태그에 맞는다.
@@ -258,6 +267,13 @@ jobs:
             prev=""
           else
             echo "::error::직전 IMAGE_TAG 조회 실패: $out" >&2
+            exit 1
+          fi
+          # 직전 태그는 롤백 때 apply.sh의 sed로 root 스크립트에 들어가고 여기서 GITHUB_OUTPUT에도 쓴다. ECR 태그 문자
+          # 집합(영문, 숫자, 점, 밑줄, 하이픈, 128자 이하)이 아니면 세운다 - 줄바꿈은 다른 output을 덮고, &, /, \는 sed를
+          # 깨뜨린다. hex가 아닌 수동 태그(실측용 베타 이미지 등)는 이 집합 안이라 통과한다 (PR #67 리뷰).
+          if [ -n "$prev" ] && ! [[ "$prev" =~ ^[ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789._-]{1,128}$ ]]; then
+            echo "::error::직전 IMAGE_TAG가 ECR 태그 형식이 아니라 롤백 근거로 쓸 수 없습니다 (길이 ${#prev}자). SSM $SSM_PREFIX/IMAGE_TAG를 확인하세요." >&2
             exit 1
           fi
           echo "previous_tag=$prev" >> "$GITHUB_OUTPUT"
@@ -341,14 +357,20 @@ jobs:
           order="${2:-forward}"
           # backend 롤백(reverse)이 지울 리비전. forward가 등록하면서 적는다.
           NEW_TD_FILE=backend-new-taskdef
+          # tag는 아래 sed로 remote.sh의 비인용 대입에 들어가 ai 호스트에서 root로 실행된다. forward의 tag는 "수동 입력 형식
+          # 확인"과 "반영할 태그 결정"을 지난 값이고 롤백의 tag는 직전 SSM IMAGE_TAG인데, 어느 쪽이든 여기서 ECR 태그 문자
+          # 집합을 한 번 더 본다 (PR #67 리뷰) - 따옴표, $, 세로선, 공백, 줄바꿈과 sed를 깨는 &, /, \가 모두 이 집합 밖이다.
+          # SSM을 바꾸기 전이라 여기서 끝나도 상태가 그대로다.
+          if ! [[ "$tag" =~ ^[ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789._-]{1,128}$ ]]; then
+            echo "태그가 ECR 태그 형식이 아닙니다 (길이 ${#tag}자) - 반영하지 않습니다."; exit 1
+          fi
           # 태그 쓰기가 실패하면 여기서 끝낸다 - 넘어가면 옛 태그로 reload가 돌고 healthy가 나와 새 태그가
           # 반영된 것처럼 보인다 (Codex P1).
           if ! aws ssm put-parameter --name "$SSM_PREFIX/IMAGE_TAG" --type String --value "$tag" --overwrite >/dev/null; then
             echo "SSM $SSM_PREFIX/IMAGE_TAG 쓰기 실패 - 반영하지 않습니다."; exit 1
           fi
-          # tag는 그대로 sed에 들어가 remote.sh의 비인용 대입이 된다. forward의 tag는 "반영할 태그 결정"이
-          # 고른 값이고(수동 입력은 거기서 7자리 hex로 검증, 나머지는 빌드한 SHA나 ECR 대조로 고른 SHA), 롤백의
-          # tag는 직전 SSM IMAGE_TAG다. 그 검증을 지우면 수동 입력이 이 치환을 거쳐 ai 호스트 root 스크립트에 실린다.
+          # tag는 그대로 sed에 들어가 remote.sh의 비인용 대입이 된다. 위의 ECR 태그 문자 집합 검사를 지우면 이 치환이 ai 호스트
+          # root 스크립트에 임의 명령을 싣는 길이 된다.
           sed "s/__EXPECTED_TAG__/$tag/" remote.sh > "remote-$tag.sh"
           # 원격 실행 상한 1500초 (accentury-up.sh 재시도 약 4분 + 압축 4.3GB pull + healthy 대기 10분 +
           # 전파 재시도). 실모델 이미지가 되면서 pull과 워밍업이 둘 다 길어졌다 (KAN-22).
