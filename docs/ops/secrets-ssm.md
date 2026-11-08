@@ -361,7 +361,8 @@ HTTPS 443을 이미 전체로 열어 두어(`modules/network`의 `backend_https_
 
 성공만 세면 LLM이 거절하는 문장의 반복이 걸리지 않으므로 LLM을 부른 호출 수도 계정당 하루 20번으로 막는다 (Redis 키
 `trc:{userId}:{yyyyMMdd}`, 코드 상수 `DAILY_CALL_LIMIT`, KAN-322). 결과가 422나 503이어도 호출 수는 돌려주지 않고, 넘으면
-같은 429다. 요청은 계정당 분당 6회까지이고 넘으면 429 `RATE_LIMITED`다 (`accentury.translation.rate-limit-per-minute`,
+같은 429에 문구만 「오늘 번역 요청 횟수(20회)」로 다르다. 200 응답의 `remaining`은 남은 성공 칸과 남은 호출 수 가운데
+작은 쪽이다. 요청은 계정당 분당 6회까지이고 넘으면 429 `RATE_LIMITED`다 (`accentury.translation.rate-limit-per-minute`,
 태스크별로 세므로 태스크 3대면 분당 18회까지 풀린다). 엣지의 WAF 10번 규칙도 이 경로를 센다.
 
 Redis 장애면 번역도 503 `TRANSLATION_UNAVAILABLE`이다. 분당 한도에 잠깐 닿는 정도를 허용하려면 monitoring 모듈의

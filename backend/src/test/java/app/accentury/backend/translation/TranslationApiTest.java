@@ -386,11 +386,25 @@ class TranslationApiTest extends IntegrationTest {
         translate(access, "밥 먹었어?")
                 .andExpect(status().isTooManyRequests())
                 .andExpect(jsonPath("$.code").value("TRANSLATION_DAILY_LIMIT_EXCEEDED"))
+                .andExpect(jsonPath("$.message").value("오늘 번역 요청 횟수(20회)를 다 썼습니다. 내일 다시 시도해 주세요."))
                 .andExpect(jsonPath("$.retryable").value(false))
                 .andExpect(header().doesNotExist(HttpHeaders.RETRY_AFTER));
 
         assertTrue(translator.inputs.isEmpty(), "상한 다음 요청은 LLM을 부르지 않는다");
         assertEquals(TranslationResult.LIMITED, onlyRecord().result());
+    }
+
+    @Test
+    void 거절이_쌓이면_남은_수는_남은_호출_수를_넘지_않는다() throws Exception {
+        String access = signUp();
+        translator.script = text -> DialectTranslator.Reply.of(DialectTranslator.Kind.REFUSED);
+        for (int i = 0; i < AccenturyProperties.Translation.DAILY_CALL_LIMIT - 3; i++) {
+            rejected(translate(access, "심한 욕설이 들어간 문장"));
+        }
+
+        translator.script = text -> DialectTranslator.Reply.translated(text);
+        translate(access, "밥 먹었어?").andExpect(status().isOk())
+                .andExpect(jsonPath("$.remaining").value(2));
     }
 
     @Test
