@@ -26,6 +26,7 @@ import java.util.concurrent.TimeUnit;
  * 마지막 사용 시각을 따로 적지 않는다.
  * <p>
  * Redis가 답하지 못하면 그 회차를 통째로 그만둔다 - "모른다"를 "없다"로 읽으면 장애 한 번에 살아 있는 게스트를 지운다.
+ * 계정 하나의 파기 실패는 다르다: 그 계정만 건너뛰고 나머지를 계속 본다.
  * Redis의 데이터가 사라진 경우(재생성)는 다르다: 그때는 Refresh도 전부 사라져 게스트들이 실제로 돌아올 수 없으므로
  * 지우는 것이 맞다.
  */
@@ -72,9 +73,9 @@ class GuestAccountRetention {
         UUID after = FIRST;
         int checked = 0;
         int purged = 0;
+        int failed = 0;
         while (true) {
-            List<UUID> page = users.findIdsByProviderCreatedBefore(Provider.GUEST, cutoff, after,
-                    PageRequest.of(0, PAGE_SIZE));
+            List<UUID> page = users.findLiveGuestIdsCreatedBefore(cutoff, after, PageRequest.of(0, PAGE_SIZE));
             for (UUID id : page) {
                 boolean live;
                 try {
@@ -85,8 +86,20 @@ class GuestAccountRetention {
                     return purged;
                 }
                 checked++;
-                if (!live && withdrawalService.purgeGuest(id)) {
-                    purged++;
+                if (live) {
+                    continue;
+                }
+                try {
+                    if (withdrawalService.purgeGuest(id)) {
+                        purged++;
+                    }
+                } catch (RuntimeException e) {
+                    // 한 계정의 실패(잠금 대기 초과, 연결 끊김)로 회차를 끝내지 않는다 (PR #69 리뷰). id 순서로 훑으므로
+                    // 여기서 멈추면 같은 계정이 계속 실패하는 동안 그 뒤의 계정은 영영 검사되지 않는다. 이 계정은 다음
+                    // 회차가 다시 본다.
+                    failed++;
+                    log.warn("게스트 계정 파기 실패 - 다음 계정으로 넘어간다 userId={} ({})", id,
+                            e.getClass().getSimpleName());
                 }
             }
             if (page.size() < PAGE_SIZE) {
@@ -94,8 +107,8 @@ class GuestAccountRetention {
             }
             after = page.getLast();
         }
-        if (purged > 0) {
-            log.info("돌아올 수 없는 게스트 계정 {}건 파기 (검사 {}건)", purged, checked);
+        if (purged > 0 || failed > 0) {
+            log.info("돌아올 수 없는 게스트 계정 {}건 파기 (검사 {}건, 실패 {}건)", purged, checked, failed);
         }
         return purged;
     }

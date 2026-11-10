@@ -404,8 +404,9 @@ ID와 계정의 대응표는 DB `translation_subject`이고 탈퇴가 그 행을
    TLS, AUTH 토큰 순으로 본다).
 
 **게스트 계정.** 게스트 발급(`POST /v0/auth/guest`, 명세서 §3.21)은 IdP 값이 필요 없고 같은 Redis만 쓴다. 발급 상한은
-Redis 키 `gq:{IP의 SHA-256}:{yyyyMMdd}`로 IP당 하루 10개를 세고(코드 상수 `GUEST_DAILY_LIMIT_PER_IP`) 다음 날 한국 시각
-01시에 만료된다. 배포 환경에서 실제 IdP 토큰 없이 토큰 발급부터 번역까지를 실증할 수 있는 경로이기도 하다. 정리 잡
+Redis 키 `gq:{IP의 HMAC-SHA256}:{yyyyMMdd}`로 IP당 하루 10개를 세고(코드 상수 `GUEST_DAILY_LIMIT_PER_IP`) 다음 날 한국 시각
+01시에 만료된다. IPv6는 앞 64비트를 한 IP로 센다. HMAC의 키는 `ACCENTURY_AUTH_JWTSECRET`에서 끌어내므로 시크릿을 따로 두지
+않고, JWT 키를 회전하면 그날의 카운터가 새로 시작한다. 배포 환경에서 실제 IdP 토큰 없이 토큰 발급부터 번역까지를 실증할 수 있는 경로이기도 하다. 정리 잡
 (`GuestAccountRetention`)은 6시간마다 Redis의 `rtuser:{계정 id}`가 없는 게스트 계정을 탈퇴와 같은 절차로 지운다. Redis
 노드를 새로 만들면 Refresh가 전부 사라지므로 그때까지의 게스트 계정은 다음 회차에 전부 파기된다.
 

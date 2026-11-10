@@ -65,6 +65,9 @@ class GuestAccountRetentionTest extends IntegrationTest {
     @Autowired
     private AccenturyProperties properties;
 
+    @Autowired
+    private RefreshTokens refreshTokens;
+
     @Test
     void 로그인이_살아_있는_게스트는_여유가_지나도_지우지_않는다() throws Exception {
         JsonNode guest = guest();
@@ -153,6 +156,36 @@ class GuestAccountRetentionTest extends IntegrationTest {
 
         assertEquals(0, purged);
         assertTrue(users.findActive(userId(guest)).isPresent(), "모른다를 없다로 읽지 않는다");
+    }
+
+    /**
+     * 한 계정의 파기 실패가 회차를 끝내지 않는다 (PR #69 리뷰). id 순서로 훑으므로 거기서 멈추면 그 뒤의 계정은 같은
+     * 계정이 실패하는 동안 영영 검사되지 않는다.
+     */
+    @Test
+    void 한_계정의_파기가_실패해도_나머지_계정은_파기한다() throws Exception {
+        UUID failing = userId(guest());
+        UUID first = userId(guest());
+        UUID second = userId(guest());
+        for (UUID id : new UUID[]{failing, first, second}) {
+            redis.delete(RefreshTokens.USER_KEY + id);
+        }
+        WithdrawalService flaky = new WithdrawalService(null, null, null, null, null, null, null) {
+            @Override
+            boolean purgeGuest(UUID userId) {
+                if (userId.equals(failing)) {
+                    throw new IllegalStateException("잠금 대기 초과를 흉내 낸다");
+                }
+                return withdrawalService.purgeGuest(userId);
+            }
+        };
+
+        new GuestAccountRetention(users, refreshTokens, flaky).purgeUnreachable(afterGrace());
+
+        // 세 계정의 id 순서는 난수라 실패하는 계정이 어디에 오든, 나머지 둘은 지워져야 한다.
+        assertTrue(users.findActive(first).isEmpty());
+        assertTrue(users.findActive(second).isEmpty());
+        assertTrue(users.findActive(failing).isPresent(), "실패한 계정은 남고 다음 회차가 다시 본다");
     }
 
     private static Instant afterGrace() {
