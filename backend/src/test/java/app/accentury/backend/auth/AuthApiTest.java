@@ -217,7 +217,7 @@ class AuthApiTest extends IntegrationTest {
     // === 프로필 (§3.10, §3.11) ===
 
     @Test
-    void 다섯_항목을_채우면_COMPLETE가_되고_내_정보에서도_그렇다() throws Exception {
+    void 항목을_다_채우면_COMPLETE가_되고_내_정보에서도_그렇다() throws Exception {
         String access = body(login("KAKAO", uniqueSub(), true)).get("accessToken").asString();
 
         putProfile(access, profile())
@@ -252,9 +252,55 @@ class AuthApiTest extends IntegrationTest {
         assertEquals(firstCompletedAt, users.findById(userId).orElseThrow().profileCompletedAt());
     }
 
+    // 성별은 선택 항목이다 (KAN-328, App Store 심사 지침 5.1.1(v)) - 빼도, null로 보내도 프로필이 완료된다.
     @ParameterizedTest
-    @ValueSource(strings = {"email", "name", "birthDate", "gender", "region"})
-    void 한_항목이라도_빠지면_400이고_완료되지_않는다(String missing) throws Exception {
+    @ValueSource(booleans = {true, false})
+    void 성별_없이_저장해도_COMPLETE이고_세션을_만들_수_있다(boolean explicitNull) throws Exception {
+        JsonNode login = body(login("KAKAO", uniqueSub(), true));
+        String access = login.get("accessToken").asString();
+        UUID userId = UUID.fromString(login.get("user").get("id").asString());
+        Map<String, Object> request = profile();
+        if (explicitNull) {
+            request.put("gender", null);
+        } else {
+            request.remove("gender");
+        }
+
+        putProfile(access, request)
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.profileStatus").value("COMPLETE"))
+                .andExpect(jsonPath("$.user.gender").doesNotExist())
+                .andExpect(jsonPath("$.user.region").value("GYEONGNAM"));
+        me(access).andExpect(jsonPath("$.profileStatus").value("COMPLETE"));
+
+        AppUser saved = users.findById(userId).orElseThrow();
+        assertNull(saved.gender());
+        assertNotNull(saved.profileCompletedAt());
+        // 403 AUTH_PROFILE_INCOMPLETE가 아니다 - 성별이 없어도 테스트를 시작한다.
+        mockMvc.perform(post("/v0/sessions").header(HttpHeaders.AUTHORIZATION, "Bearer " + access))
+                .andExpect(status().isCreated());
+    }
+
+    @Test
+    void 성별이_있던_계정이_null로_다시_보내면_성별이_지워지고_COMPLETE는_그대로다() throws Exception {
+        JsonNode login = body(login("KAKAO", uniqueSub(), true));
+        String access = login.get("accessToken").asString();
+        UUID userId = UUID.fromString(login.get("user").get("id").asString());
+        putProfile(access, profile()).andExpect(jsonPath("$.user.gender").value("MALE"));
+
+        Map<String, Object> cleared = profile();
+        cleared.put("gender", null);
+        putProfile(access, cleared)
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.profileStatus").value("COMPLETE"))
+                .andExpect(jsonPath("$.user.gender").doesNotExist());
+
+        assertNull(users.findById(userId).orElseThrow().gender());
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"email", "name", "birthDate", "region"})
+    void 필수_항목이_하나라도_빠지면_400이고_완료되지_않는다(String missing) throws Exception {
         String access = body(login("KAKAO", uniqueSub(), true)).get("accessToken").asString();
         Map<String, Object> request = profile();
         request.remove(missing);
@@ -281,6 +327,13 @@ class AuthApiTest extends IntegrationTest {
                     .andExpect(status().isBadRequest())
                     .andExpect(jsonPath("$.code").value("VALIDATION_FAILED"));
         }
+        // 성별은 빼거나 null이면 받지만, 빈 문자열은 값을 보낸 것이라 400이다 (KAN-328).
+        Map<String, Object> blankGender = profile();
+        blankGender.put("gender", "");
+        putProfile(access, blankGender)
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("VALIDATION_FAILED"));
+        me(access).andExpect(jsonPath("$.profileStatus").value("INCOMPLETE"));
         Map<String, Object> future = profile();
         future.put("birthDate", LocalDate.now(ZoneId.of("Asia/Seoul")).plusDays(1).toString());
         putProfile(access, future).andExpect(status().isBadRequest());
