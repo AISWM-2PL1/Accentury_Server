@@ -281,17 +281,43 @@ class AuthApiTest extends IntegrationTest {
                 .andExpect(status().isCreated());
     }
 
-    @Test
-    void 성별이_있던_계정이_null로_다시_보내면_성별이_지워지고_COMPLETE는_그대로다() throws Exception {
+    // PUT은 화면 전체를 보내는 교체다 (§3.10) - 빠진 gender도 null과 같이 「선택 안 함」이라 있던 성별을 지운다.
+    @ParameterizedTest
+    @ValueSource(booleans = {true, false})
+    void 성별이_있던_계정이_성별을_빼거나_null로_다시_보내면_지워지고_COMPLETE는_그대로다(boolean explicitNull)
+            throws Exception {
         JsonNode login = body(login("KAKAO", uniqueSub(), true));
         String access = login.get("accessToken").asString();
         UUID userId = UUID.fromString(login.get("user").get("id").asString());
         putProfile(access, profile()).andExpect(jsonPath("$.user.gender").value("MALE"));
 
         Map<String, Object> cleared = profile();
-        cleared.put("gender", null);
+        if (explicitNull) {
+            cleared.put("gender", null);
+        } else {
+            cleared.remove("gender");
+        }
         putProfile(access, cleared)
                 .andExpect(status().isOk())
+                .andExpect(jsonPath("$.profileStatus").value("COMPLETE"))
+                .andExpect(jsonPath("$.user.gender").doesNotExist());
+
+        assertNull(users.findById(userId).orElseThrow().gender());
+    }
+
+    @Test
+    void 성별_없이_완료한_계정은_재로그인_뒤에도_성별이_비어_있다() throws Exception {
+        String sub = uniqueSub();
+        JsonNode first = body(login("KAKAO", sub, true));
+        String access = first.get("accessToken").asString();
+        UUID userId = UUID.fromString(first.get("user").get("id").asString());
+        Map<String, Object> request = profile();
+        request.put("gender", null);
+        putProfile(access, request).andExpect(jsonPath("$.profileStatus").value("COMPLETE"));
+
+        login("KAKAO", sub, false)
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.isNewUser").value(false))
                 .andExpect(jsonPath("$.profileStatus").value("COMPLETE"))
                 .andExpect(jsonPath("$.user.gender").doesNotExist());
 

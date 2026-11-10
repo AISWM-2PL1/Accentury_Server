@@ -61,7 +61,7 @@ public class AppUser implements Persistable<UUID> {
     @Column(name = "birth_date")
     private @Nullable LocalDate birthDate;
 
-    /** 선택 항목이다 (KAN-328) - null이면 IdP도 주지 않았고 사용자도 고르지 않은 계정이다. */
+    /** 선택 항목이다 (KAN-328) - 추가 정보 화면에서 사용자가 고른 값만 들어간다. null이면 고르지 않은 계정이다. */
     @Enumerated(EnumType.STRING)
     @Column(length = 10)
     private @Nullable Gender gender;
@@ -120,7 +120,8 @@ public class AppUser implements Persistable<UUID> {
     }
 
     /**
-     * 가입 - IdP가 준 값으로 채운다. 동의는 호출 쪽({@code AuthService})이 이미 확인했다.
+     * 가입 - IdP가 준 값으로 채운다. 동의는 호출 쪽({@code AuthService})이 이미 확인했다. 성별은 IdP 값이 없으므로
+     * ({@link IdpProfile}) 비워 둔다 (KAN-328).
      */
     AppUser(IdpProfile profile, String privacyPolicyVersion, Instant now) {
         this.isNew = true;
@@ -130,7 +131,6 @@ public class AppUser implements Persistable<UUID> {
         this.email = profile.email();
         this.name = profile.name();
         this.birthDate = profile.birthDate();
-        this.gender = profile.gender();
         this.nickname = profile.nickname();
         this.profileImageUrl = profile.profileImageUrl();
         this.privacyConsentAt = now;
@@ -144,8 +144,8 @@ public class AppUser implements Persistable<UUID> {
      * 재로그인 - 비어 있는 항목만 IdP 값으로 채운다 (§3.9). 사용자가 추가 정보 화면에서 이미 입력한 값은
      * 덮지 않는다: IdP의 값이 바뀌었다고 사용자가 고친 이름이 되돌아가면 안 된다.
      * <p>
-     * 성별은 프로필이 완료된 뒤에는 비어 있어도 채우지 않는다 (KAN-328). 선택 항목이라 완료된 프로필의 빈 성별은
-     * "아직 못 받은 값"이 아니라 사용자가 고르지 않기로 한 값이다 - 여기서 채우면 그 선택이 재로그인마다 되돌아간다.
+     * 성별은 건드리지 않는다 (KAN-328) - IdP 값이 없고, 사용자가 추가 정보 화면에서 고른 값(또는 고르지 않은 것)이
+     * 재로그인으로 바뀌면 안 된다.
      *
      * @return 바뀐 항목이 있었는가
      */
@@ -161,10 +161,6 @@ public class AppUser implements Persistable<UUID> {
         }
         if (birthDate == null && profile.birthDate() != null) {
             birthDate = profile.birthDate();
-            changed = true;
-        }
-        if (gender == null && profile.gender() != null && profileCompletedAt == null) {
-            gender = profile.gender();
             changed = true;
         }
         if (nickname == null && profile.nickname() != null) {

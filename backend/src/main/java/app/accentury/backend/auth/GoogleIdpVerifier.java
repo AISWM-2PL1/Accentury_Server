@@ -39,7 +39,7 @@ final class GoogleIdpVerifier implements IdpVerifier {
         JWTClaimsSet claims = idTokens.verify(credential.token());
         return new IdpProfile(Provider.GOOGLE, claims.getSubject(),
                 Boolean.TRUE.equals(bool(claims, "email_verified")) ? string(claims, "email") : null,
-                string(claims, "name"), null, null, null, string(claims, "picture"));
+                string(claims, "name"), null, null, string(claims, "picture"));
     }
 
     static @Nullable String string(JWTClaimsSet claims, String name) {

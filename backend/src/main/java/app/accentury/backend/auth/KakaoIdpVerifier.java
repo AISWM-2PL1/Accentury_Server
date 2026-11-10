@@ -68,7 +68,6 @@ final class KakaoIdpVerifier implements IdpVerifier {
                 emailUsable ? text(account.get("email")) : null,
                 text(account.get("name")),
                 birthDate(account),
-                gender(text(account.get("gender"))),
                 text(profile.get("nickname")),
                 text(profile.get("profile_image_url")));
     }
@@ -90,16 +89,6 @@ final class KakaoIdpVerifier implements IdpVerifier {
         } catch (NumberFormatException | DateTimeException e) {
             return null;
         }
-    }
-
-    private static @Nullable Gender gender(@Nullable String value) {
-        if ("male".equals(value)) {
-            return Gender.MALE;
-        }
-        if ("female".equals(value)) {
-            return Gender.FEMALE;
-        }
-        return null;
     }
 
     /** 문자열이든 숫자든 텍스트로 - 카카오의 id와 app_id는 숫자다. 없거나 null이면 null. */

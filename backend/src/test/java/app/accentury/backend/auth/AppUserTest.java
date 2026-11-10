@@ -26,7 +26,7 @@ class AppUserTest {
         user.updateProfile("mine@example.com", "내가고친이름", LocalDate.of(1999, 3, 2), Gender.FEMALE, Region.SEOUL, NOW);
 
         boolean changed = user.fillBlanksFrom(new IdpProfile(Provider.KAKAO, "sub", "idp@kakao.com", "카카오이름",
-                LocalDate.of(1988, 1, 1), Gender.MALE, "닉네임", "https://k.kakaocdn.net/p.jpg"), NOW.plusSeconds(60));
+                LocalDate.of(1988, 1, 1), "닉네임", "https://k.kakaocdn.net/p.jpg"), NOW.plusSeconds(60));
 
         assertTrue(changed, "비어 있던 닉네임과 이미지는 채워진다");
         assertEquals("mine@example.com", user.email());
@@ -43,10 +43,10 @@ class AppUserTest {
         AppUser user = new AppUser(IdpProfile.subjectOnly(Provider.NAVER, "sub"), "2026-09-24", NOW);
 
         user.fillBlanksFrom(new IdpProfile(Provider.NAVER, "sub", "a@naver.com", "이름", LocalDate.of(1999, 3, 2),
-                Gender.MALE, null, null), NOW);
+                null, null), NOW);
 
         assertEquals("a@naver.com", user.email());
-        assertEquals(Gender.MALE, user.gender(), "프로필 완료 전에는 성별도 IdP 값으로 채운다");
+        assertNull(user.gender(), "성별은 IdP 값으로 채우지 않는다 - 사용자가 고를 때만 저장한다 (KAN-328)");
         assertFalse(user.isProfileComplete(), "출신지역은 IdP가 주지 않는다 - 추가 정보 화면이 받는다");
     }
 
@@ -62,35 +62,37 @@ class AppUserTest {
     }
 
     @Test
-    void 완료된_프로필의_빈_성별은_재로그인이_IdP_값으로_채우지_않는다() {
-        // 카카오가 성별을 줬지만 사용자가 추가 정보 화면에서 「선택 안 함」으로 바꿔 저장했다.
+    void 성별은_사용자가_고른_값만_남고_가입과_재로그인은_건드리지_않는다() {
+        // 카카오와 네이버가 성별을 줘도 IdpProfile에는 자리가 없다 (KAN-328) - 가입 직후에는 성별이 비어 있다.
         IdpProfile kakao = new IdpProfile(Provider.KAKAO, "sub", "k@kakao.com", "이름", LocalDate.of(1999, 3, 2),
-                Gender.MALE, null, null);
+                null, null);
         AppUser user = new AppUser(kakao, "2026-09-24", NOW);
-        assertEquals(Gender.MALE, user.gender(), "가입 때는 IdP가 준 성별을 채운다");
+        assertNull(user.gender(), "사용자가 고르기 전에는 성별이 저장되지 않는다");
+
+        user.updateProfile("k@kakao.com", "이름", LocalDate.of(1999, 3, 2), Gender.FEMALE, Region.GYEONGNAM, NOW);
+        assertFalse(user.fillBlanksFrom(kakao, NOW.plusSeconds(60)));
+        assertEquals(Gender.FEMALE, user.gender(), "고른 성별은 재로그인이 바꾸지 않는다");
+
         user.updateProfile("k@kakao.com", "이름", LocalDate.of(1999, 3, 2), null, Region.GYEONGNAM, NOW);
-
-        boolean changed = user.fillBlanksFrom(kakao, NOW.plusSeconds(60));
-
-        assertFalse(changed, "성별만 비어 있었고 그 값은 채우지 않는다");
-        assertNull(user.gender(), "사용자가 고르지 않기로 한 값이 재로그인으로 되돌아가면 안 된다");
+        assertFalse(user.fillBlanksFrom(kakao, NOW.plusSeconds(120)));
+        assertNull(user.gender(), "「선택 안 함」은 재로그인 뒤에도 비어 있다");
         assertTrue(user.isProfileComplete());
     }
 
     @Test
     void 바뀐_것이_없으면_false다() {
-        AppUser user = new AppUser(new IdpProfile(Provider.GOOGLE, "sub", "g@example.com", "이름", null, null, null, null),
+        AppUser user = new AppUser(new IdpProfile(Provider.GOOGLE, "sub", "g@example.com", "이름", null, null, null),
                 "2026-09-24", NOW);
 
         assertFalse(user.fillBlanksFrom(new IdpProfile(Provider.GOOGLE, "sub", "other@example.com", "다른이름",
-                null, null, null, null), NOW));
+                null, null, null), NOW));
         assertNotNull(user.email());
     }
 
     @Test
     void 탈퇴는_개인_정보를_지우고_IdP_사용자_id를_계정_id로_바꾼다() {
         AppUser user = new AppUser(new IdpProfile(Provider.KAKAO, "4242", "k@kakao.com", "이름",
-                LocalDate.of(1999, 3, 2), Gender.MALE, "닉네임", "https://k.kakaocdn.net/p.jpg"), "2026-09-24", NOW);
+                LocalDate.of(1999, 3, 2), "닉네임", "https://k.kakaocdn.net/p.jpg"), "2026-09-24", NOW);
         user.updateProfile("k@kakao.com", "이름", LocalDate.of(1999, 3, 2), Gender.MALE, Region.GYEONGNAM, NOW);
 
         user.withdraw(NOW.plusSeconds(60));

@@ -79,7 +79,6 @@ final class NaverIdpVerifier implements IdpVerifier {
                 KakaoIdpVerifier.text(response.get("name")),
                 birthDate(KakaoIdpVerifier.text(response.get("birthyear")),
                         KakaoIdpVerifier.text(response.get("birthday"))),
-                gender(KakaoIdpVerifier.text(response.get("gender"))),
                 KakaoIdpVerifier.text(response.get("nickname")),
                 KakaoIdpVerifier.text(response.get("profile_image")));
     }
@@ -112,16 +111,5 @@ final class NaverIdpVerifier implements IdpVerifier {
             return null;
         }
         return KakaoIdpVerifier.date(year, monthDay.substring(0, 2), monthDay.substring(3));
-    }
-
-    /** 네이버는 M, F, U(미상)다. U는 모르는 것과 같다. */
-    private static @Nullable Gender gender(@Nullable String value) {
-        if ("M".equals(value)) {
-            return Gender.MALE;
-        }
-        if ("F".equals(value)) {
-            return Gender.FEMALE;
-        }
-        return null;
     }
 }
