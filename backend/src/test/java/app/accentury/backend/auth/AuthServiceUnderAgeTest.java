@@ -48,7 +48,7 @@ class AuthServiceUnderAgeTest {
 
             @Override
             public IdpProfile verify(IdpCredential credential) {
-                return new IdpProfile(provider, "child-sub", null, null, birthDate, null, null, null);
+                return new IdpProfile(provider, "child-sub", null, null, birthDate, null, null);
             }
         };
     }

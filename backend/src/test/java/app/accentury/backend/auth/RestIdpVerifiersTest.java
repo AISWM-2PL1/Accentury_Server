@@ -19,6 +19,7 @@ import tools.jackson.databind.json.JsonMapper;
 
 import java.time.Duration;
 import java.time.LocalDate;
+import java.util.Arrays;
 import java.util.concurrent.TimeUnit;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -105,7 +106,7 @@ class RestIdpVerifiersTest {
         assertEquals("user@kakao.com", profile.email());
         assertEquals("카카오사람", profile.name());
         assertEquals(LocalDate.of(1999, 3, 2), profile.birthDate());
-        assertEquals(Gender.FEMALE, profile.gender());
+        // 응답의 gender는 읽지 않는다 (KAN-328) - 성별은 사용자가 추가 정보 화면에서 고를 때만 저장한다.
         assertEquals("사투리왕", profile.nickname());
         assertEquals("https://k.kakaocdn.net/p.jpg", profile.profileImageUrl());
 
@@ -203,10 +204,11 @@ class RestIdpVerifiersTest {
         assertEquals("naver-id-1", profile.subject());
         assertEquals("user@naver.com", profile.email());
         assertEquals("네이버사람", profile.name());
-        assertEquals(Gender.MALE, profile.gender());
         assertEquals(LocalDate.of(2001, 10, 1), profile.birthDate());
-        // 휴대폰 번호를 담을 자리 자체가 없다 - IdpProfile에 필드가 없다.
-        assertEquals(8, IdpProfile.class.getRecordComponents().length);
+        // 휴대폰 번호와 성별(KAN-328)을 담을 자리 자체가 없다 - IdpProfile에 필드가 없다.
+        assertEquals(7, IdpProfile.class.getRecordComponents().length);
+        assertTrue(Arrays.stream(IdpProfile.class.getRecordComponents())
+                .noneMatch(component -> component.getName().equals("gender")));
     }
 
     @Test

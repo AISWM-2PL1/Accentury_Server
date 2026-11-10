@@ -55,7 +55,7 @@ final class AppleIdpVerifier implements IdpVerifier {
         Boolean verified = GoogleIdpVerifier.bool(claims, "email_verified");
         return new IdpProfile(Provider.APPLE, claims.getSubject(),
                 Boolean.FALSE.equals(verified) ? null : GoogleIdpVerifier.string(claims, "email"),
-                credential.appleName(), null, null, null, null);
+                credential.appleName(), null, null, null);
     }
 
     static String sha256Hex(String value) {
