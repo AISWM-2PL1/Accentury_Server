@@ -78,6 +78,28 @@ class TranslationRateLimitApiTest extends IntegrationTest {
         translate(signUp()).andExpect(status().isOk());
     }
 
+    /** 게스트 계정(KAN-329)도 같은 축이다 - 계정 id가 키라 게스트라고 풀리지 않는다. */
+    @Test
+    void 게스트_계정도_분당_한도를_넘으면_429_RATE_LIMITED다() throws Exception {
+        String body = mockMvc.perform(post("/v0/auth/guest")
+                        .with(request -> {
+                            request.setRemoteAddr("10.77.1.1");
+                            return request;
+                        })
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(Map.of("privacyConsent", true,
+                                "privacyPolicyVersion", AccenturyProperties.Auth.PRIVACY_POLICY_VERSION))))
+                .andExpect(status().isOk()).andReturn().getResponse().getContentAsString();
+        String access = objectMapper.readTree(body).get("accessToken").asString();
+        translate(access).andExpect(status().isOk());
+        translate(access).andExpect(status().isOk());
+
+        translate(access)
+                .andExpect(status().isTooManyRequests())
+                .andExpect(jsonPath("$.code").value("RATE_LIMITED"))
+                .andExpect(header().exists(HttpHeaders.RETRY_AFTER));
+    }
+
     private ResultActions translate(String access) throws Exception {
         return mockMvc.perform(post("/v0/translations")
                 .header(HttpHeaders.AUTHORIZATION, "Bearer " + access)

@@ -82,6 +82,12 @@ public enum ErrorCode {
     // 이미 회전된 Refresh의 재사용 - 복사본이 있다는 뜻이라 그 로그인의 토큰 패밀리 전체를 폐기한다.
     AUTH_REFRESH_REUSED(HttpStatus.UNAUTHORIZED, false, "로그인이 만료되었습니다. 다시 로그인해 주세요."),
     AUTH_PROFILE_INCOMPLETE(HttpStatus.FORBIDDEN, false, "추가 정보를 입력해야 테스트를 시작할 수 있습니다."),
+    // 게스트 계정(§3.21, KAN-329)은 사투리 번역기만 쓴다 - 그 밖의 계정 API는 로그인 계정 전용이다. 프로필 미완료와
+    // 코드를 가르는 것은 클라이언트가 갈 화면이 달라서다: 추가 정보 화면이 아니라 로그인 화면이다.
+    AUTH_GUEST_NOT_ALLOWED(HttpStatus.FORBIDDEN, false, "로그인이 필요한 기능입니다."),
+    // 같은 IP의 하루 게스트 발급 상한 (§2.5, §3.21). 다음 날에야 풀리므로 번역 일일 한도처럼 retryable=false다.
+    AUTH_GUEST_LIMIT_EXCEEDED(HttpStatus.TOO_MANY_REQUESTS, false,
+            "오늘은 로그인 없이 시작할 수 있는 횟수를 다 썼습니다. 로그인해 이용해 주세요."),
     // Refresh 저장소(Redis) 장애 - 로그인, refresh, 로그아웃만 해당하고 익명 응시는 영향이 없다 (NFR-AV-02).
     AUTH_STORE_UNAVAILABLE(HttpStatus.SERVICE_UNAVAILABLE, true, "잠시 뒤 다시 시도해 주세요."),
 

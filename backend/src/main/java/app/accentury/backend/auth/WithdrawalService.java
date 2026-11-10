@@ -12,6 +12,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.support.TransactionTemplate;
 
 import java.time.Instant;
+import java.util.UUID;
 
 /**
  * 회원 탈퇴 (FR-AC-09, KAN-241, 명세서 §3.14).
@@ -59,6 +60,41 @@ public class WithdrawalService {
                              int purgedTranslationSubjects) {
     }
 
+    /** 계정 파기의 본체 - 잠근 계정을 받아 한 트랜잭션 안에서 부른다. 탈퇴와 게스트 정리가 같은 절차를 쓴다. */
+    private Withdrawn destroy(AppUser locked) {
+        // IdP 사용자 id는 치환하기 전에 잡아 둔다 - 애플 revoke가 교환 결과와 맞춰 본다.
+        String subject = locked.providerUserId();
+        locked.withdraw(Instant.now());
+        int detached = sessions.detachUser(locked.id());
+        // 학습 기록은 세션과 달리 귀속만 끊지 않고 지운다 - 계정 없이는 의미가 없는 개인 기록이다 (§5.5).
+        int purged = learningRecords.purge(locked.id());
+        // 번역 기록은 S3에 남기고 계정 연결만 끊는다 (2026-10-08 결정, §3.18).
+        int unlinked = translationSubjects.purge(locked.id());
+        return new Withdrawn(locked.provider(), subject, detached, purged, unlinked);
+    }
+
+    /**
+     * 돌아올 수 없게 된 게스트 계정을 탈퇴와 같은 절차로 파기한다 (KAN-329, §3.21). {@link GuestAccountRetention}이
+     * 살아 있는 로그인이 없는 것을 확인하고 부른다 - 그래서 Refresh 폐기 단계가 없다.
+     * <p>
+     * 게스트인지는 잠근 뒤에 다시 본다. 여기는 요청이 아니라 잡이 부르는 자리라, 호출 쪽의 실수 하나가 소셜 계정을
+     * 지우는 길이 되지 않게 한다.
+     *
+     * @return 파기했는가 - 그사이 이미 사라졌거나(다른 태스크의 같은 잡, 탈퇴) 게스트가 아니면 false
+     */
+    boolean purgeGuest(UUID userId) {
+        Withdrawn withdrawn = transactionTemplate.execute(tx -> users.lockActive(userId)
+                .filter(AppUser::isGuest)
+                .map(this::destroy)
+                .orElse(null));
+        if (withdrawn == null) {
+            return false;
+        }
+        log.info("게스트 계정 파기 userId={} purgedTranslationSubjects={}", userId,
+                withdrawn.purgedTranslationSubjects());
+        return true;
+    }
+
     /**
      * @throws ApiException 401 {@code AUTH_TOKEN_INVALID} - 그사이 이미 탈퇴했다 (동시에 두 번 누른 경우의 뒤의 것)
      */
@@ -68,15 +104,7 @@ public class WithdrawalService {
             // 빈 열 채우기와 겹쳐도 그쪽이 먼저 커밋하면 이쪽이 그 값을 덮고, 이쪽이 먼저면 그쪽은 lockActive에서 빈다.
             AppUser locked = users.lockActive(user.id())
                     .orElseThrow(() -> new ApiException(ErrorCode.AUTH_TOKEN_INVALID));
-            // IdP 사용자 id는 치환하기 전에 잡아 둔다 - 애플 revoke가 교환 결과와 맞춰 본다.
-            String subject = locked.providerUserId();
-            locked.withdraw(Instant.now());
-            int detached = sessions.detachUser(locked.id());
-            // 학습 기록은 세션과 달리 귀속만 끊지 않고 지운다 - 계정 없이는 의미가 없는 개인 기록이다 (§5.5).
-            int purged = learningRecords.purge(locked.id());
-            // 번역 기록은 S3에 남기고 계정 연결만 끊는다 (2026-10-08 결정, §3.18).
-            int unlinked = translationSubjects.purge(locked.id());
-            return new Withdrawn(locked.provider(), subject, detached, purged, unlinked);
+            return destroy(locked);
         });
         if (withdrawn == null) {
             throw new IllegalStateException("탈퇴 트랜잭션이 결과 없이 끝났다");

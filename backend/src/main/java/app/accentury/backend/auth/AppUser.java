@@ -48,7 +48,7 @@ public class AppUser implements Persistable<UUID> {
     @Column(nullable = false, length = 10)
     private Provider provider;
 
-    /** IdP의 사용자 id - 구글과 애플 {@code sub}, 카카오와 네이버 {@code id}. */
+    /** IdP의 사용자 id - 구글과 애플 {@code sub}, 카카오와 네이버 {@code id}. 게스트는 서버가 만든 난수다 (KAN-329). */
     @Column(name = "provider_user_id", nullable = false, length = 255)
     private String providerUserId;
 
@@ -138,6 +138,20 @@ public class AppUser implements Persistable<UUID> {
         this.createdAt = now;
         this.updatedAt = now;
         markCompletionIfReady(now);
+    }
+
+    /**
+     * 게스트 계정 (KAN-329, 명세서 §3.21) - 소셜 로그인 없이 서버가 만든다. IdP가 없으므로 {@code provider_user_id}에는
+     * 서버가 만든 난수가 들어가고, 프로필 항목은 전부 비어 있다. 동의는 호출 쪽({@code AuthService})이 이미 확인했다.
+     */
+    static AppUser guest(String privacyPolicyVersion, Instant now) {
+        return new AppUser(IdpProfile.subjectOnly(Provider.GUEST, UUID.randomUUID().toString()),
+                privacyPolicyVersion, now);
+    }
+
+    /** 게스트 계정인가 - 게스트는 사투리 번역기만 쓰고 프로필과 음성 저장 동의가 없다 (KAN-329). */
+    public boolean isGuest() {
+        return provider == Provider.GUEST;
     }
 
     /**

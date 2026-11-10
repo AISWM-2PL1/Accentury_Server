@@ -334,6 +334,30 @@ class TranslationApiTest extends IntegrationTest {
         assertEquals(TranslationResult.LLM_FAILED, onlyRecord().result());
     }
 
+    // === 게스트 계정 (KAN-329, §3.21) ===
+
+    /** 게스트가 쓸 수 있는 유일한 기능 API다 - 한도는 로그인 계정과 같이 그 게스트 계정으로 센다. */
+    @Test
+    void 게스트_토큰으로도_번역이_되고_하루_다섯_건_한도가_같이_걸린다() throws Exception {
+        String access = guest();
+        translator.script = text -> DialectTranslator.Reply.translated("밥 뭇나?");
+
+        translate(access, "밥 먹었어?")
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.dialect").value("밥 뭇나?"))
+                .andExpect(jsonPath("$.remaining").value(4));
+        assertEquals(userId(access), store.records.getFirst().userId());
+
+        for (int remaining = 3; remaining >= 0; remaining--) {
+            translate(access, "밥 먹었어?").andExpect(status().isOk())
+                    .andExpect(jsonPath("$.remaining").value(remaining));
+        }
+        translate(access, "밥 먹었어?")
+                .andExpect(status().isTooManyRequests())
+                .andExpect(jsonPath("$.code").value("TRANSLATION_DAILY_LIMIT_EXCEEDED"));
+        assertEquals(5, translator.inputs.size(), "여섯 번째는 LLM을 부르지 않는다");
+    }
+
     // === 일일 한도 (2026-10-15 결정) ===
 
     @Test
@@ -503,6 +527,22 @@ class TranslationApiTest extends IntegrationTest {
         String body = mockMvc.perform(get("/v0/users/me").header(HttpHeaders.AUTHORIZATION, "Bearer " + access))
                 .andExpect(status().isOk()).andReturn().getResponse().getContentAsString();
         return UUID.fromString(objectMapper.readTree(body).path("user").path("id").asString());
+    }
+
+    /** 게스트 계정을 하나 만든다 - 발급 상한이 IP당 하루 단위라 부를 때마다 다른 IP다. */
+    private String guest() throws Exception {
+        java.util.concurrent.ThreadLocalRandom random = java.util.concurrent.ThreadLocalRandom.current();
+        String ip = "10." + random.nextInt(256) + "." + random.nextInt(256) + "." + random.nextInt(1, 255);
+        String body = mockMvc.perform(post("/v0/auth/guest")
+                        .with(request -> {
+                            request.setRemoteAddr(ip);
+                            return request;
+                        })
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(
+                                Map.of("privacyConsent", true, "privacyPolicyVersion", POLICY_VERSION))))
+                .andExpect(status().isOk()).andReturn().getResponse().getContentAsString();
+        return objectMapper.readTree(body).get("accessToken").asString();
     }
 
     private String signUp() throws Exception {

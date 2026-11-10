@@ -33,7 +33,8 @@ public final class IdpVerifiers {
                 throw new IllegalStateException("IdP 검증기가 둘이다: " + verifier.provider());
             }
         }
-        for (Provider provider : Provider.values()) {
+        // 게스트는 IdP가 아니라 검증기가 없다 (KAN-329) - 소셜 넷만 본다.
+        for (Provider provider : Provider.SOCIAL) {
             if (!map.containsKey(provider)) {
                 // 하나를 빠뜨리면 그 IdP 로그인만 조용히 500이 된다 - 기동 시점에 세운다.
                 throw new IllegalStateException("IdP 검증기가 없다: " + provider);

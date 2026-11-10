@@ -1,10 +1,13 @@
 package app.accentury.backend.auth;
 
+import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Lock;
 import org.springframework.data.jpa.repository.Query;
 
 import jakarta.persistence.LockModeType;
+import java.time.Instant;
+import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
 
@@ -33,4 +36,13 @@ public interface AppUserRepository extends JpaRepository<AppUser, UUID> {
     @Lock(LockModeType.PESSIMISTIC_WRITE)
     @Query("select u from AppUser u where u.id = :id and u.deletedAt is null")
     Optional<AppUser> lockActive(UUID id);
+
+    /**
+     * 살아 있는 계정의 id를 id 순서로 한 쪽 읽는다 - 게스트 계정 정리({@link GuestAccountRetention}, KAN-329)가 전부를
+     * 훑을 때 쓴다. {@code after}보다 큰 id부터라 앞 쪽을 다시 읽지 않는다 (키셋). provider가 앞에 선 유일 색인
+     * (provider, provider_user_id)이 provider 조건을 받는다.
+     */
+    @Query("select u.id from AppUser u where u.provider = :provider and u.deletedAt is null"
+            + " and u.createdAt < :createdBefore and u.id > :after order by u.id")
+    List<UUID> findIdsByProviderCreatedBefore(Provider provider, Instant createdBefore, UUID after, Pageable pageable);
 }

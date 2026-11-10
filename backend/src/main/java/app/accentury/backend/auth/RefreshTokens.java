@@ -263,6 +263,17 @@ public class RefreshTokens {
         return revoked != null ? revoked : 0L;
     }
 
+    /**
+     * 그 사용자에게 살아 있는 로그인이 하나라도 있는가 - 사용자 색인이 있는지로 답한다. 색인은 그 사용자의 어느 패밀리보다
+     * 늦게 끝나고 마지막 패밀리가 폐기되면 비어서 사라지므로, 색인이 없으면 쓸 수 있는 Refresh도 없다. 게스트 계정
+     * 정리({@link GuestAccountRetention}, KAN-329)가 쓴다.
+     *
+     * @throws ApiException 503 {@code AUTH_STORE_UNAVAILABLE} - Redis 장애. 호출 쪽은 이것을 "없다"로 읽으면 안 된다
+     */
+    public boolean hasLiveLogin(UUID userId) {
+        return Boolean.TRUE.equals(call(() -> redis.hasKey(USER_KEY + userId)));
+    }
+
     private static <T> T call(Supplier<T> redisCall) {
         try {
             return redisCall.get();

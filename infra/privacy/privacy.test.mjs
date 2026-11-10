@@ -172,6 +172,10 @@ test('1항 표의 보유 기간이 행마다 코드와 맞는다', () => {
     ['테스트 세션', ['30분', '완료', '24시간'], 'session/SessionService.java, TestSession.java'],
     // 계정은 탈퇴까지 (KAN-223 V2__app_user.sql, 탈퇴는 KAN-241). 정리 잡이 없으므로 기간이 아니라 사건이 기준이다.
     ['계정 (앱)', ['탈퇴'], 'auth/AppUser.java, V2__app_user.sql'],
+    // 게스트 계정은 Refresh가 전부 만료되면(30일 동안 회전 없음) 정리 잡이 6시간마다 걷어 간다 (KAN-329).
+    ['게스트 계정 (앱)', ['30일', '하루 안에'], 'auth/GuestAccountRetention.java, application.yml auth.refresh-token-ttl'],
+    // 게스트 발급 상한의 Redis 카운터는 다음 날 KST 01시에 만료된다 (KAN-329).
+    ['게스트 계정 발급 횟수 (앱)', ['다음 날 오전 1시'], 'auth/GuestQuota.java EXPIRE_AT'],
     // Refresh 토큰 수명 (application.yml auth.refresh-token-ttl: 30d, RefreshTokens의 Redis TTL).
     ['로그인 토큰', ['30일', '로그아웃'], 'application.yml auth.refresh-token-ttl, auth/RefreshTokens.java'],
     ['테스트 결과와 어휘 답안', ['24시간'], 'application.yml analysis.retention: 24h'],
@@ -771,6 +775,44 @@ test('1항에 계정 절이 있고 수집 항목과 목적과 보유 기간을 �
   // 출석일도 계정에 쌓인다 (KAN-286, V16 learning_attendance).
   assert.ok(account.includes('출석하신 날짜도 계정에 쌓이며'), '계정 절에 출석 기록의 예외가 없다');
   assert.ok(account.includes('어느 세션이 어느 계정의 것인지를 남기지 않습니다'), '로그의 세션-계정 대응 미기록 문구가 없다');
+});
+
+test('1항에 게스트 계정 절이 있고 쓸 수 있는 기능, 두는 정보, 자동 파기, 발급 횟수가 코드와 맞는다 (KAN-329)', () => {
+  assert.ok(html.includes('<h3>게스트 계정 (앱)</h3>'), '1항 아래 「게스트 계정 (앱)」 절이 없다');
+  const guest = section('<h3>게스트 계정 (앱)</h3>', '<h3>익명 통계</h3>').replace(/\s+/g, ' ');
+  // 게스트는 사투리 번역기만 쓴다 (@AuthenticatedUser(allowGuest = true)는 번역, 내 계정, 로그아웃, 탈퇴뿐이다).
+  assert.ok(guest.includes('게스트 계정으로는 사투리 번역기만 쓰실 수 있으며'), '게스트가 쓸 수 있는 기능이 없다');
+  // AppUser.guest가 채우는 것은 식별자와 동의 기록뿐이다. 발급 요청(GuestRequest)도 동의 두 필드만 받는다.
+  assert.ok(guest.includes('이 방침에 대한 동의를 받고'), '게스트 발급 때 동의를 받는다는 문장이 없다');
+  for (const item of ['계정 식별자', '방침 동의 시각', '방침 버전']) {
+    assert.ok(guest.includes(item), `게스트 계정 절에 「${item}」이 없다`);
+  }
+  assert.ok(guest.includes('이메일, 이름, 생년월일, 성별, 출신 지역은 받지 않으며'), '게스트가 받지 않는 항목이 없다');
+  // 게스트 토큰은 세션에 귀속되지 않는다 (AccountTokens.forSession이 403).
+  assert.ok(guest.includes('게스트 계정은 테스트 세션에 연결되지 않습니다'), '게스트와 테스트 세션의 관계가 없다');
+  // GuestAccountRetention - Refresh가 전부 만료된 게스트를 6시간마다 탈퇴와 같은 절차로 지운다.
+  assert.ok(guest.includes('30일 동안 이용하지 않으시면'), '게스트 계정의 파기 조건(30일 미이용)이 없다');
+  assert.ok(guest.includes('하루 안에 게스트 계정을 탈퇴와 같은 방법으로 자동 파기합니다'), '게스트 계정의 자동 파기가 없다');
+  assert.ok(guest.includes('연결 기록도 이때 함께 지웁니다'), '게스트 파기 때 번역 연결 기록을 지운다는 문장이 없다');
+  // GuestQuota - 키에 IP 원문이 아니라 SHA-256을 두고 다음 날 KST 01시에 만료한다.
+  assert.ok(guest.includes('접속 IP 주소의 해시값'), '게스트 발급 횟수의 키가 IP 해시라는 것이 없다');
+  assert.ok(guest.includes('IP 주소 원문은 이 기록에 두지 않습니다'), 'IP 원문을 두지 않는다는 문장이 없다');
+  assert.ok(guest.includes('다음 날 오전 1시(한국 시간)에 자동으로 삭제합니다'), '게스트 발급 횟수의 삭제 시각이 없다');
+  // 방침은 발급 상한의 숫자를 적지 않는다 - 숫자가 들어가면 AccenturyProperties.Auth.GUEST_DAILY_LIMIT_PER_IP와 묶어야 한다.
+  assert.ok(!/하루(에)? ?10(개|번|회)/.test(guest), '게스트 발급 상한의 숫자가 방침에 들어왔다 - 상수와 묶는 검사를 더한다');
+
+  const flat = html.replace(/\s+/g, ' ');
+  // 번역기는 게스트 계정으로도 쓴다 - 「로그인해 이용하는 앱에서만」이 남으면 게스트의 번역 전송이 고지에서 빠진다.
+  assert.ok(flat.includes('사투리 번역기는 로그인해 이용하는 앱에서 로그인한 계정이나 게스트 계정으로 쓸 수 있습니다'),
+    '번역기 절이 게스트 계정을 적지 않는다');
+  assert.ok(flat.includes('게스트 계정의 연결 기록은 게스트 계정이 파기될 때 함께 지웁니다'), '번역기 절에 게스트 연결 기록의 파기가 없다');
+  // 5, 6, 7, 12항.
+  assert.ok(flat.includes('게스트 계정: 30일 동안 이용하지 않으시면 그때부터 하루 안에 자동으로 파기합니다'), '5항에 게스트 계정의 파기가 없다');
+  assert.ok(flat.includes('게스트 계정 발급 횟수: 다음 날 오전 1시(한국 시간)에 자동으로 사라집니다'), '5항에 게스트 발급 횟수의 파기가 없다');
+  assert.ok(flat.includes('요청을 받아 삭제하는 대신'), '6항에 게스트 계정의 권리 행사 방법이 없다');
+  assert.ok(flat.includes('게스트 계정은 생년월일을 받지 않아 나이를 확인하지 않으며'), '7항에 게스트 계정의 나이 확인이 없다');
+  assert.ok(flat.includes('게스트 계정은 로그인 화면에서 「로그인 없이 둘러보기」를 고르실 때 이 방침에 대한 동의를 받습니다'),
+    '12항에 게스트 계정의 동의 방식이 없다');
 });
 
 test('3항에 로그인 제공자 넷과 받는 정보, 애플 전달용 이메일이 있다 (KAN-240, auth/*IdpVerifier.java)', () => {
