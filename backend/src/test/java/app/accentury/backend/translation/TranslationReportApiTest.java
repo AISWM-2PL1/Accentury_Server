@@ -207,6 +207,25 @@ class TranslationReportApiTest extends IntegrationTest {
         report(access, "toDialect", "밥 먹었어?", "나".repeat(301)).andExpect(status().isBadRequest());
     }
 
+    /**
+     * PostgreSQL은 문자열에 NUL(U+0000)을 받지 않는다 (PR #70 리뷰). 검증에서 거르지 않으면 저장에서 터져 400이 아니라
+     * 500이 된다.
+     */
+    @Test
+    void NUL_문자가_든_문장은_400이고_저장하지_않는다() throws Exception {
+        String access = signUp();
+        long before = count();
+
+        report(access, "toDialect", "밥\u0000먹었어?", "밥 뭇나?")
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("VALIDATION_FAILED"));
+        report(access, "toDialect", "밥 먹었어?", "밥\u0000뭇나?")
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("VALIDATION_FAILED"));
+
+        assertEquals(before, count());
+    }
+
     @Test
     void 본문이_없으면_400이다() throws Exception {
         mockMvc.perform(post("/v0/translations/reports").header(HttpHeaders.AUTHORIZATION, "Bearer " + signUp())
@@ -230,6 +249,28 @@ class TranslationReportApiTest extends IntegrationTest {
                 .andExpect(header().exists(HttpHeaders.RETRY_AFTER));
 
         report(signUp(), "toDialect", "밥 먹었어?", "밥 뭇나?").andExpect(status().isCreated());
+    }
+
+    /**
+     * 계정 축만 있으면 게스트 계정을 새로 만들 때마다 한도가 새로 생긴다 (PR #70 리뷰). 한 IP는 계정을 몇 개 쓰든
+     * 분당 같은 한도로 묶인다.
+     */
+    @Test
+    void 같은_IP는_계정을_바꿔도_분당_한도를_넘으면_429이고_다른_IP는_영향이_없다() throws Exception {
+        String ip = uniqueIp();
+        for (int i = 0; i < AccenturyProperties.Translation.REPORT_IP_RATE_LIMIT_PER_MINUTE; i++) {
+            // 요청마다 새 계정이다 - 계정 축에는 걸리지 않는다.
+            report(ip, signUp(), "toDialect", "밥 먹었어?", "밥 뭇나?").andExpect(status().isCreated());
+        }
+        long before = count();
+
+        report(ip, signUp(), "toDialect", "밥 먹었어?", "밥 뭇나?")
+                .andExpect(status().isTooManyRequests())
+                .andExpect(jsonPath("$.code").value("RATE_LIMITED"))
+                .andExpect(header().exists(HttpHeaders.RETRY_AFTER));
+
+        assertEquals(before, count(), "한도를 넘은 신고는 저장하지 않는다");
+        report(uniqueIp(), signUp(), "toDialect", "밥 먹었어?", "밥 뭇나?").andExpect(status().isCreated());
     }
 
     // === 탈퇴와 보존 기간 (2026-11-10 결정) ===
@@ -321,7 +362,18 @@ class TranslationReportApiTest extends IntegrationTest {
         throw new AssertionError("슬랙 알림이 오지 않았다 reportId=" + reportId);
     }
 
+    /** 요청마다 다른 IP로 보낸다 - IP 축 제한(분당 10건)이 테스트 사이에 섞이지 않게 한다. */
     private ResultActions report(String access, String direction, String text, String result) throws Exception {
+        return report(uniqueIp(), access, direction, text, result);
+    }
+
+    private static String uniqueIp() {
+        ThreadLocalRandom random = ThreadLocalRandom.current();
+        return "10." + random.nextInt(256) + "." + random.nextInt(256) + "." + random.nextInt(1, 255);
+    }
+
+    private ResultActions report(String ip, String access, String direction, String text, String result)
+            throws Exception {
         Map<String, Object> body = new LinkedHashMap<>();
         if (direction != null) {
             body.put("direction", direction);
@@ -333,6 +385,10 @@ class TranslationReportApiTest extends IntegrationTest {
             body.put("result", result);
         }
         return mockMvc.perform(post("/v0/translations/reports")
+                .with(request -> {
+                    request.setRemoteAddr(ip);
+                    return request;
+                })
                 .header(HttpHeaders.AUTHORIZATION, "Bearer " + access)
                 .contentType(MediaType.APPLICATION_JSON)
                 .content(objectMapper.writeValueAsString(body)));

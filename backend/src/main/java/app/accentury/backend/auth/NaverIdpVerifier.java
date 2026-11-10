@@ -64,17 +64,9 @@ final class NaverIdpVerifier implements IdpVerifier {
         if (clientId == null || clientSecret == null || credential.idpRefreshToken() == null) {
             throw new ApiException(ErrorCode.AUTH_IDP_TOKEN_INVALID);
         }
-        JsonNode me = api.get("/v1/nid/me", exchange(auth, clientId, clientSecret, credential.idpRefreshToken()));
-        if (!"00".equals(KakaoIdpVerifier.text(me.get("resultcode")))) {
-            log.info("네이버 프로필 조회 실패 resultcode={}", KakaoIdpVerifier.text(me.get("resultcode")));
-            throw new ApiException(ErrorCode.AUTH_IDP_TOKEN_INVALID);
-        }
-        JsonNode response = me.path("response");
-        String id = KakaoIdpVerifier.text(response.get("id"));
-        if (id == null) {
-            throw new ApiException(ErrorCode.AUTH_IDP_UNAVAILABLE);
-        }
-        return new IdpProfile(Provider.NAVER, id,
+        Identity identity = identify(auth, api, clientId, clientSecret, credential.idpRefreshToken());
+        JsonNode response = identity.response();
+        return new IdpProfile(Provider.NAVER, identity.id(),
                 KakaoIdpVerifier.text(response.get("email")),
                 KakaoIdpVerifier.text(response.get("name")),
                 birthDate(KakaoIdpVerifier.text(response.get("birthyear")),
@@ -84,10 +76,39 @@ final class NaverIdpVerifier implements IdpVerifier {
     }
 
     /**
-     * refresh token을 우리 클라이언트로 교환해 새 access token을 받는다. 교환 실패는 다른 앱의 토큰이거나 만료다.
-     * 탈퇴의 연결 해제({@link IdpUnlinker}, KAN-343)도 같은 교환을 쓴다.
+     * refresh token의 주인 - 교환으로 받은 access token과 프로필 응답이다.
+     *
+     * @param accessToken 교환으로 받은 access token - 이 요청 안에서만 쓰고 버린다
+     * @param id          네이버 사용자 id
+     * @param response    {@code /v1/nid/me}의 {@code response} 객체
      */
-    static String exchange(IdpHttp auth, String clientId, String clientSecret, String refreshToken) {
+    record Identity(String accessToken, String id, JsonNode response) {
+    }
+
+    /**
+     * refresh token이 우리 앱의 것인지 확인하고 그 주인을 읽는다 - 교환, 프로필 조회, {@code resultcode} 검사까지가
+     * 한 흐름이다. 로그인({@link #verify})과 탈퇴의 연결 해제({@link IdpUnlinker}, KAN-343)가 같은 흐름을 쓴다:
+     * 둘이 따로 구현하면 한쪽만 검사를 빠뜨린 채 갈라진다 (PR #70 리뷰).
+     *
+     * @throws ApiException 401 {@code AUTH_IDP_TOKEN_INVALID} 또는 502 {@code AUTH_IDP_UNAVAILABLE}
+     */
+    static Identity identify(IdpHttp auth, IdpHttp api, String clientId, String clientSecret, String refreshToken) {
+        String accessToken = exchange(auth, clientId, clientSecret, refreshToken);
+        JsonNode me = api.get("/v1/nid/me", accessToken);
+        if (!"00".equals(KakaoIdpVerifier.text(me.get("resultcode")))) {
+            log.info("네이버 프로필 조회 실패 resultcode={}", KakaoIdpVerifier.text(me.get("resultcode")));
+            throw new ApiException(ErrorCode.AUTH_IDP_TOKEN_INVALID);
+        }
+        JsonNode response = me.path("response");
+        String id = KakaoIdpVerifier.text(response.get("id"));
+        if (id == null) {
+            throw new ApiException(ErrorCode.AUTH_IDP_UNAVAILABLE);
+        }
+        return new Identity(accessToken, id, response);
+    }
+
+    /** refresh token을 우리 클라이언트로 교환해 새 access token을 받는다. 교환 실패는 다른 앱의 토큰이거나 만료다. */
+    private static String exchange(IdpHttp auth, String clientId, String clientSecret, String refreshToken) {
         MultiValueMap<String, String> form = new LinkedMultiValueMap<>();
         form.add("grant_type", "refresh_token");
         form.add("client_id", clientId);

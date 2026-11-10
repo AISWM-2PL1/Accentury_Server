@@ -9,11 +9,13 @@ import app.accentury.backend.translation.TranslationSubjects;
 import org.jspecify.annotations.Nullable;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.support.TransactionTemplate;
 
 import java.time.Instant;
 import java.util.UUID;
+import java.util.concurrent.Executor;
 
 /**
  * 회원 탈퇴 (FR-AC-09, KAN-241, 명세서 §3.14).
@@ -29,7 +31,8 @@ import java.util.UUID;
  *       장애) 탈퇴는 성공으로 답하고 WARN만 남긴다 - 남은 키는 30일 TTL로 사라진다. 커밋 뒤에 503을 내면 앱이 재시도하고,
  *       그 재시도는 401이 되어 사용자가 탈퇴가 됐는지 알 수 없다.</li>
  *   <li><b>제공자 연결 해제</b> - 애플은 토큰 revoke({@link AppleTokenRevoker}), 카카오와 네이버는 연결 해제
- *       ({@link IdpUnlinker}, KAN-343)다. 실패해도 WARN이다. 구글과 게스트는 대상이 아니다.</li>
+ *       ({@link IdpUnlinker}, KAN-343)다. 실패해도 WARN이다. 구글과 게스트는 대상이 아니다. 카카오와 네이버는
+ *       전용 실행기에서 응답 뒤에 돈다 - 제공자가 느려도 탈퇴 응답이 늦지 않는다.</li>
  * </ol>
  * 로그에는 계정 id와 provider만 남긴다.
  */
@@ -45,12 +48,14 @@ public class WithdrawalService {
     private final RefreshTokens refreshTokens;
     private final AppleTokenRevoker appleTokenRevoker;
     private final IdpUnlinker idpUnlinker;
+    private final Executor idpUnlinkExecutor;
     private final TranslationReports translationReports;
     private final TransactionTemplate transactionTemplate;
 
     WithdrawalService(AppUserRepository users, TestSessionRepository sessions, LearningRecords learningRecords,
                       TranslationSubjects translationSubjects,
                       RefreshTokens refreshTokens, AppleTokenRevoker appleTokenRevoker, IdpUnlinker idpUnlinker,
+                      @Qualifier("idpUnlinkExecutor") Executor idpUnlinkExecutor,
                       TranslationReports translationReports, TransactionTemplate transactionTemplate) {
         this.users = users;
         this.sessions = sessions;
@@ -59,6 +64,7 @@ public class WithdrawalService {
         this.refreshTokens = refreshTokens;
         this.appleTokenRevoker = appleTokenRevoker;
         this.idpUnlinker = idpUnlinker;
+        this.idpUnlinkExecutor = idpUnlinkExecutor;
         this.translationReports = translationReports;
         this.transactionTemplate = transactionTemplate;
     }
@@ -134,14 +140,29 @@ public class WithdrawalService {
         }
 
         // 제공자 쪽 연결을 끊는다 - 셋 다 실패해도 던지지 않는다. 구글은 서버가 끊을 수단이 없다 (IdpUnlinker).
+        // 카카오와 네이버는 요청 스레드에서 기다리지 않고 전용 실행기에 넘긴다 (PR #70 리뷰) - 애플은 iOS만 쓰고 iOS는
+        // 탈퇴 응답을 30초까지 기다리므로 지금처럼 동기로 둔다.
+        String subject = withdrawn.subject();
+        UUID userId = user.id();
         switch (withdrawn.provider()) {
             case APPLE -> appleTokenRevoker.revoke(request != null ? request.appleAuthorizationCode() : null,
-                    withdrawn.subject(), user.id());
-            case KAKAO -> idpUnlinker.unlinkKakao(withdrawn.subject(), user.id());
-            case NAVER -> idpUnlinker.unlinkNaver(request != null ? request.naverRefreshToken() : null,
-                    withdrawn.subject(), user.id());
+                    subject, userId);
+            case KAKAO -> unlinkLater(userId, () -> idpUnlinker.unlinkKakao(subject, userId));
+            case NAVER -> {
+                String naverRefreshToken = request != null ? request.naverRefreshToken() : null;
+                unlinkLater(userId, () -> idpUnlinker.unlinkNaver(naverRefreshToken, subject, userId));
+            }
             case GOOGLE, GUEST -> {
             }
+        }
+    }
+
+    /** 연결 해제를 실행기에 넘긴다. 넘기지 못해도 던지지 않는다 - 탈퇴는 이미 커밋됐고 응답은 204여야 한다. */
+    private void unlinkLater(UUID userId, Runnable unlink) {
+        try {
+            idpUnlinkExecutor.execute(unlink);
+        } catch (RuntimeException e) {
+            log.warn("제공자 연결 해제를 넘기지 못했다 userId={} ({})", userId, e.getClass().getSimpleName());
         }
     }
 }

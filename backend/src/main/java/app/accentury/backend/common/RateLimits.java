@@ -94,7 +94,12 @@ public class RateLimits {
          */
         TRANSLATION("user"),
         /** 번역 결과 신고 - 계정당 (§2.5, §3.22, KAN-343). 건마다 슬랙 알림이 나가므로 번역 요청과 따로 센다. */
-        TRANSLATION_REPORT("user");
+        TRANSLATION_REPORT("user"),
+        /**
+         * 번역 결과 신고 - IP당 (§2.5, §3.22, PR #70 리뷰). 게스트 계정은 IP당 하루 여러 개를 만들 수 있어 계정 축만으로는
+         * 한 IP가 계정 수만큼 신고를 보낸다. 신고는 건마다 슬랙 메시지가 나가므로 IP로 한 번 더 묶는다.
+         */
+        TRANSLATION_REPORT_IP("ip");
 
         private final String axis;
 
@@ -158,7 +163,9 @@ public class RateLimits {
                 Map.entry(Scope.INTONATION_LEARNING, properties.learning().intonationRateLimitPerMinute()),
                 Map.entry(Scope.INTONATION_UPLOAD_IP, properties.learning().intonationIpRateLimitPerMinute()),
                 Map.entry(Scope.TRANSLATION, properties.translation().rateLimitPerMinute()),
-                Map.entry(Scope.TRANSLATION_REPORT, AccenturyProperties.Translation.REPORT_RATE_LIMIT_PER_MINUTE));
+                Map.entry(Scope.TRANSLATION_REPORT, AccenturyProperties.Translation.REPORT_RATE_LIMIT_PER_MINUTE),
+                Map.entry(Scope.TRANSLATION_REPORT_IP,
+                        AccenturyProperties.Translation.REPORT_IP_RATE_LIMIT_PER_MINUTE));
     }
 
     /**

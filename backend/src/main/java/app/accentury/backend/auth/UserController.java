@@ -75,10 +75,13 @@ class UserController {
     }
 
     /**
-     * 회원 탈퇴 (§3.14). 계정의 개인 정보를 즉시 파기하고 모든 기기의 로그인을 끊는다. 본문은 선택이고 애플 계정만
-     * {@code appleAuthorizationCode}를 싣는다.
+     * 회원 탈퇴 (§3.14). 계정의 개인 정보를 즉시 파기하고 모든 기기의 로그인을 끊는다. 본문은 선택이다 - 애플 계정은
+     * {@code appleAuthorizationCode}를, 네이버 계정은 {@code naverRefreshToken}을 싣는다 ({@link WithdrawalRequest}).
+     * 네이버 계정이 {@code naverRefreshToken}을 싣지 않으면 오류 없이 네이버 연결 해제만 건너뛴다. 카카오 계정은 서버가
+     * 어드민 키로 끊으므로 실을 것이 없다.
      * <p>
-     * 204 / 401 {@code AUTH_TOKEN_INVALID}. 애플 revoke와 Refresh 폐기의 실패는 응답을 바꾸지 않는다 ({@link WithdrawalService}).
+     * 204 / 401 {@code AUTH_TOKEN_INVALID}. Refresh 폐기와 제공자 연결 해제(애플 revoke, 카카오와 네이버 연결 해제)의
+     * 실패는 응답을 바꾸지 않는다 ({@link WithdrawalService}). 카카오와 네이버의 연결 해제는 응답 뒤에 따로 돈다.
      */
     @PostMapping("/withdrawal")
     ResponseEntity<Void> withdraw(@AuthenticatedUser(allowGuest = true) AppUser user,

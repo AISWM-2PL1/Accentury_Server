@@ -2,6 +2,8 @@ package app.accentury.backend.translation;
 
 import app.accentury.backend.auth.AppUser;
 import app.accentury.backend.auth.AuthenticatedUser;
+import app.accentury.backend.common.ClientIps;
+import jakarta.servlet.http.HttpServletRequest;
 import org.jspecify.annotations.Nullable;
 import org.springframework.http.CacheControl;
 import org.springframework.http.HttpStatus;
@@ -21,10 +23,12 @@ class TranslationController {
 
     private final TranslationService service;
     private final TranslationReportService reportService;
+    private final ClientIps clientIps;
 
-    TranslationController(TranslationService service, TranslationReportService reportService) {
+    TranslationController(TranslationService service, TranslationReportService reportService, ClientIps clientIps) {
         this.service = service;
         this.reportService = reportService;
+        this.clientIps = clientIps;
     }
 
     /**
@@ -47,8 +51,9 @@ class TranslationController {
     @PostMapping(value = "/v0/translations/reports", consumes = MediaType.APPLICATION_JSON_VALUE)
     ResponseEntity<TranslationReportResponse> report(
             @AuthenticatedUser(allowGuest = true) AppUser user,
-            @RequestBody(required = false) @Nullable TranslationReportRequest request) {
+            @RequestBody(required = false) @Nullable TranslationReportRequest request,
+            HttpServletRequest httpRequest) {
         return ResponseEntity.status(HttpStatus.CREATED).cacheControl(CacheControl.noStore())
-                .body(reportService.report(user, request));
+                .body(reportService.report(user, request, clientIps.resolve(httpRequest)));
     }
 }
