@@ -128,6 +128,29 @@ class IdpUnlinkerTest {
         assertTrue(output.getAll().contains("카카오 연결 해제 건너뜀 - 회원번호 형식이 아니다"));
     }
 
+    /**
+     * 어드민 키가 자리 표시 값이나 빈 문자열이어도 기동 때 경고한다 (PR #70 리뷰) - 걸러 낸 필드가 아니라 인자를 보면
+     * 이 두 경우는 null이 아니라서 경고 없이 뜨고, 설정 누락이 탈퇴 때에야 드러난다.
+     */
+    @Test
+    void 어드민_키가_자리_표시_값이거나_비어_있어도_기동_때_경고한다(CapturedOutput output) {
+        for (String unset : new String[]{null, "unset-put-parameter-after-apply", "  "}) {
+            int before = count(output.getAll(), "카카오 연결 해제 미설정");
+
+            unlinker(unset, NAVER_CLIENT_SECRET);
+
+            assertEquals(before + 1, count(output.getAll(), "카카오 연결 해제 미설정"), "어드민 키 값: " + unset);
+        }
+    }
+
+    private static int count(String text, String needle) {
+        int count = 0;
+        for (int at = text.indexOf(needle); at >= 0; at = text.indexOf(needle, at + 1)) {
+            count++;
+        }
+        return count;
+    }
+
     // === 네이버 ===
 
     @Test
@@ -176,6 +199,20 @@ class IdpUnlinkerTest {
         take();
         assertNull(server.takeRequest(200, TimeUnit.MILLISECONDS), "삭제 요청이 나가면 안 된다");
         assertTrue(output.getAll().contains("토큰이 탈퇴한 계정의 것이 아니다"));
+    }
+
+    /** 로그인과 같은 검사를 쓴다 (PR #70 리뷰) - 프로필 조회가 실패({@code resultcode}가 00이 아님)면 삭제로 가지 않는다. */
+    @Test
+    void 네이버_프로필_조회가_실패하면_삭제하지_않는다(CapturedOutput output) throws Exception {
+        enqueueJson(200, "{\"access_token\": \"exchanged-access\"}");
+        enqueueJson(200, "{\"resultcode\": \"024\", \"message\": \"Authentication failed\"}");
+
+        unlinker().unlinkNaver("sdk-refresh-token", "naver-user-1", USER_ID);
+
+        take();
+        take();
+        assertNull(server.takeRequest(200, TimeUnit.MILLISECONDS), "삭제 요청이 나가면 안 된다");
+        assertTrue(output.getAll().contains("네이버 연결 해제 실패 userId=" + USER_ID + " code=AUTH_IDP_TOKEN_INVALID"));
     }
 
     @Test

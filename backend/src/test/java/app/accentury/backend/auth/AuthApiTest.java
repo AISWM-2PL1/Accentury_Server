@@ -664,12 +664,14 @@ class AuthApiTest extends IntegrationTest {
         withdraw(naver.get("accessToken").asString(), Map.of("naverRefreshToken", "naver-refresh-value"))
                 .andExpect(status().isNoContent());
 
-        String logs = output.getOut();
-        assertTrue(logs.contains("카카오 연결 해제 건너뜀 - 미설정 userId=" + kakao.get("user").get("id").asString()));
-        assertTrue(logs.contains("네이버 연결 해제 건너뜀 - 미설정 userId=" + naver.get("user").get("id").asString()));
-        assertFalse(logs.contains("naver-refresh-value"), "네이버 토큰은 로그에 남기지 않는다");
+        // 응답이 먼저다 - 연결 해제는 전용 실행기에서 뒤에 돈다 (PR #70 리뷰). 그래서 로그는 기다려서 본다.
         me(kakao.get("accessToken").asString()).andExpect(status().isUnauthorized());
         me(naver.get("accessToken").asString()).andExpect(status().isUnauthorized());
+        awaitLog(output, "카카오 연결 해제 건너뜀 - 미설정 userId=" + kakao.get("user").get("id").asString());
+        awaitLog(output, "네이버 연결 해제 건너뜀 - 미설정 userId=" + naver.get("user").get("id").asString());
+        assertFalse(output.getOut().contains("naver-refresh-value"), "네이버 토큰은 로그에 남기지 않는다");
+        // 로그 줄의 스레드 이름이 전용 실행기의 것이다 (왼쪽을 공백으로 채워 찍으므로 이름만 본다).
+        assertTrue(output.getOut().contains("idp-unlink-"), "연결 해제는 요청 스레드가 아니라 전용 실행기에서 돈다");
     }
 
     @Test
@@ -886,6 +888,17 @@ class AuthApiTest extends IntegrationTest {
                 .header(HttpHeaders.AUTHORIZATION, "Bearer " + access)
                 .contentType(MediaType.APPLICATION_JSON)
                 .content(objectMapper.writeValueAsString(Map.of("refreshToken", refreshToken))));
+    }
+
+    /** 비동기로 남는 로그를 기다린다 - 넘으면 실패다. */
+    private static void awaitLog(CapturedOutput output, String expected) throws InterruptedException {
+        long deadline = System.nanoTime() + java.time.Duration.ofSeconds(5).toNanos();
+        while (!output.getOut().contains(expected)) {
+            if (System.nanoTime() > deadline) {
+                throw new AssertionError("로그가 남지 않았다: " + expected);
+            }
+            Thread.sleep(20);
+        }
     }
 
     private ResultActions withdraw(String access, Map<String, Object> request) throws Exception {

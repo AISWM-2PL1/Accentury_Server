@@ -23,7 +23,7 @@ import java.util.UUID;
  * 없다(staging은 기록을 남기지 않고, prod의 기록은 계정 대신 대체 ID만 적힌 S3 객체다). 그래서 신고의 원문과 결과가
  * 실제로 번역기가 낸 값인지는 서버가 확인하지 않는다. 신고는 운영자가 읽는 제보이고 자동으로 무엇을 막는 데 쓰지 않는다.
  * <p>
- * 순서: 형식 검사(400) → 분당 제한(429) → 저장 → 슬랙 알림(커밋 뒤, 비동기). 원문과 결과는 로그에 남기지 않는다 (§2.6).
+ * 순서: 형식 검사(400) → 분당 제한(429, IP 축 뒤에 계정 축) → 저장 → 슬랙 알림(커밋 뒤, 비동기). 원문과 결과는 로그에 남기지 않는다 (§2.6).
  */
 @Service
 class TranslationReportService {
@@ -47,13 +47,16 @@ class TranslationReportService {
      * @throws ApiException 400 {@code VALIDATION_FAILED} / 401 {@code AUTH_TOKEN_INVALID} - 그사이 탈퇴한 계정 /
      *                      429 {@code RATE_LIMITED}
      */
-    TranslationReportResponse report(AppUser user, @Nullable TranslationReportRequest request) {
+    TranslationReportResponse report(AppUser user, @Nullable TranslationReportRequest request, String clientIp) {
         if (request == null) {
             throw new ApiException(ErrorCode.VALIDATION_FAILED, "요청 본문이 필요합니다.");
         }
         TranslationDirection direction = direction(request.direction());
         String text = required(request.text(), "text", AccenturyProperties.Translation.MAX_INPUT_LENGTH);
         String result = required(request.result(), "result", AccenturyProperties.Translation.MAX_REPORT_RESULT_LENGTH);
+        // IP가 먼저다 (PR #70 리뷰) - 계정 축만 있으면 게스트 계정을 새로 만들 때마다 한도가 새로 생겨, 한 IP가 계정 수만큼
+        // 슬랙 채널에 메시지를 보낼 수 있다.
+        rateLimits.check(RateLimits.Scope.TRANSLATION_REPORT_IP, clientIp);
         rateLimits.check(RateLimits.Scope.TRANSLATION_REPORT, user.id().toString());
 
         UUID reportId = UUID.randomUUID();
@@ -88,6 +91,10 @@ class TranslationReportService {
         String stripped = value == null ? "" : value.strip();
         if (stripped.isEmpty() || TranslationHarness.length(stripped) > max) {
             throw new ApiException(ErrorCode.VALIDATION_FAILED, field + "는 1~" + max + "자여야 합니다.");
+        }
+        if (stripped.indexOf('\u0000') >= 0) {
+            // PostgreSQL은 문자열에 NUL을 받지 않는다 (PR #70 리뷰) - 여기서 거르지 않으면 저장에서 터져 400이 아니라 500이 된다.
+            throw new ApiException(ErrorCode.VALIDATION_FAILED, field + "에 쓸 수 없는 문자가 있습니다.");
         }
         return stripped;
     }

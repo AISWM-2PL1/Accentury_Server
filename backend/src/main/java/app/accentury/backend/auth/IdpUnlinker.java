@@ -28,14 +28,18 @@ import java.util.regex.Pattern;
  * <h4>네이버</h4>
  * 네이버의 토큰 삭제({@code POST /oauth2.0/token}, {@code grant_type=delete})는 사용자의 access token을 요구하고,
  * 서버는 로그인 때 네이버 토큰을 보관하지 않는다. 그래서 앱이 탈퇴 요청에 SDK의 refresh token을 싣는다 (로그인 때
- * 보내는 것과 같은 값). 서버는 그것을 우리 클라이언트로 교환해 새 access token을 받고(다른 앱의 토큰이면 여기서
- * 거절된다), 그 토큰의 주인이 탈퇴하는 계정인지 확인한 뒤 삭제를 부른다 - 남의 토큰으로 남의 연결을 끊지 않게 한다
- * ({@link AppleTokenRevoker}와 같은 규칙). 교환으로 받은 토큰은 이 요청 안에서만 쓰고 버린다.
+ * 보내는 것과 같은 값). 서버는 로그인과 같은 흐름({@link NaverIdpVerifier#identify})으로 그 토큰이 우리 앱의 것인지
+ * 확인하고 주인을 읽은 뒤, 주인이 탈퇴하는 계정일 때만 삭제를 부른다 - 남의 토큰으로 남의 연결을 끊지 않게 한다
+ * ({@link AppleTokenRevoker}와 같은 규칙). 교환으로 받은 토큰은 이 호출 안에서만 쓰고 버린다.
  * <p>
  * <b>이 클래스는 예외를 던지지 않는다.</b> 설정이 없거나, 토큰이 없거나, 제공자가 거절하거나 닿지 않으면 WARN만 남기고
  * 돌아간다 - 탈퇴와 개인 정보 파기는 우리 쪽에서 이미 끝났고, 연결은 사용자가 제공자의 설정 화면에서도 끊을 수 있다.
- * 로그에는 토큰과 키를 남기지 않는다. 호출은 탈퇴 요청 스레드에서 동기로 돈다 (카카오 1회, 네이버 3회, 호출마다
- * {@code idp-timeout}까지).
+ * 로그에는 토큰과 키를 남기지 않는다.
+ * <p>
+ * <b>탈퇴 요청 스레드에서 돌지 않는다 (PR #70 리뷰).</b> 호출마다 연결과 읽기가 각각 {@code idp-timeout}(5초)까지라
+ * 카카오 1회가 최대 약 10초, 네이버 3회가 최대 약 30초다. 요청 스레드에서 기다리면 그만큼 204가 늦는데, Android 앱은
+ * 탈퇴 요청을 10초에서 포기한다 - 계정은 이미 지워졌는데 앱은 실패로 알고, 다시 시도하면 401이다. 그래서
+ * {@code WithdrawalService}가 전용 실행기({@code idpUnlinkExecutor}, {@code AuthConfig})에 넘기고 바로 답한다.
  */
 final class IdpUnlinker {
 
@@ -64,7 +68,9 @@ final class IdpUnlinker {
                 && JwksIdTokens.configured(auth.naverClientSecret());
         this.naverClientId = naverConfigured ? auth.naverClientId() : null;
         this.naverClientSecret = naverConfigured ? auth.naverClientSecret() : null;
-        if (kakaoAdminKey == null) {
+        // 인자가 아니라 걸러 낸 필드를 본다 (PR #70 리뷰) - 인자는 자리 표시 값이나 빈 문자열일 때 null이 아니라서,
+        // 그대로 보면 설정이 빠진 배포가 기동 때 아무 경고 없이 뜬다.
+        if (this.kakaoAdminKey == null) {
             log.warn("카카오 연결 해제 미설정 - 어드민 키가 없어 탈퇴 때 연결 해제를 건너뛴다");
         }
         if (!naverConfigured) {
@@ -122,12 +128,13 @@ final class IdpUnlinker {
             return;
         }
         try {
-            String accessToken = NaverIdpVerifier.exchange(naverAuth, naverClientId, naverClientSecret, refreshToken);
-            JsonNode me = naverApi.get("/v1/nid/me", accessToken);
-            if (!subject.equals(KakaoIdpVerifier.text(me.path("response").get("id")))) {
+            NaverIdpVerifier.Identity identity = NaverIdpVerifier.identify(naverAuth, naverApi, naverClientId,
+                    naverClientSecret, refreshToken);
+            if (!subject.equals(identity.id())) {
                 log.warn("네이버 연결 해제 건너뜀 - 토큰이 탈퇴한 계정의 것이 아니다 userId={}", userId);
                 return;
             }
+            String accessToken = identity.accessToken();
             MultiValueMap<String, String> form = new LinkedMultiValueMap<>();
             form.add("grant_type", "delete");
             form.add("client_id", naverClientId);

@@ -497,6 +497,12 @@ public record AccenturyProperties(Session session,
         public static final int REPORT_RATE_LIMIT_PER_MINUTE = 10;
 
         /**
+         * IP당 분당 번역 신고 허용 횟수 (§2.5, 2026-11-10 결정, PR #70 리뷰). 계정 축과 같은 값이다 - 한 IP가 계정을
+         * 몇 개 쓰든 분당 이 값으로 묶인다. 다른 메모리 제한처럼 backend 태스크마다 세므로 태스크가 셋이면 세 배까지 풀린다.
+         */
+        public static final int REPORT_IP_RATE_LIMIT_PER_MINUTE = 10;
+
+        /**
          * 계정당 하루 번역 상한 - 성공한 번역만 세고 한국 시각 자정에 바뀐다 (명세서 §3.18, 2026-10-15 결정). 사업자 무료 한도
          * (prod RPD 500)를 한 사람이 다 쓰지 못하게 한다. 오류 메시지에 박혀 있는 값이라 설정이 아니라 상수다.
          */
