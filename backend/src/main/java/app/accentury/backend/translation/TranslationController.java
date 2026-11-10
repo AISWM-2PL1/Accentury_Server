@@ -4,6 +4,7 @@ import app.accentury.backend.auth.AppUser;
 import app.accentury.backend.auth.AuthenticatedUser;
 import org.jspecify.annotations.Nullable;
 import org.springframework.http.CacheControl;
+import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -19,9 +20,11 @@ import org.springframework.web.bind.annotation.RestController;
 class TranslationController {
 
     private final TranslationService service;
+    private final TranslationReportService reportService;
 
-    TranslationController(TranslationService service) {
+    TranslationController(TranslationService service, TranslationReportService reportService) {
         this.service = service;
+        this.reportService = reportService;
     }
 
     /**
@@ -33,5 +36,19 @@ class TranslationController {
     ResponseEntity<TranslationResponse> translate(@AuthenticatedUser(allowGuest = true) AppUser user,
                                                   @RequestBody(required = false) @Nullable TranslationRequest request) {
         return ResponseEntity.ok().cacheControl(CacheControl.noStore()).body(service.translate(user, request));
+    }
+
+    /**
+     * 번역 결과 신고 (명세서 §3.22, KAN-343). 번역기를 쓰는 계정은 누구나 신고할 수 있어야 하므로 게스트도 받는다.
+     * <p>
+     * 201 저장됨 / 400 {@code VALIDATION_FAILED} / 401 {@code AUTH_TOKEN_INVALID} / 429 {@code RATE_LIMITED}.
+     * 저장이 커밋되면 개발팀 슬랙으로 알림이 나가지만 응답은 그것을 기다리지 않는다.
+     */
+    @PostMapping(value = "/v0/translations/reports", consumes = MediaType.APPLICATION_JSON_VALUE)
+    ResponseEntity<TranslationReportResponse> report(
+            @AuthenticatedUser(allowGuest = true) AppUser user,
+            @RequestBody(required = false) @Nullable TranslationReportRequest request) {
+        return ResponseEntity.status(HttpStatus.CREATED).cacheControl(CacheControl.noStore())
+                .body(reportService.report(user, request));
     }
 }

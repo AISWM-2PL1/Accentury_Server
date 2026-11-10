@@ -64,7 +64,7 @@ final class NaverIdpVerifier implements IdpVerifier {
         if (clientId == null || clientSecret == null || credential.idpRefreshToken() == null) {
             throw new ApiException(ErrorCode.AUTH_IDP_TOKEN_INVALID);
         }
-        JsonNode me = api.get("/v1/nid/me", exchange(clientId, clientSecret, credential.idpRefreshToken()));
+        JsonNode me = api.get("/v1/nid/me", exchange(auth, clientId, clientSecret, credential.idpRefreshToken()));
         if (!"00".equals(KakaoIdpVerifier.text(me.get("resultcode")))) {
             log.info("네이버 프로필 조회 실패 resultcode={}", KakaoIdpVerifier.text(me.get("resultcode")));
             throw new ApiException(ErrorCode.AUTH_IDP_TOKEN_INVALID);
@@ -83,8 +83,11 @@ final class NaverIdpVerifier implements IdpVerifier {
                 KakaoIdpVerifier.text(response.get("profile_image")));
     }
 
-    /** refresh token을 우리 클라이언트로 교환해 새 access token을 받는다. 교환 실패는 다른 앱의 토큰이거나 만료다. */
-    private String exchange(String clientId, String clientSecret, String refreshToken) {
+    /**
+     * refresh token을 우리 클라이언트로 교환해 새 access token을 받는다. 교환 실패는 다른 앱의 토큰이거나 만료다.
+     * 탈퇴의 연결 해제({@link IdpUnlinker}, KAN-343)도 같은 교환을 쓴다.
+     */
+    static String exchange(IdpHttp auth, String clientId, String clientSecret, String refreshToken) {
         MultiValueMap<String, String> form = new LinkedMultiValueMap<>();
         form.add("grant_type", "refresh_token");
         form.add("client_id", clientId);

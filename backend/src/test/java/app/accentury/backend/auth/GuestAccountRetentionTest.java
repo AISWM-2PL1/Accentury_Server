@@ -170,7 +170,7 @@ class GuestAccountRetentionTest extends IntegrationTest {
         for (UUID id : new UUID[]{failing, first, second}) {
             redis.delete(RefreshTokens.USER_KEY + id);
         }
-        WithdrawalService flaky = new WithdrawalService(null, null, null, null, null, null, null) {
+        WithdrawalService flaky = new WithdrawalService(null, null, null, null, null, null, null, null, null) {
             @Override
             boolean purgeGuest(UUID userId) {
                 if (userId.equals(failing)) {

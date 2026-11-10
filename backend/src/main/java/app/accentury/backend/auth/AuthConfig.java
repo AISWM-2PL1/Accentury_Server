@@ -36,6 +36,12 @@ class AuthConfig {
                 new NaverIdpVerifier(auth, objectMapper)), auth.fakeIdp());
     }
 
+    /** 탈퇴한 카카오, 네이버 계정의 연결 해제 (KAN-343). 설정이 없으면 기동 때 WARN 한 번이고, 탈퇴는 연결 해제 없이 성공한다. */
+    @Bean
+    IdpUnlinker idpUnlinker(AccenturyProperties properties, ObjectMapper objectMapper) {
+        return new IdpUnlinker(properties.auth(), properties.share().kakaoAdminKey(), objectMapper);
+    }
+
     /** 탈퇴한 애플 계정의 토큰 revoke (KAN-241). 설정이 없으면 기동 때 WARN 한 번이고, 탈퇴는 revoke 없이 성공한다. */
     @Bean
     AppleTokenRevoker appleTokenRevoker(AccenturyProperties properties, ObjectMapper objectMapper) {

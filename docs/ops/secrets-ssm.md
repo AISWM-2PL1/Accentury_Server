@@ -246,8 +246,8 @@ apply 뒤 복구 창이다), TLS가 아닌 요청을 거부하는 버킷 정책�
 
 | 파라미터 | 발급처 | 환경별 값 | 가드 | 자리 표시 값인 동안 |
 | --- | --- | --- | --- | --- |
-| `ACCENTURY_SHARE_KAKAOADMINKEY` | 카카오디벨로퍼스 [앱 설정] > [앱 키] > **Admin 키** (네이티브 앱 키 아님) | 두 환경 같음 | 필수 | 카카오 공유 웹훅을 전부 401로 거부한다 (`SHARE_WEBHOOK_UNAUTHORIZED`) |
-| `ACCENTURY_FEEDBACK_SLACKWEBHOOKURL` | 슬랙 앱 Incoming Webhook (`#feedback`) | 두 환경 같음 | 선택 | 후기 알림만 꺼진다 (`후기 슬랙 알림 꺼짐`) |
+| `ACCENTURY_SHARE_KAKAOADMINKEY` | 카카오디벨로퍼스 [앱 설정] > [앱 키] > **Admin 키** (네이티브 앱 키 아님) | 두 환경 같음 | 필수 | 카카오 공유 웹훅을 전부 401로 거부한다 (`SHARE_WEBHOOK_UNAUTHORIZED`). 탈퇴한 카카오 계정의 연결 해제(`/v1/user/unlink`)도 이 키로 부르므로, 자리 표시 값이면 연결 해제만 건너뛴다 (`카카오 연결 해제 건너뜀 - 미설정`) |
+| `ACCENTURY_FEEDBACK_SLACKWEBHOOKURL` | 슬랙 앱 Incoming Webhook (`#feedback`) | 두 환경 같음 | 선택 | 후기 알림과 번역 신고 알림이 꺼진다 (`후기 슬랙 알림 꺼짐`). 저장은 그대로다 |
 | `ACCENTURY_AUTH_NAVERCLIENTSECRET` | 네이버 개발자 센터 앱 설정 (앱의 `NAVER_CLIENT_SECRET`과 같다) | 두 환경 같음 | 필수 | 네이버 로그인만 401 |
 | `ACCENTURY_AUTH_APPLEPRIVATEKEY` | 애플 개발자 계정 Keys의 Sign in with Apple 키 .p8 (만들 때 한 번만 내려받는다) | 두 환경 같음 | 선택 | 탈퇴 때 애플 revoke만 건너뛴다 (`애플 토큰 revoke 미설정` WARN) |
 | `ACCENTURY_TRANSLATION_APIKEY` | 환경별 Google AI Studio 프로젝트의 API 키 | **환경마다 다름** | 선택 | 번역만 503 `TRANSLATION_UNAVAILABLE` (`번역 API 키가 없다`) |

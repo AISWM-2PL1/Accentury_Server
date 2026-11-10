@@ -479,6 +479,24 @@ public record AccenturyProperties(Session session,
         public static final int MAX_INPUT_LENGTH = 100;
 
         /**
+         * 번역 신고(KAN-343, 명세서 §3.22)가 싣는 번역 결과의 길이 상한 - 코드 포인트 수다. 번역 결과는 한 문장이라
+         * 입력 상한의 세 배면 넉넉하다. {@code translation_report.result_text}(V19)의 길이와 같아야 한다.
+         */
+        public static final int MAX_REPORT_RESULT_LENGTH = 300;
+
+        /**
+         * 번역 신고의 보존 기간 (2026-11-10 결정) - 이용 후기와 같은 1년이다. 방침(privacy.html 1항 표의 「번역 신고
+         * 기록 (앱)」)이 이 기간을 적고 {@code privacy.test.mjs}가 묶는다. 바꾸면 방침도 함께 고친다.
+         */
+        public static final Duration REPORT_RETENTION = Duration.ofDays(365);
+
+        /**
+         * 계정당 분당 번역 신고 허용 횟수 (§2.5). 신고는 LLM을 부르지 않지만 건마다 슬랙 메시지가 하나 나간다 - 한 계정이
+         * 채널을 메우지 못하게 한다. 정상은 번역 한 건에 신고 한 번이고 번역이 분당 6건까지라 그보다 조금 넉넉하다.
+         */
+        public static final int REPORT_RATE_LIMIT_PER_MINUTE = 10;
+
+        /**
          * 계정당 하루 번역 상한 - 성공한 번역만 세고 한국 시각 자정에 바뀐다 (명세서 §3.18, 2026-10-15 결정). 사업자 무료 한도
          * (prod RPD 500)를 한 사람이 다 쓰지 못하게 한다. 오류 메시지에 박혀 있는 값이라 설정이 아니라 상수다.
          */

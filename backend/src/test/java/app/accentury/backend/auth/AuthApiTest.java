@@ -651,6 +651,38 @@ class AuthApiTest extends IntegrationTest {
         me(login.get("accessToken").asString()).andExpect(status().isUnauthorized());
     }
 
+    /**
+     * 탈퇴는 제공자 쪽 연결도 끊으려 한다 (KAN-343). 테스트 설정에는 어드민 키와 네이버 Client 값이 없어 실제 호출은
+     * 나가지 않고, 탈퇴가 그 제공자의 해제 경로를 탔다는 것만 로그로 본다. 호출 자체는 {@link IdpUnlinkerTest}가 본다.
+     */
+    @Test
+    void 카카오와_네이버_계정은_연결_해제를_시도하고_미설정이면_WARN만_남기고_탈퇴한다(CapturedOutput output) throws Exception {
+        JsonNode kakao = body(login("KAKAO", uniqueSub(), true));
+        JsonNode naver = body(login("NAVER", uniqueSub(), true));
+
+        withdraw(kakao.get("accessToken").asString(), null).andExpect(status().isNoContent());
+        withdraw(naver.get("accessToken").asString(), Map.of("naverRefreshToken", "naver-refresh-value"))
+                .andExpect(status().isNoContent());
+
+        String logs = output.getOut();
+        assertTrue(logs.contains("카카오 연결 해제 건너뜀 - 미설정 userId=" + kakao.get("user").get("id").asString()));
+        assertTrue(logs.contains("네이버 연결 해제 건너뜀 - 미설정 userId=" + naver.get("user").get("id").asString()));
+        assertFalse(logs.contains("naver-refresh-value"), "네이버 토큰은 로그에 남기지 않는다");
+        me(kakao.get("accessToken").asString()).andExpect(status().isUnauthorized());
+        me(naver.get("accessToken").asString()).andExpect(status().isUnauthorized());
+    }
+
+    @Test
+    void 구글_계정의_탈퇴는_제공자_호출이_없다(CapturedOutput output) throws Exception {
+        JsonNode google = body(login("GOOGLE", uniqueSub(), true));
+
+        withdraw(google.get("accessToken").asString(), null).andExpect(status().isNoContent());
+
+        String userId = google.get("user").get("id").asString();
+        assertTrue(output.getOut().contains("탈퇴 userId=" + userId + " provider=GOOGLE"));
+        assertFalse(output.getOut().contains("연결 해제 건너뜀 - 미설정 userId=" + userId));
+    }
+
     @Test
     void 로그아웃과_새_로그인은_사용자_색인을_정리한다() throws Exception {
         String sub = uniqueSub();

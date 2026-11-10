@@ -146,7 +146,7 @@ public class FeedbackSlackNotifier {
      * 후기 본문은 사용자가 쓴 자유 서술이라 {@code <http://...|링크>}나 {@code <!channel>} 같은
      * 슬랙 문법이 그대로 들어올 수 있다 - 이스케이프하지 않으면 후기가 채널 전체 멘션이 된다.
      */
-    static String escape(String text) {
+    public static String escape(String text) {
         return text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;");
     }
 
@@ -157,7 +157,7 @@ public class FeedbackSlackNotifier {
      * 결과 URL은 이미 환경마다 다른 값이 SSM으로 주입된다 - 환경 이름 파라미터를 하나 더 만들면
      * 그것과 도메인이 어긋날 자리만 생긴다. 값이 없거나 호스트를 못 읽으면 로컬로 본다.
      */
-    static String label(@Nullable String webTestUrl) {
+    public static String label(@Nullable String webTestUrl) {
         if (webTestUrl == null || webTestUrl.isBlank()) {
             return LOCAL_LABEL;
         }
@@ -169,8 +169,11 @@ public class FeedbackSlackNotifier {
         }
     }
 
-    /** 설정된 웹훅 URL이 진짜 값인가 - 비었거나 Terraform 자리 표시 값이면 아니다. */
-    private static boolean configured(@Nullable String slackWebhookUrl) {
+    /**
+     * 설정된 웹훅 URL이 진짜 값인가 - 비었거나 Terraform 자리 표시 값이면 아니다. 같은 웹훅을 쓰는 번역 신고 알림
+     * (KAN-343)도 이 판정을 쓴다 - {@link #escape}와 {@link #label}이 public인 것도 그래서다.
+     */
+    public static boolean configured(@Nullable String slackWebhookUrl) {
         return slackWebhookUrl != null && !slackWebhookUrl.isBlank()
                 && !SsmPlaceholder.UNSET.equals(slackWebhookUrl.strip());
     }

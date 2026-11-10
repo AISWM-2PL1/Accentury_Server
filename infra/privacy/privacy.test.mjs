@@ -176,6 +176,8 @@ test('1항 표의 보유 기간이 행마다 코드와 맞는다', () => {
     ['게스트 계정 (앱)', ['30일', '하루 안에'], 'auth/GuestAccountRetention.java, application.yml auth.refresh-token-ttl'],
     // 게스트 발급 상한의 Redis 카운터는 다음 날 KST 01시에 만료된다 (KAN-329).
     ['게스트 계정 발급 횟수 (앱)', ['다음 날 오전 1시'], 'auth/GuestQuota.java EXPIRE_AT'],
+    // 번역 신고는 1년 뒤 정리 잡이 지운다 (KAN-343, AccenturyProperties.Translation.REPORT_RETENTION).
+    ['번역 신고 기록 (앱)', ['1년'], 'AccenturyProperties.Translation.REPORT_RETENTION, TranslationReportRetention.java'],
     // Refresh 토큰 수명 (application.yml auth.refresh-token-ttl: 30d, RefreshTokens의 Redis TTL).
     ['로그인 토큰', ['30일', '로그아웃'], 'application.yml auth.refresh-token-ttl, auth/RefreshTokens.java'],
     ['테스트 결과와 어휘 답안', ['24시간'], 'application.yml analysis.retention: 24h'],
@@ -813,6 +815,47 @@ test('1항에 게스트 계정 절이 있고 쓸 수 있는 기능, 두는 정�
   assert.ok(flat.includes('게스트 계정은 생년월일을 받지 않아 나이를 확인하지 않으며'), '7항에 게스트 계정의 나이 확인이 없다');
   assert.ok(flat.includes('게스트 계정은 로그인 화면에서 「로그인 없이 둘러보기」를 고르실 때 이 방침에 대한 동의를 받습니다'),
     '12항에 게스트 계정의 동의 방식이 없다');
+});
+
+test('탈퇴 경로가 앱 안이고 제공자 연결 해제와 번역 신고 기록이 코드와 맞는다 (KAN-343)', () => {
+  const flat = html.replace(/\s+/g, ' ');
+  // 앱 안 탈퇴(KAN-241, 앱 KAN-251)가 나온 뒤에도 「준비 중」이 남으면 있는 기능을 없다고 고지하는 것이다.
+  assert.ok(!flat.includes('탈퇴하는 기능은 준비하고 있습니다'), '6항에 「준비 중」 문구가 남아 있다');
+  assert.ok(!flat.includes('앱 안의 탈퇴 기능이 나오기 전까지는'), '5항에 「탈퇴 기능이 나오기 전까지」가 남아 있다');
+  const rights = section('<h2>6. 정보주체의 권리', '<h2>7. 만 14세 미만').replace(/\s+/g, ' ');
+  assert.ok(rights.includes('탈퇴는 앱 안에서 바로 하실 수 있습니다'), '6항에 앱 안 탈퇴가 없다');
+  assert.ok(rights.includes('「설정」 화면에서 「계정」 아래의 「회원 탈퇴」'), '6항에 앱 안 탈퇴 경로가 없다');
+  // 이메일 요청은 앱을 쓸 수 없는 경우의 대안으로 남는다.
+  assert.ok(rights.includes('앱을 쓰실 수 없는 경우에는'), '6항에 이메일 요청 대안이 없다');
+  // WithdrawalService - 애플은 revoke, 카카오와 네이버는 IdpUnlinker. 네이버는 앱이 토큰을 실어야 하고 구글은 대상이 아니다.
+  assert.ok(rights.includes('카카오와 애플로 로그인하신 계정은 탈퇴하실 때'), '6항에 카카오와 애플의 연결 해제가 없다');
+  assert.ok(rights.includes('네이버로 로그인하신 계정은 앱이 탈퇴 요청에 네이버 로그인 정보를 함께 보내는 버전부터'),
+    '6항에 네이버 연결 해제의 조건이 없다');
+  assert.ok(rights.includes('구글로 로그인하신 계정은 각 제공자의 계정 설정에서 직접'), '6항에 구글 계정의 안내가 없다');
+
+  // 번역 신고 - TranslationReports(V19)의 열과 TranslationReportSlackNotifier가 보내는 값.
+  const translator = section('<h3>사투리 번역기 (앱)</h3>', '<h3>억양 학습 (앱)</h3>').replace(/\s+/g, ' ');
+  for (const item of ['원문과 번역 결과', '번역 방향', '신고 시각', '계정 식별자']) {
+    assert.ok(translator.includes(item), `번역기 절의 신고 기록에 「${item}」이 없다`);
+  }
+  assert.ok(translator.includes('신고한 때로부터 1년이 지나면 정리 작업이 삭제합니다'), '번역 신고의 보유 기간이 없다');
+  assert.ok(translator.includes('신고 기록에서 계정 식별자를 지우며'), '탈퇴 시 신고의 계정 연결을 끊는다는 문장이 없다');
+  assert.ok(translator.includes('채널로는 계정 식별자의 앞자리만 보냅니다'), '슬랙으로 가는 계정 식별자의 범위가 없다');
+  assert.ok(translator.includes('신고하지 않으시면 이 기록은 남지 않습니다'), '신고하지 않으면 남지 않는다는 문장이 없다');
+  // 보유 기간은 코드 상수와 같아야 한다 - 상수를 바꾸면 방침의 「1년」도 함께 고친다.
+  const source = readFileSync(join(HERE, '../../backend/src/main/java/app/accentury/backend/common/AccenturyProperties.java'), 'utf8');
+  assert.ok(source.includes('REPORT_RETENTION = Duration.ofDays(365);'), '번역 신고 보존 기간 상수가 365일이 아니다');
+  // 4항 - 신고가 슬랙으로 간다.
+  const transfer = section('<h2>4. 개인정보의 국외 이전', '<h2>5. 개인정보의 파기').replace(/\s+/g, ' ');
+  assert.ok(transfer.includes('번역 결과를 신고하신 경우에도 신고하신 원문과 번역 결과가 같은 채널로 전달됩니다'),
+    '4항에 번역 신고의 국외 이전이 없다');
+  assert.ok(transfer.includes('번역 신고는 신고하신 원문과 번역 결과, 번역 방향, 계정 식별자의 앞자리'), '4항 이전 항목에 번역 신고가 없다');
+  // 5항.
+  const disposal = section('<h2>5. 개인정보의 파기', '<h2>6. 정보주체의 권리').replace(/\s+/g, ' ');
+  assert.ok(disposal.includes('번역 신고 기록: 신고한 때로부터 1년이 지나면 정리 작업이 삭제합니다'), '5항에 번역 신고의 파기가 없다');
+  assert.ok(disposal.includes('탈퇴는 앱 안에서 하실 수 있고'), '5항의 계정 파기에 앱 안 탈퇴가 없다');
+  // 선택 동의 음성과 연결 기록은 탈퇴 뒤에도 남는다 (KAN-269, 2026-11-10 유지 결정) - 이 문장이 사라지면 코드와 어긋난다.
+  assert.ok(flat.includes('식별자만 들어 있고, 탈퇴하신 뒤에도 남습니다'), '1항에 연결 기록이 탈퇴 뒤에도 남는다는 문장이 없다');
 });
 
 test('3항에 로그인 제공자 넷과 받는 정보, 애플 전달용 이메일이 있다 (KAN-240, auth/*IdpVerifier.java)', () => {
