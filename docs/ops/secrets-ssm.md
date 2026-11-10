@@ -403,6 +403,12 @@ ID와 계정의 대응표는 DB `translation_subject`이고 탈퇴가 그 행을
    `AUTH_REFRESH_INVALID`가 오는지로 Redis 연결을 본다 - 503 `AUTH_STORE_UNAVAILABLE`이면 Redis에 닿지 못한 것이다 (SG,
    TLS, AUTH 토큰 순으로 본다).
 
+**게스트 계정.** 게스트 발급(`POST /v0/auth/guest`, 명세서 §3.21)은 IdP 값이 필요 없고 같은 Redis만 쓴다. 발급 상한은
+Redis 키 `gq:{IP의 SHA-256}:{yyyyMMdd}`로 IP당 하루 10개를 세고(코드 상수 `GUEST_DAILY_LIMIT_PER_IP`) 다음 날 한국 시각
+01시에 만료된다. 배포 환경에서 실제 IdP 토큰 없이 토큰 발급부터 번역까지를 실증할 수 있는 경로이기도 하다. 정리 잡
+(`GuestAccountRetention`)은 6시간마다 Redis의 `rtuser:{계정 id}`가 없는 게스트 계정을 탈퇴와 같은 절차로 지운다. Redis
+노드를 새로 만들면 Refresh가 전부 사라지므로 그때까지의 게스트 계정은 다음 회차에 전부 파기된다.
+
 **IdP String 값.** 콘솔에서 받기 전까지 자리 표시 값(`unset-put-parameter-after-apply`, 변수 기본값)이고 그동안 그 IdP
 로그인만 401 `AUTH_IDP_TOKEN_INVALID`다. 기동과 다른 IdP, 익명 응시는 영향이 없다. 값을 받으면 환경의 `terraform.tfvars`에
 적고 apply한 뒤 backend 태스크를 새로 띄운다. 시크릿이 아니라 tfvars에 그대로 적어도 된다. 두 환경 모두 지금 넷 다 들어가

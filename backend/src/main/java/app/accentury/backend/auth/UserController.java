@@ -13,6 +13,9 @@ import org.springframework.web.bind.annotation.RestController;
 
 /**
  * 내 계정 (KAN-223, KAN-241, 명세서 §3.10, §3.11, §3.14) - 전부 Access 토큰 필수다. 개인 정보가 든 응답이라 캐시하지 않는다.
+ * <p>
+ * 게스트 계정(KAN-329, §3.21)은 내 계정 조회와 탈퇴만 부를 수 있다. 프로필 저장과 음성 저장 동의는 403
+ * {@code AUTH_GUEST_NOT_ALLOWED}다 - 게스트는 프로필이 없고 음성을 저장하지 않는다.
  */
 @RestController
 @RequestMapping("/v0/users/me")
@@ -32,7 +35,7 @@ class UserController {
      * 200 / 401 {@code AUTH_TOKEN_INVALID}.
      */
     @GetMapping
-    ResponseEntity<MeResponse> me(@AuthenticatedUser AppUser user) {
+    ResponseEntity<MeResponse> me(@AuthenticatedUser(allowGuest = true) AppUser user) {
         return ResponseEntity.ok().cacheControl(CacheControl.noStore()).body(userService.me(user));
     }
 
@@ -78,7 +81,7 @@ class UserController {
      * 204 / 401 {@code AUTH_TOKEN_INVALID}. 애플 revoke와 Refresh 폐기의 실패는 응답을 바꾸지 않는다 ({@link WithdrawalService}).
      */
     @PostMapping("/withdrawal")
-    ResponseEntity<Void> withdraw(@AuthenticatedUser AppUser user,
+    ResponseEntity<Void> withdraw(@AuthenticatedUser(allowGuest = true) AppUser user,
                                   @RequestBody(required = false) @Nullable WithdrawalRequest request) {
         withdrawalService.withdraw(user, request);
         return ResponseEntity.noContent().build();

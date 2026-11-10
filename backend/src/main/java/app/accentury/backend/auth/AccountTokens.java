@@ -45,10 +45,16 @@ public class AccountTokens {
      * 세션 생성에 쓸 계정 (§3.1) - 토큰이 유효하고 프로필이 완료된 계정만.
      *
      * @param accessToken {@code Bearer } 뒤의 토큰 원문 (세션 토큰 {@code st_}가 아닌 것으로 이미 갈랐다)
-     * @throws ApiException 401 {@code AUTH_TOKEN_INVALID} / 403 {@code AUTH_PROFILE_INCOMPLETE}
+     * @throws ApiException 401 {@code AUTH_TOKEN_INVALID} / 403 {@code AUTH_PROFILE_INCOMPLETE},
+     *                      {@code AUTH_GUEST_NOT_ALLOWED}
      */
     public SessionAccount forSession(String accessToken) {
         AppUser user = byToken(accessToken);
+        if (user.isGuest()) {
+            // 게스트의 레벨테스트는 토큰 없이 익명 세션으로 본다 (KAN-329, §3.21). 프로필 미완료(아래)로 답하면 앱이
+            // 추가 정보 화면으로 가는데, 게스트에게는 그 화면이 없다.
+            throw new ApiException(ErrorCode.AUTH_GUEST_NOT_ALLOWED);
+        }
         Region region = user.region();
         if (!user.isProfileComplete() || region == null) {
             throw new ApiException(ErrorCode.AUTH_PROFILE_INCOMPLETE);

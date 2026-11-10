@@ -15,7 +15,7 @@ import java.time.Instant;
 import java.time.LocalDate;
 
 /**
- * 로그인, refresh, 로그아웃 (KAN-223, 명세서 §3.9, §3.12, §3.13).
+ * 로그인, 게스트 발급, refresh, 로그아웃 (KAN-223, KAN-329, 명세서 §3.9, §3.12, §3.13, §3.21).
  * <p>
  * 로그에는 provider, 사용자 id, 신규 여부, 실패 코드만 남긴다 (§2.6) - 실패 코드는 {@code GlobalExceptionHandler}가
  * 이미 남기므로 여기서는 성공만 적는다.
@@ -39,19 +39,21 @@ public class AuthService {
     private final AccessTokens accessTokens;
     private final RefreshTokens refreshTokens;
     private final RateLimits rateLimits;
+    private final GuestQuota guestQuota;
     private final TransactionTemplate transactionTemplate;
 
     /** 게시 중인 방침 버전 (KAN-240) - 가입 요청의 버전이 이 값과 정확히 같아야 동의로 기록한다. */
     private final String privacyPolicyVersion;
 
     AuthService(IdpVerifiers idpVerifiers, AppUserRepository users, AccessTokens accessTokens,
-                RefreshTokens refreshTokens, RateLimits rateLimits, TransactionTemplate transactionTemplate,
-                AccenturyProperties properties) {
+                RefreshTokens refreshTokens, RateLimits rateLimits, GuestQuota guestQuota,
+                TransactionTemplate transactionTemplate, AccenturyProperties properties) {
         this.idpVerifiers = idpVerifiers;
         this.users = users;
         this.accessTokens = accessTokens;
         this.refreshTokens = refreshTokens;
         this.rateLimits = rateLimits;
+        this.guestQuota = guestQuota;
         this.transactionTemplate = transactionTemplate;
         this.privacyPolicyVersion = properties.auth().privacyPolicyVersion();
     }
@@ -179,13 +181,47 @@ public class AuthService {
 
     private static Provider provider(@Nullable String value) {
         if (value != null) {
-            for (Provider provider : Provider.values()) {
+            // 게스트는 로그인으로 만들지 않는다 (KAN-329) - POST /v0/auth/guest만 만든다.
+            for (Provider provider : Provider.SOCIAL) {
                 if (provider.name().equals(value)) {
                     return provider;
                 }
             }
         }
         throw new ApiException(ErrorCode.VALIDATION_FAILED, "provider는 GOOGLE, KAKAO, NAVER, APPLE 중 하나여야 합니다.");
+    }
+
+    /**
+     * 게스트 계정 발급 (§3.21, KAN-329) - 소셜 로그인 없이 계정 하나를 만들고 토큰 쌍을 준다. 부를 때마다 새 계정이다.
+     * <p>
+     * 순서: 분당 요청 제한(로그인과 한 통) → 동의 검사 → IP당 하루 상한 → 계정 만들기 → 토큰 발급. 동의가 없는 요청은
+     * 하루 상한을 깎지 않는다. 계정을 커밋한 뒤에 Refresh를 내는 이유는 로그인과 같다 - 거기서 Redis가 죽으면 주인 없는
+     * 계정 행이 남는데, 그 행은 {@link GuestAccountRetention}이 걷어 간다.
+     *
+     * @throws ApiException 400 {@code VALIDATION_FAILED}, {@code AUTH_CONSENT_REQUIRED} /
+     *                      429 {@code RATE_LIMITED}, {@code AUTH_GUEST_LIMIT_EXCEEDED} / 503 {@code AUTH_STORE_UNAVAILABLE}
+     */
+    GuestResponse guest(@Nullable GuestRequest request, String clientIp) {
+        rateLimits.check(RateLimits.Scope.AUTH, clientIp);
+        if (request == null) {
+            throw new ApiException(ErrorCode.VALIDATION_FAILED, "요청 본문이 필요합니다.");
+        }
+        // 로그인의 가입 동의와 같은 규칙이다 (KAN-240) - 게시 중인 버전과 정확히 같아야 동의로 기록한다.
+        if (!Boolean.TRUE.equals(request.privacyConsent())
+                || !privacyPolicyVersion.equals(request.privacyPolicyVersion())) {
+            throw new ApiException(ErrorCode.AUTH_CONSENT_REQUIRED, "개인정보 수집 이용에 동의해야 이용할 수 있습니다.");
+        }
+        guestQuota.acquire(clientIp);
+
+        AppUser created = transactionTemplate.execute(
+                tx -> users.saveAndFlush(AppUser.guest(privacyPolicyVersion, Instant.now())));
+        if (created == null) {
+            throw new IllegalStateException("게스트 발급 트랜잭션이 결과 없이 끝났다");
+        }
+        String accessToken = accessTokens.issue(created.id());
+        String refreshToken = refreshTokens.issue(created.id());
+        log.info("게스트 발급 userId={}", created.id());
+        return new GuestResponse(accessToken, refreshToken, accessTokens.ttlSeconds(), UserView.of(created));
     }
 
     /**

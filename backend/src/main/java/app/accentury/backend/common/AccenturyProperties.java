@@ -405,6 +405,14 @@ public record AccenturyProperties(Session session,
 
         /** 게시 중인 개인정보처리방침 버전 - privacy.html의 {@code accentury-policy-version} 메타와 같은 값이다 (KAN-240). */
         public static final String PRIVACY_POLICY_VERSION = "2026-10-20";
+
+        /**
+         * 같은 IP가 하루(KST)에 만들 수 있는 게스트 계정 수 (KAN-329, 명세서 §2.5, §3.21, 2026-11-10 결정). 게스트마다
+         * 번역 하루 한도({@link Translation#DAILY_LIMIT})가 새로 생기므로 한 IP가 하루에 늘릴 수 있는 번역은 이 값의
+         * 5배(50건)다 - 번역 사업자 무료 등급의 하루 몫(500건)의 10%다. 정상 사용은 기기당 한 번(재설치 때 한 번 더)이라
+         * 10이면 한 IP를 나눠 쓰는 몇 사람까지 받는다. 방침(privacy.html)이 이 숫자를 적지 않으므로 바꿔도 문구는 그대로다.
+         */
+        public static final int GUEST_DAILY_LIMIT_PER_IP = 10;
     }
 
     /**

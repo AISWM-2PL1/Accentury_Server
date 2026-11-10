@@ -44,6 +44,17 @@ class AuthStoreDownApiTest extends IntegrationTest {
                 .andExpect(jsonPath("$.retryable").value(true));
     }
 
+    /** 게스트 발급(KAN-329)은 하루 상한을 Redis에서 센다 - 세지 못하면 계정을 만들지 않는다. */
+    @Test
+    void 게스트_발급은_503이다() throws Exception {
+        mockMvc.perform(post("/v0/auth/guest").contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"privacyConsent\": true, \"privacyPolicyVersion\": \""
+                                + AccenturyProperties.Auth.PRIVACY_POLICY_VERSION + "\"}"))
+                .andExpect(status().isServiceUnavailable())
+                .andExpect(jsonPath("$.code").value("AUTH_STORE_UNAVAILABLE"))
+                .andExpect(jsonPath("$.retryable").value(true));
+    }
+
     @Test
     void refresh는_503이다() throws Exception {
         mockMvc.perform(post("/v0/auth/refresh").contentType(MediaType.APPLICATION_JSON)
