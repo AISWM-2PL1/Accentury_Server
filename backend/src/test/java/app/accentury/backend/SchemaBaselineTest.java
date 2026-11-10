@@ -286,8 +286,10 @@ class SchemaBaselineTest extends IntegrationTest {
                 // KAN-211 이용 후기 (옛 V12, 지금은 V1) - 세션당 하나(유니크)이고, 보존 기간 삭제가 created_at으로 탄다.
                 Map.entry("session_feedback", Set.of("pk_session_feedback",
                         "ux_session_feedback_session", "ix_session_feedback_created_at")),
-                // KAN-223 계정 (V2) - 계정 식별 키 (provider, provider_user_id) 유일.
-                Map.entry("app_user", Set.of("pk_app_user", "ux_app_user_provider_subject")),
+                // KAN-223 계정 (V2) - 계정 식별 키 (provider, provider_user_id) 유일. ix_app_user_live_guest는
+                // KAN-329(V18)의 부분 인덱스 - 게스트 계정 정리가 살아 있는 게스트만 id 순서로 훑는다.
+                Map.entry("app_user", Set.of("pk_app_user", "ux_app_user_provider_subject",
+                        "ix_app_user_live_guest")),
                 // KAN-269 계정과 음성의 대응표 (V6) - 세션마다 한 행이고, 철회와 탈퇴 때 계정으로 찾는다.
                 Map.entry("training_voice_owner", Set.of("pk_training_voice_owner",
                         "ix_training_voice_owner_user")),

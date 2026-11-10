@@ -13,3 +13,9 @@
 alter table app_user drop constraint ck_app_user_provider;
 alter table app_user
     add constraint ck_app_user_provider check (provider in ('GOOGLE', 'KAKAO', 'NAVER', 'APPLE', 'GUEST'));
+
+-- 살아 있는 게스트 계정의 id 색인 - 게스트 계정 정리(backend GuestAccountRetention)가 id 순서로 전부를 훑는다.
+-- 파기된 게스트 행(deleted_at이 찍힌 행)은 지우지 않고 남기므로 시간이 갈수록 그쪽이 훨씬 많아진다. 부분 색인이라
+-- 그 행들은 색인에 없고, 정리 쿼리는 살아 있는 게스트 수만큼만 읽는다. 조건은 쿼리의 where와 글자 그대로 같아야
+-- 색인이 쓰인다 (AppUserRepository.findLiveGuestIdsCreatedBefore).
+create index ix_app_user_live_guest on app_user (id) where provider = 'GUEST' and deleted_at is null;

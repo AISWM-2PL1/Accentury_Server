@@ -794,7 +794,7 @@ test('1항에 게스트 계정 절이 있고 쓸 수 있는 기능, 두는 정�
   assert.ok(guest.includes('30일 동안 이용하지 않으시면'), '게스트 계정의 파기 조건(30일 미이용)이 없다');
   assert.ok(guest.includes('하루 안에 게스트 계정을 탈퇴와 같은 방법으로 자동 파기합니다'), '게스트 계정의 자동 파기가 없다');
   assert.ok(guest.includes('연결 기록도 이때 함께 지웁니다'), '게스트 파기 때 번역 연결 기록을 지운다는 문장이 없다');
-  // GuestQuota - 키에 IP 원문이 아니라 SHA-256을 두고 다음 날 KST 01시에 만료한다.
+  // GuestQuota - 키에 IP 원문이 아니라 서버 비밀값으로 낸 HMAC-SHA256을 두고 다음 날 KST 01시에 만료한다.
   assert.ok(guest.includes('접속 IP 주소의 해시값'), '게스트 발급 횟수의 키가 IP 해시라는 것이 없다');
   assert.ok(guest.includes('IP 주소 원문은 이 기록에 두지 않습니다'), 'IP 원문을 두지 않는다는 문장이 없다');
   assert.ok(guest.includes('다음 날 오전 1시(한국 시간)에 자동으로 삭제합니다'), '게스트 발급 횟수의 삭제 시각이 없다');

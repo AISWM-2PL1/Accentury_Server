@@ -195,8 +195,8 @@ public class AuthService {
      * 게스트 계정 발급 (§3.21, KAN-329) - 소셜 로그인 없이 계정 하나를 만들고 토큰 쌍을 준다. 부를 때마다 새 계정이다.
      * <p>
      * 순서: 분당 요청 제한(로그인과 한 통) → 동의 검사 → IP당 하루 상한 → 계정 만들기 → 토큰 발급. 동의가 없는 요청은
-     * 하루 상한을 깎지 않는다. 계정을 커밋한 뒤에 Refresh를 내는 이유는 로그인과 같다 - 거기서 Redis가 죽으면 주인 없는
-     * 계정 행이 남는데, 그 행은 {@link GuestAccountRetention}이 걷어 간다.
+     * 하루 상한을 깎지 않고, 상한을 잡은 뒤 실패한 발급은 잡은 칸을 돌려준다. 계정을 커밋한 뒤에 Refresh를 내는 이유는
+     * 로그인과 같다 - 거기서 Redis가 죽으면 주인 없는 계정 행이 남는데, 그 행은 {@link GuestAccountRetention}이 걷어 간다.
      *
      * @throws ApiException 400 {@code VALIDATION_FAILED}, {@code AUTH_CONSENT_REQUIRED} /
      *                      429 {@code RATE_LIMITED}, {@code AUTH_GUEST_LIMIT_EXCEEDED} / 503 {@code AUTH_STORE_UNAVAILABLE}
@@ -211,17 +211,23 @@ public class AuthService {
                 || !privacyPolicyVersion.equals(request.privacyPolicyVersion())) {
             throw new ApiException(ErrorCode.AUTH_CONSENT_REQUIRED, "개인정보 수집 이용에 동의해야 이용할 수 있습니다.");
         }
-        guestQuota.acquire(clientIp);
-
-        AppUser created = transactionTemplate.execute(
-                tx -> users.saveAndFlush(AppUser.guest(privacyPolicyVersion, Instant.now())));
-        if (created == null) {
-            throw new IllegalStateException("게스트 발급 트랜잭션이 결과 없이 끝났다");
+        String quotaSlot = guestQuota.acquire(clientIp);
+        try {
+            AppUser created = transactionTemplate.execute(
+                    tx -> users.saveAndFlush(AppUser.guest(privacyPolicyVersion, Instant.now())));
+            if (created == null) {
+                throw new IllegalStateException("게스트 발급 트랜잭션이 결과 없이 끝났다");
+            }
+            String accessToken = accessTokens.issue(created.id());
+            String refreshToken = refreshTokens.issue(created.id());
+            log.info("게스트 발급 userId={}", created.id());
+            return new GuestResponse(accessToken, refreshToken, accessTokens.ttlSeconds(), UserView.of(created));
+        } catch (RuntimeException e) {
+            // 토큰을 주지 못한 발급은 하루 상한에서 뺀다 (PR #69 리뷰) - 서버 장애 동안의 재시도가 그 IP의 하루 몫을
+            // 다 쓰지 않게 한다. Refresh 발급에서 실패했으면 계정 행은 이미 커밋돼 있다 - 그 행은 정리 잡이 걷어 간다.
+            guestQuota.release(quotaSlot);
+            throw e;
         }
-        String accessToken = accessTokens.issue(created.id());
-        String refreshToken = refreshTokens.issue(created.id());
-        log.info("게스트 발급 userId={}", created.id());
-        return new GuestResponse(accessToken, refreshToken, accessTokens.ttlSeconds(), UserView.of(created));
     }
 
     /**

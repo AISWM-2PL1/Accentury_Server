@@ -3,6 +3,9 @@ package app.accentury.backend.auth;
 import app.accentury.backend.IntegrationTest;
 import app.accentury.backend.RedisTestcontainer;
 import app.accentury.backend.common.AccenturyProperties;
+import app.accentury.backend.common.ApiException;
+import app.accentury.backend.common.ErrorCode;
+import app.accentury.backend.common.RateLimits;
 import app.accentury.backend.session.TestSessionRepository;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -20,6 +23,7 @@ import org.springframework.http.MediaType;
 import org.springframework.test.context.TestPropertySource;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.ResultActions;
+import org.springframework.transaction.support.TransactionTemplate;
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.ObjectMapper;
 
@@ -36,6 +40,7 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
@@ -73,6 +78,24 @@ class GuestApiTest extends IntegrationTest {
 
     @Autowired
     private StringRedisTemplate redis;
+
+    @Autowired
+    private GuestQuota guestQuota;
+
+    @Autowired
+    private IdpVerifiers idpVerifiers;
+
+    @Autowired
+    private AccessTokens accessTokens;
+
+    @Autowired
+    private RateLimits rateLimits;
+
+    @Autowired
+    private TransactionTemplate transactionTemplate;
+
+    @Autowired
+    private AccenturyProperties properties;
 
     // === 발급 (AC 1) ===
 
@@ -118,8 +141,7 @@ class GuestApiTest extends IntegrationTest {
                 .andExpect(jsonPath("$.code").value("AUTH_CONSENT_REQUIRED"));
 
         assertEquals(before, users.count());
-        assertNull(redis.opsForValue().get(GuestQuota.key(ip, LocalDate.now(ZoneId.of("Asia/Seoul")))),
-                "동의가 없는 요청은 하루 상한을 깎지 않는다");
+        assertNull(redis.opsForValue().get(guestQuota.key(ip, today())), "동의가 없는 요청은 하루 상한을 깎지 않는다");
     }
 
     @Test
@@ -159,7 +181,76 @@ class GuestApiTest extends IntegrationTest {
                 .andExpect(jsonPath("$.retryable").value(false));
 
         assertEquals(before, users.count(), "상한을 넘은 요청은 계정을 만들지 않는다");
+        assertEquals(String.valueOf(DAILY_LIMIT), redis.opsForValue().get(guestQuota.key(ip, today())),
+                "넘은 요청은 카운터를 올린 채 두지 않는다");
         guest(uniqueIp(), true, POLICY_VERSION).andExpect(status().isOk());
+    }
+
+    /**
+     * IPv6는 가입자 한 명에게 /64가 통째로 간다 (PR #69 리뷰) - 주소 단위로 세면 주소만 바꿔 상한을 끝없이 피한다.
+     */
+    @Test
+    void IPv6는_같은_64비트_대역이_한_통이고_주소를_바꿔도_상한을_피하지_못한다() throws Exception {
+        ThreadLocalRandom random = ThreadLocalRandom.current();
+        String prefix = "2001:db8:" + Integer.toHexString(random.nextInt(1, 0x10000)) + ":"
+                + Integer.toHexString(random.nextInt(1, 0x10000));
+        for (int i = 1; i <= DAILY_LIMIT; i++) {
+            guest(prefix + "::" + Integer.toHexString(i), true, POLICY_VERSION).andExpect(status().isOk());
+        }
+
+        guest(prefix + ":aaaa:bbbb:cccc:dddd", true, POLICY_VERSION)
+                .andExpect(status().isTooManyRequests())
+                .andExpect(jsonPath("$.code").value("AUTH_GUEST_LIMIT_EXCEEDED"));
+
+        guest(prefix + "f::1", true, POLICY_VERSION).andExpect(status().isOk());
+    }
+
+    @Test
+    void 통은_IPv4는_주소이고_IPv6는_앞_64비트다() {
+        assertEquals(GuestQuota.bucket("2001:db8:1:2::1"), GuestQuota.bucket("2001:db8:1:2:aaaa:bbbb:cccc:dddd"));
+        assertNotEquals(GuestQuota.bucket("2001:db8:1:2::1"), GuestQuota.bucket("2001:db8:1:3::1"));
+        assertNotEquals(GuestQuota.bucket("10.1.2.3"), GuestQuota.bucket("10.1.2.4"));
+        assertEquals("10.1.2.3", GuestQuota.bucket("::ffff:10.1.2.3"), "IPv4를 감싼 IPv6 주소는 IPv4로 센다");
+        assertEquals("not-an-ip", GuestQuota.bucket("not-an-ip"), "읽지 못한 값도 한 통이다 - 상한을 풀지 않는다");
+    }
+
+    /**
+     * 키에서 IP를 되살릴 수 없어야 한다 (PR #69 리뷰). 솔트 없는 SHA-256은 IPv4 전부를 대입하면 몇 초 만에 풀린다.
+     */
+    @Test
+    void 키에는_IP_원문도_솔트_없는_해시도_없다() {
+        String ip = "203.0.113.77";
+
+        String key = guestQuota.key(ip, today());
+
+        assertFalse(key.contains(ip));
+        assertFalse(key.contains(RefreshTokens.hash(ip)), "SHA-256(IP)가 그대로 키에 있으면 전수 대입으로 IP가 나온다");
+        assertEquals(key, guestQuota.key(ip, today()), "같은 IP와 날짜는 같은 키다");
+        assertNotEquals(key, new GuestQuota(redis, java.time.Clock.systemUTC(), new byte[32]).key(ip, today()),
+                "비밀값이 다르면 키도 다르다");
+    }
+
+    /**
+     * 토큰을 주지 못한 발급은 하루 상한에서 뺀다 (PR #69 리뷰) - 서버 장애 동안의 재시도가 그 IP의 하루 몫을 다 쓰지
+     * 않게 한다. Refresh 발급이 실패한 경우를 본다: 계정 행은 이미 커밋됐고 정리 잡이 걷어 간다.
+     */
+    @Test
+    void 토큰_발급이_실패하면_잡았던_하루_상한_칸을_돌려준다() {
+        String ip = uniqueIp();
+        RefreshTokens down = new RefreshTokens(redis, properties) {
+            @Override
+            public String issue(UUID userId) {
+                throw new ApiException(ErrorCode.AUTH_STORE_UNAVAILABLE);
+            }
+        };
+        AuthService failing = new AuthService(idpVerifiers, users, accessTokens, down, rateLimits, guestQuota,
+                transactionTemplate, properties);
+
+        ApiException e = assertThrows(ApiException.class,
+                () -> failing.guest(new GuestRequest(true, POLICY_VERSION), ip));
+
+        assertEquals(ErrorCode.AUTH_STORE_UNAVAILABLE, e.code());
+        assertEquals("0", redis.opsForValue().get(guestQuota.key(ip, today())));
     }
 
     // === 게스트가 쓰는 계정 API ===
@@ -283,6 +374,10 @@ class GuestApiTest extends IntegrationTest {
             request.setRemoteAddr(ip);
             return request;
         };
+    }
+
+    private static LocalDate today() {
+        return LocalDate.now(ZoneId.of("Asia/Seoul"));
     }
 
     private static String uniqueIp() {

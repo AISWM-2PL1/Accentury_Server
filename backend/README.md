@@ -38,7 +38,7 @@ AI 서버로 보내므로 `accentury.analysis.ai-base-url`과 `accentury.analysi
 
 게스트 계정은 가짜 IdP 없이도 만들 수 있다. `POST /v0/auth/guest`에 `{"privacyConsent": true,
 "privacyPolicyVersion": "<같은 값>"}`를 보내면 토큰 쌍이 온다. 게스트 토큰은 번역(`POST /v0/translations`)과 내 계정
-조회, 로그아웃, 탈퇴만 부를 수 있고 학습 API와 계정 세션 생성은 403 `AUTH_GUEST_NOT_ALLOWED`다. 같은 IP는 하루 10개까지
+조회, 로그아웃, 탈퇴만 부를 수 있고 학습 API와 계정 세션 생성은 403 `AUTH_GUEST_NOT_ALLOWED`다. 같은 IP(IPv6는 /64 대역)는 하루 10개까지
 만들 수 있고(429 `AUTH_GUEST_LIMIT_EXCEEDED`), 살아 있는 Refresh가 없는 게스트 계정은 정리 잡이 6시간마다 지운다.
 
 루트 `docker compose up -d --build`(로컬 풀스택)는 fake-idp와 jwt-secret을 이미 켜 두고 가짜 AI와 Redis까지
@@ -74,7 +74,7 @@ AI 서버로 보내므로 `accentury.analysis.ai-base-url`과 `accentury.analysi
 | `V15__gn_2026_10_2_voice_emotion.sql` | gn-2026.10.2 음성 문항에 감정 톤을 제자리 UPDATE (아래 불변 예외) |
 | `V16__learning_attendance.sql` | 계정의 출석일 기록 |
 | `V17__test_session_complete_requested_at.sql` | 세션의 첫 `/complete` 호출 시각 |
-| `V18__app_user_guest_provider.sql` | 계정 provider 허용 값에 GUEST 추가 |
+| `V18__app_user_guest_provider.sql` | 계정 provider 허용 값에 GUEST 추가, 살아 있는 게스트 계정의 부분 색인 |
 
 | 상황 | 하는 일 |
 | --- | --- |
