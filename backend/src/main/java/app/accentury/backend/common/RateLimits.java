@@ -92,7 +92,9 @@ public class RateLimits {
          * 사투리 번역 요청 - 계정당 (§2.5, KAN-322). 한 계정의 연속 호출이 프로젝트 몫 Gemini RPM 15를 채워 다른 사용자의 429가
          * 되는 것을 막는다. 다른 축처럼 태스크 수만큼 풀리므로 하루 총량은 이 축이 아니라 Redis 호출 수 상한이 맡는다.
          */
-        TRANSLATION("user");
+        TRANSLATION("user"),
+        /** 번역 결과 신고 - 계정당 (§2.5, §3.22, KAN-343). 건마다 슬랙 알림이 나가므로 번역 요청과 따로 센다. */
+        TRANSLATION_REPORT("user");
 
         private final String axis;
 
@@ -155,7 +157,8 @@ public class RateLimits {
                 Map.entry(Scope.WORD_LEARNING, properties.learning().rateLimitPerMinute()),
                 Map.entry(Scope.INTONATION_LEARNING, properties.learning().intonationRateLimitPerMinute()),
                 Map.entry(Scope.INTONATION_UPLOAD_IP, properties.learning().intonationIpRateLimitPerMinute()),
-                Map.entry(Scope.TRANSLATION, properties.translation().rateLimitPerMinute()));
+                Map.entry(Scope.TRANSLATION, properties.translation().rateLimitPerMinute()),
+                Map.entry(Scope.TRANSLATION_REPORT, AccenturyProperties.Translation.REPORT_RATE_LIMIT_PER_MINUTE));
     }
 
     /**

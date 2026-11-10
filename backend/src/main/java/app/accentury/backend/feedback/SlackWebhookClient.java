@@ -7,8 +7,10 @@ package app.accentury.backend.feedback;
  * {@link RestSlackWebhookClient} 하나이고, 설정이 없을 때를 위한 no-op 구현은 두지 않는다.
  * 껐다 켜는 판단은 전송기({@link FeedbackSlackNotifier})가 한 곳에서 하고, 꺼져 있으면 이
  * 인터페이스는 아예 호출되지 않는다.
+ * <p>
+ * 번역 신고 알림(KAN-343, {@code translation} 패키지)도 같은 웹훅으로 보내므로 public이다.
  */
-interface SlackWebhookClient {
+public interface SlackWebhookClient {
 
     /**
      * 채널에 메시지 한 줄을 올린다.

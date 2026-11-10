@@ -75,6 +75,7 @@ AI 서버로 보내므로 `accentury.analysis.ai-base-url`과 `accentury.analysi
 | `V16__learning_attendance.sql` | 계정의 출석일 기록 |
 | `V17__test_session_complete_requested_at.sql` | 세션의 첫 `/complete` 호출 시각 |
 | `V18__app_user_guest_provider.sql` | 계정 provider 허용 값에 GUEST 추가, 살아 있는 게스트 계정의 부분 색인 |
+| `V19__translation_report.sql` | 번역 결과 신고 |
 
 | 상황 | 하는 일 |
 | --- | --- |
