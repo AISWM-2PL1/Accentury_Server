@@ -57,7 +57,8 @@ public class UserService {
     }
 
     /**
-     * 다섯 항목을 검증해 저장한다 (§3.10). 거절된 값은 저장하지 않는다 - 만 14세 미만의 생년월일도 남기지 않는다.
+     * 필수 네 항목과 선택인 성별을 검증해 저장한다 (§3.10). 거절된 값은 저장하지 않는다 - 만 14세 미만의
+     * 생년월일도 남기지 않는다.
      *
      * @throws ApiException 400 {@code VALIDATION_FAILED} 또는 {@code AUTH_UNDER_AGE} / 401 {@code AUTH_TOKEN_INVALID}
      */
@@ -69,7 +70,7 @@ public class UserService {
         String name = name(request.name());
         LocalDate today = LocalDate.now(clock.withZone(ZONE));
         LocalDate birthDate = birthDate(request.birthDate(), today);
-        Gender gender = gender(request.gender());
+        @Nullable Gender gender = gender(request.gender());
         Region region = region(request.region());
         if (ProfileRules.age(birthDate, today) < ProfileRules.MINIMUM_AGE) {
             throw new ApiException(ErrorCode.AUTH_UNDER_AGE);
@@ -166,12 +167,17 @@ public class UserService {
         return value;
     }
 
-    private static Gender gender(@Nullable String raw) {
-        if (raw != null) {
-            for (Gender gender : Gender.values()) {
-                if (gender.name().equals(raw)) {
-                    return gender;
-                }
+    /**
+     * 성별은 선택 항목이다 (KAN-328) - 빠졌거나 null이면 성별 없이 저장한다. 값을 보냈으면 두 값 중 하나여야 하고,
+     * 빈 문자열도 값을 보낸 것이라 400이다: 조용히 null로 받으면 클라이언트의 잘못된 직렬화가 드러나지 않는다.
+     */
+    private static @Nullable Gender gender(@Nullable String raw) {
+        if (raw == null) {
+            return null;
+        }
+        for (Gender gender : Gender.values()) {
+            if (gender.name().equals(raw)) {
+                return gender;
             }
         }
         throw new ApiException(ErrorCode.VALIDATION_FAILED, "gender는 MALE, FEMALE 중 하나여야 합니다.");

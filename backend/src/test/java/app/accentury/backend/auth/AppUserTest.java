@@ -46,7 +46,35 @@ class AppUserTest {
                 Gender.MALE, null, null), NOW);
 
         assertEquals("a@naver.com", user.email());
+        assertEquals(Gender.MALE, user.gender(), "프로필 완료 전에는 성별도 IdP 값으로 채운다");
         assertFalse(user.isProfileComplete(), "출신지역은 IdP가 주지 않는다 - 추가 정보 화면이 받는다");
+    }
+
+    @Test
+    void 성별이_없어도_필수_네_항목이_있으면_완료다() {
+        AppUser user = new AppUser(IdpProfile.subjectOnly(Provider.GOOGLE, "sub"), "2026-09-24", NOW);
+
+        user.updateProfile("mine@example.com", "이름", LocalDate.of(1999, 3, 2), null, Region.GYEONGNAM, NOW);
+
+        assertNull(user.gender());
+        assertTrue(user.isProfileComplete(), "성별은 선택 항목이라 완료 판정에 쓰지 않는다 (KAN-328)");
+        assertEquals(NOW, user.profileCompletedAt());
+    }
+
+    @Test
+    void 완료된_프로필의_빈_성별은_재로그인이_IdP_값으로_채우지_않는다() {
+        // 카카오가 성별을 줬지만 사용자가 추가 정보 화면에서 「선택 안 함」으로 바꿔 저장했다.
+        IdpProfile kakao = new IdpProfile(Provider.KAKAO, "sub", "k@kakao.com", "이름", LocalDate.of(1999, 3, 2),
+                Gender.MALE, null, null);
+        AppUser user = new AppUser(kakao, "2026-09-24", NOW);
+        assertEquals(Gender.MALE, user.gender(), "가입 때는 IdP가 준 성별을 채운다");
+        user.updateProfile("k@kakao.com", "이름", LocalDate.of(1999, 3, 2), null, Region.GYEONGNAM, NOW);
+
+        boolean changed = user.fillBlanksFrom(kakao, NOW.plusSeconds(60));
+
+        assertFalse(changed, "성별만 비어 있었고 그 값은 채우지 않는다");
+        assertNull(user.gender(), "사용자가 고르지 않기로 한 값이 재로그인으로 되돌아가면 안 된다");
+        assertTrue(user.isProfileComplete());
     }
 
     @Test

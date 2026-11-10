@@ -23,8 +23,9 @@ import java.util.UUID;
  * 계정 식별은 (provider, provider_user_id)이고 이메일은 식별자가 아니다 - 같은 이메일로 다른 IdP에 로그인하면
  * 별개 계정이다 (계정 연동 FR-AC-04는 범위 밖).
  * <p>
- * <b>프로필 완료 판정은 이메일, 이름, 생년월일, 성별, 출신지역 다섯 개로만 한다.</b> 다섯 개가 다 있으면
+ * <b>프로필 완료 판정은 이메일, 이름, 생년월일, 출신지역 네 개로만 한다.</b> 네 개가 다 있으면
  * {@code profileCompletedAt}이 찍히고, 그 전에는 세션을 만들 수 없다 (§3.1 403 {@code AUTH_PROFILE_INCOMPLETE}).
+ * 성별은 선택 항목이라 판정에 쓰지 않는다 (KAN-328) - 앱의 핵심 기능과 무관한 개인 정보를 필수로 받지 않는다.
  * 닉네임과 프로필 이미지는 IdP가 줄 때만 남기는 보조 정보라 판정과 무관하다.
  * <p>
  * 이메일, 이름, 생년월일은 로그에 남기지 않는다 (§2.6). {@link #toString()}을 재정의하지 않는 것도 그래서다 -
@@ -60,6 +61,7 @@ public class AppUser implements Persistable<UUID> {
     @Column(name = "birth_date")
     private @Nullable LocalDate birthDate;
 
+    /** 선택 항목이다 (KAN-328) - null이면 IdP도 주지 않았고 사용자도 고르지 않은 계정이다. */
     @Enumerated(EnumType.STRING)
     @Column(length = 10)
     private @Nullable Gender gender;
@@ -74,7 +76,7 @@ public class AppUser implements Persistable<UUID> {
     @Column(name = "profile_image_url", length = 1024)
     private @Nullable String profileImageUrl;
 
-    /** 다섯 항목이 처음 다 채워진 시각 - null이면 프로필 미완료다. */
+    /** 필수 네 항목이 처음 다 채워진 시각 - null이면 프로필 미완료다. */
     @Column(name = "profile_completed_at")
     private @Nullable Instant profileCompletedAt;
 
@@ -141,6 +143,9 @@ public class AppUser implements Persistable<UUID> {
     /**
      * 재로그인 - 비어 있는 항목만 IdP 값으로 채운다 (§3.9). 사용자가 추가 정보 화면에서 이미 입력한 값은
      * 덮지 않는다: IdP의 값이 바뀌었다고 사용자가 고친 이름이 되돌아가면 안 된다.
+     * <p>
+     * 성별은 프로필이 완료된 뒤에는 비어 있어도 채우지 않는다 (KAN-328). 선택 항목이라 완료된 프로필의 빈 성별은
+     * "아직 못 받은 값"이 아니라 사용자가 고르지 않기로 한 값이다 - 여기서 채우면 그 선택이 재로그인마다 되돌아간다.
      *
      * @return 바뀐 항목이 있었는가
      */
@@ -158,7 +163,7 @@ public class AppUser implements Persistable<UUID> {
             birthDate = profile.birthDate();
             changed = true;
         }
-        if (gender == null && profile.gender() != null) {
+        if (gender == null && profile.gender() != null && profileCompletedAt == null) {
             gender = profile.gender();
             changed = true;
         }
@@ -178,10 +183,12 @@ public class AppUser implements Persistable<UUID> {
     }
 
     /**
-     * 추가 정보 화면의 다섯 항목 (§3.10). 검증은 호출 쪽이 끝냈다. 이미 완료된 프로필에 다시 부르면 값만
-     * 갱신하고 완료 시각은 처음 것을 둔다 (멱등).
+     * 추가 정보 화면의 항목 (§3.10) - 필수 넷과 선택인 성별이다. 검증은 호출 쪽이 끝냈다. 이미 완료된 프로필에
+     * 다시 부르면 값만 갱신하고 완료 시각은 처음 것을 둔다 (멱등). 성별이 null이면 있던 값도 지운다 - 화면에서
+     * 「선택 안 함」으로 바꾼 것이다 (KAN-328).
      */
-    void updateProfile(String email, String name, LocalDate birthDate, Gender gender, Region region, Instant now) {
+    void updateProfile(String email, String name, LocalDate birthDate, @Nullable Gender gender, Region region,
+                       Instant now) {
         this.email = email;
         this.name = name;
         this.birthDate = birthDate;
@@ -250,11 +257,12 @@ public class AppUser implements Persistable<UUID> {
         }
     }
 
+    /** 필수 네 항목 - 성별은 선택이라 보지 않는다 (KAN-328). */
     private boolean hasAllProfileFields() {
-        return email != null && name != null && birthDate != null && gender != null && region != null;
+        return email != null && name != null && birthDate != null && region != null;
     }
 
-    /** 다섯 항목이 다 있는가 (§3.9 {@code profileStatus}). */
+    /** 필수 네 항목이 다 있는가 (§3.9 {@code profileStatus}). */
     public boolean isProfileComplete() {
         return profileCompletedAt != null && hasAllProfileFields();
     }
