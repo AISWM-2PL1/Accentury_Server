@@ -74,6 +74,22 @@ final class IdpHttp {
     }
 
     /**
+     * {@code Authorization} 헤더를 싣는 form POST - 카카오 어드민 키 호출(연결 해제, KAN-343)이 쓴다. 헤더 값은 호출
+     * 쪽이 스킴까지 붙여 넘긴다 ({@code KakaoAK ...}). 실패 분류는 {@link #get}과 같다.
+     *
+     * @throws ApiException 401 {@code AUTH_IDP_TOKEN_INVALID} 또는 502 {@code AUTH_IDP_UNAVAILABLE}
+     */
+    JsonNode postForm(String path, MultiValueMap<String, String> form, String authorization) {
+        return exchange(path, () -> restClient.post()
+                .uri(path)
+                .header(HttpHeaders.AUTHORIZATION, authorization)
+                .contentType(MediaType.APPLICATION_FORM_URLENCODED)
+                .body(form)
+                .retrieve()
+                .body(String.class));
+    }
+
+    /**
      * 응답 본문이 없는 form POST - 애플 토큰 revoke(KAN-241)가 쓴다. 애플은 성공을 빈 본문의 200으로 답한다.
      * 실패 분류는 {@link #get}과 같다.
      *

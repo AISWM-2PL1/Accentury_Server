@@ -246,8 +246,8 @@ apply 뒤 복구 창이다), TLS가 아닌 요청을 거부하는 버킷 정책�
 
 | 파라미터 | 발급처 | 환경별 값 | 가드 | 자리 표시 값인 동안 |
 | --- | --- | --- | --- | --- |
-| `ACCENTURY_SHARE_KAKAOADMINKEY` | 카카오디벨로퍼스 [앱 설정] > [앱 키] > **Admin 키** (네이티브 앱 키 아님) | 두 환경 같음 | 필수 | 카카오 공유 웹훅을 전부 401로 거부한다 (`SHARE_WEBHOOK_UNAUTHORIZED`) |
-| `ACCENTURY_FEEDBACK_SLACKWEBHOOKURL` | 슬랙 앱 Incoming Webhook (`#feedback`) | 두 환경 같음 | 선택 | 후기 알림만 꺼진다 (`후기 슬랙 알림 꺼짐`) |
+| `ACCENTURY_SHARE_KAKAOADMINKEY` | 카카오디벨로퍼스 [앱 설정] > [앱 키] > **Admin 키** (네이티브 앱 키 아님) | 두 환경 같음 | 필수 | 카카오 공유 웹훅을 전부 401로 거부한다 (`SHARE_WEBHOOK_UNAUTHORIZED`). 탈퇴한 카카오 계정의 연결 해제(`/v1/user/unlink`)도 이 키로 부르므로, 자리 표시 값이면 연결 해제만 건너뛴다 (`카카오 연결 해제 건너뜀 - 미설정`) |
+| `ACCENTURY_FEEDBACK_SLACKWEBHOOKURL` | 슬랙 앱 Incoming Webhook (`#feedback`) | 두 환경 같음 | 선택 | 후기 알림과 번역 신고 알림이 꺼진다 (`후기 슬랙 알림 꺼짐`). 저장은 그대로다 |
 | `ACCENTURY_AUTH_NAVERCLIENTSECRET` | 네이버 개발자 센터 앱 설정 (앱의 `NAVER_CLIENT_SECRET`과 같다) | 두 환경 같음 | 필수 | 네이버 로그인만 401 |
 | `ACCENTURY_AUTH_APPLEPRIVATEKEY` | 애플 개발자 계정 Keys의 Sign in with Apple 키 .p8 (만들 때 한 번만 내려받는다) | 두 환경 같음 | 선택 | 탈퇴 때 애플 revoke만 건너뛴다 (`애플 토큰 revoke 미설정` WARN) |
 | `ACCENTURY_TRANSLATION_APIKEY` | 환경별 Google AI Studio 프로젝트의 API 키 | **환경마다 다름** | 선택 | 번역만 503 `TRANSLATION_UNAVAILABLE` (`번역 API 키가 없다`) |
@@ -357,8 +357,15 @@ HTTPS 443을 이미 전체로 열어 두어(`modules/network`의 `backend_https_
 
 **한도.** Gemini 무료 등급 한도는 RPM 15, RPD 500이고 프로젝트 전체 몫이다 (2026-10-15 AI Studio 확인). 한 계정이 다 쓰지
 못하게 backend가 성공한 번역을 계정당 하루 5건까지만 받고 6번째부터 LLM 없이 429 `TRANSLATION_DAILY_LIMIT_EXCEEDED`를
-돌려준다. 두 방향이 한 한도를 쓴다 (2026-11-04 결정 - 방향별로 나누면 계정당 10건이 되어 한도 산정 전제가 바뀐다). 카운터는 Redis 키 `trq:{userId}:{yyyyMMdd}`이고 한국 시각 자정에 바뀐다 (코드 상수 `DAILY_LIMIT`). Redis 장애면
-번역도 503 `TRANSLATION_UNAVAILABLE`이다. 분당 한도에 잠깐 닿는 정도를 허용하려면 monitoring 모듈의
+돌려준다. 두 방향이 한 한도를 쓴다 (2026-11-04 결정 - 방향별로 나누면 계정당 10건이 되어 한도 산정 전제가 바뀐다). 카운터는 Redis 키 `trq:{userId}:{yyyyMMdd}`이고 한국 시각 자정에 바뀐다 (코드 상수 `DAILY_LIMIT`).
+
+성공만 세면 LLM이 거절하는 문장의 반복이 걸리지 않으므로 LLM을 부른 호출 수도 계정당 하루 20번으로 막는다 (Redis 키
+`trc:{userId}:{yyyyMMdd}`, 코드 상수 `DAILY_CALL_LIMIT`, KAN-322). 결과가 422나 503이어도 호출 수는 돌려주지 않고, 넘으면
+같은 429에 문구만 「오늘 번역 요청 횟수(20회)」로 다르다. 200 응답의 `remaining`은 남은 성공 칸과 남은 호출 수 가운데
+작은 쪽이다. 요청은 계정당 분당 6회까지이고 넘으면 429 `RATE_LIMITED`다 (`accentury.translation.rate-limit-per-minute`,
+태스크별로 세므로 태스크 3대면 분당 18회까지 풀린다). 엣지의 WAF 10번 규칙도 이 경로를 센다.
+
+Redis 장애면 번역도 503 `TRANSLATION_UNAVAILABLE`이다. 분당 한도에 잠깐 닿는 정도를 허용하려면 monitoring 모듈의
 `translation_quota_exhausted_threshold`를 올린다.
 
 **apply와 배포의 순서 제약이 없다.** 키는 가드 밖이라 키가 없거나 자리 표시 값인 backend는 번역만 503이고 기동 로그에
@@ -395,6 +402,13 @@ ID와 계정의 대응표는 DB `translation_subject`이고 탈퇴가 그 행을
    IdP 토큰이 있어야 로그인 실증이 된다. 그 전에는 `POST /v0/auth/refresh`에 아무 `rt_` 토큰을 보내 401
    `AUTH_REFRESH_INVALID`가 오는지로 Redis 연결을 본다 - 503 `AUTH_STORE_UNAVAILABLE`이면 Redis에 닿지 못한 것이다 (SG,
    TLS, AUTH 토큰 순으로 본다).
+
+**게스트 계정.** 게스트 발급(`POST /v0/auth/guest`, 명세서 §3.21)은 IdP 값이 필요 없고 같은 Redis만 쓴다. 발급 상한은
+Redis 키 `gq:{IP의 HMAC-SHA256}:{yyyyMMdd}`로 IP당 하루 10개를 세고(코드 상수 `GUEST_DAILY_LIMIT_PER_IP`) 다음 날 한국 시각
+01시에 만료된다. IPv6는 앞 64비트를 한 IP로 센다. HMAC의 키는 `ACCENTURY_AUTH_JWTSECRET`에서 끌어내므로 시크릿을 따로 두지
+않고, JWT 키를 회전하면 그날의 카운터가 새로 시작한다. 배포 환경에서 실제 IdP 토큰 없이 토큰 발급부터 번역까지를 실증할 수 있는 경로이기도 하다. 정리 잡
+(`GuestAccountRetention`)은 6시간마다 Redis의 `rtuser:{계정 id}`가 없는 게스트 계정을 탈퇴와 같은 절차로 지운다. Redis
+노드를 새로 만들면 Refresh가 전부 사라지므로 그때까지의 게스트 계정은 다음 회차에 전부 파기된다.
 
 **IdP String 값.** 콘솔에서 받기 전까지 자리 표시 값(`unset-put-parameter-after-apply`, 변수 기본값)이고 그동안 그 IdP
 로그인만 401 `AUTH_IDP_TOKEN_INVALID`다. 기동과 다른 IdP, 익명 응시는 영향이 없다. 값을 받으면 환경의 `terraform.tfvars`에

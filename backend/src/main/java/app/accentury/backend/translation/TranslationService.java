@@ -4,6 +4,7 @@ import app.accentury.backend.auth.AppUser;
 import app.accentury.backend.common.AccenturyProperties;
 import app.accentury.backend.common.ApiException;
 import app.accentury.backend.common.ErrorCode;
+import app.accentury.backend.common.RateLimits;
 import app.accentury.backend.observability.ServiceMetrics;
 import io.micrometer.core.instrument.Counter;
 import io.micrometer.core.instrument.MeterRegistry;
@@ -24,23 +25,32 @@ import java.util.concurrent.TimeUnit;
 /**
  * 사투리 텍스트 번역 (KAN-266, 명세서 §3.18) - 두 방향이다 (KAN-316, {@link TranslationDirection}).
  * <p>
- * 순서: 형식 검사(400, {@code text}와 {@code direction}) → 길이(422 {@code TRANSLATION_TOO_LONG}) → 서버 사전 검사(422 {@code TRANSLATION_REJECTED}) →
- * 일일 한도(429 {@code TRANSLATION_DAILY_LIMIT_EXCEEDED}) → LLM 호출(실패면 503 {@code TRANSLATION_UNAVAILABLE}) →
- * 응답 검사(어기면 422 {@code TRANSLATION_REJECTED}) → 200.
- * 400을 뺀 모든 끝에서 결과 종류를 지표로 세고 번역 기록을 넘긴다.
+ * 순서: 형식 검사(400, {@code text}와 {@code direction}) → 분당 제한(429 {@code RATE_LIMITED}) → 길이(422 {@code TRANSLATION_TOO_LONG}) →
+ * 서버 사전 검사(422 {@code TRANSLATION_REJECTED}) → 일일 한도(429 {@code TRANSLATION_DAILY_LIMIT_EXCEEDED}) →
+ * LLM 호출(실패면 503 {@code TRANSLATION_UNAVAILABLE}) → 응답 검사(어기면 422 {@code TRANSLATION_REJECTED}) → 200.
+ * 400과 분당 제한을 뺀 모든 끝에서 결과 종류를 지표로 세고 번역 기록을 넘긴다.
  * <p>
  * <b>입력과 출력 텍스트는 로그에 남기지 않는다</b> (§2.6) - 로그는 결과 종류, 입력 길이, 소요 시간뿐이다.
  * 계정당 하루 {@value AccenturyProperties.Translation#DAILY_LIMIT}건이고 성공한 번역만 센다 (2026-10-15 결정 - 10-04의
- * 「제한 없음」을 바꿨다). 한도 칸은 LLM 호출 전에 잡고 성공이 아니면 돌려준다 ({@link TranslationQuota}).
+ * 「제한 없음」을 바꿨다). 한도 칸은 LLM 호출 전에 잡고 성공이 아니면 돌려준다 ({@link TranslationQuota}). LLM 호출 수는
+ * 칸과 별개로 하루 {@value AccenturyProperties.Translation#DAILY_CALL_LIMIT}번까지이고 돌려주지 않는다 (KAN-322).
  */
 @Service
 class TranslationService {
 
     private static final Logger log = LoggerFactory.getLogger(TranslationService.class);
 
+    /**
+     * 호출 수 상한의 429 문구 - 코드는 성공 5건 한도와 같은 {@code TRANSLATION_DAILY_LIMIT_EXCEEDED}이고 문구만 다르다 (PR #66
+     * 리뷰). 성공이 5건 미만인 사용자에게 「5회를 다 썼다」고 하지 않는다. 앱과 웹은 서버 문구를 그대로 보여 준다.
+     */
+    static final String CALL_LIMIT_MESSAGE = "오늘 번역 요청 횟수(%d회)를 다 썼습니다. 내일 다시 시도해 주세요."
+            .formatted(AccenturyProperties.Translation.DAILY_CALL_LIMIT);
+
     private final DialectTranslator translator;
     private final TranslationQuota quota;
     private final TranslationRecordStore records;
+    private final RateLimits rateLimits;
     private final Clock clock;
     /** 결과 종류 x 방향 카운터 - 지표는 하나고 태그 {@code result}, {@code direction}으로 가른다. */
     private final Map<TranslationDirection, Map<TranslationResult, Counter>> requests =
@@ -48,16 +58,18 @@ class TranslationService {
 
     @Autowired
     TranslationService(DialectTranslator translator, TranslationQuota quota,
-                       ObjectProvider<TranslationRecordStore> records, MeterRegistry meterRegistry) {
-        this(translator, quota, records.getIfAvailable(() -> TranslationRecordStore.NONE), Clock.systemUTC(),
+                       ObjectProvider<TranslationRecordStore> records, RateLimits rateLimits,
+                       MeterRegistry meterRegistry) {
+        this(translator, quota, records.getIfAvailable(() -> TranslationRecordStore.NONE), rateLimits, Clock.systemUTC(),
                 meterRegistry);
     }
 
     TranslationService(DialectTranslator translator, TranslationQuota quota, TranslationRecordStore records,
-                       Clock clock, MeterRegistry meterRegistry) {
+                       RateLimits rateLimits, Clock clock, MeterRegistry meterRegistry) {
         this.translator = translator;
         this.quota = quota;
         this.records = records;
+        this.rateLimits = rateLimits;
         this.clock = clock;
         for (TranslationDirection direction : TranslationDirection.values()) {
             Map<TranslationResult, Counter> byResult = new EnumMap<>(TranslationResult.class);
@@ -75,7 +87,8 @@ class TranslationService {
 
     /**
      * @throws ApiException 400 {@code VALIDATION_FAILED}, 422 {@code TRANSLATION_TOO_LONG}, 422 {@code TRANSLATION_REJECTED},
-     *                      429 {@code TRANSLATION_DAILY_LIMIT_EXCEEDED}, 503 {@code TRANSLATION_UNAVAILABLE}
+     *                      429 {@code RATE_LIMITED}, 429 {@code TRANSLATION_DAILY_LIMIT_EXCEEDED},
+     *                      503 {@code TRANSLATION_UNAVAILABLE}
      */
     TranslationResponse translate(AppUser user, @Nullable TranslationRequest request) {
         long started = System.nanoTime();
@@ -85,6 +98,9 @@ class TranslationService {
             throw new ApiException(ErrorCode.VALIDATION_FAILED, "text가 비어 있습니다.");
         }
         TranslationDirection direction = direction(request);
+        // 기록을 넘기는 어떤 끝보다 앞이다 - 분당 제한을 넘긴 요청까지 남기면 만료 없는 버킷에 요청 수만큼 객체가 쌓인다.
+        // 이 429의 수는 RateLimits의 지표가 센다.
+        rateLimits.check(RateLimits.Scope.TRANSLATION, user.id().toString());
         Attempt attempt = new Attempt(UUID.randomUUID(), requestedAt, started, user.id(), direction, text);
         String input = text.strip();
 
@@ -102,7 +118,9 @@ class TranslationService {
             slot = quota.acquire(user.id());
         } catch (TranslationQuota.Exhausted e) {
             finish(attempt, TranslationResult.LIMITED, null, null);
-            throw new ApiException(ErrorCode.TRANSLATION_DAILY_LIMIT_EXCEEDED);
+            throw e.callLimit()
+                    ? new ApiException(ErrorCode.TRANSLATION_DAILY_LIMIT_EXCEEDED, CALL_LIMIT_MESSAGE)
+                    : new ApiException(ErrorCode.TRANSLATION_DAILY_LIMIT_EXCEEDED);
         } catch (TranslationQuota.StoreUnavailable e) {
             finish(attempt, TranslationResult.LLM_FAILED, null, null);
             throw new ApiException(ErrorCode.TRANSLATION_UNAVAILABLE);

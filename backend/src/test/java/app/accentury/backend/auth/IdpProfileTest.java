@@ -14,7 +14,7 @@ class IdpProfileTest {
     @Test
     void 긴_이름은_글자_단위로_자르고_이상한_이메일과_긴_URL은_버린다() {
         IdpProfile profile = new IdpProfile(Provider.GOOGLE, "sub",
-                "no-at-sign", "가".repeat(60) + "😀", null, null, "  닉  ", "https://x/" + "a".repeat(1100));
+                "no-at-sign", "가".repeat(60) + "😀", null, "  닉  ", "https://x/" + "a".repeat(1100));
 
         assertNull(profile.email());
         assertEquals(50, profile.name().codePointCount(0, profile.name().length()));
@@ -24,7 +24,7 @@ class IdpProfileTest {
 
     @Test
     void 이모지를_반으로_자르지_않는다() {
-        IdpProfile profile = new IdpProfile(Provider.KAKAO, "sub", null, "😀".repeat(51), null, null, null, null);
+        IdpProfile profile = new IdpProfile(Provider.KAKAO, "sub", null, "😀".repeat(51), null, null, null);
 
         assertEquals("😀".repeat(50), profile.name());
     }

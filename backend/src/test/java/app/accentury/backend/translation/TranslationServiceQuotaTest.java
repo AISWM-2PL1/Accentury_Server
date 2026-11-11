@@ -1,8 +1,11 @@
 package app.accentury.backend.translation;
 
+import app.accentury.backend.PropertiesFixture;
 import app.accentury.backend.auth.AppUser;
+import app.accentury.backend.common.AccenturyProperties;
 import app.accentury.backend.common.ApiException;
 import app.accentury.backend.common.ErrorCode;
+import app.accentury.backend.common.RateLimits;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import org.junit.jupiter.api.Test;
 
@@ -23,9 +26,11 @@ import static org.mockito.Mockito.when;
 /**
  * 번역과 일일 한도 칸의 짝 (KAN-266, 명세서 §3.18) - 성공만 칸을 쓰고, 그 밖의 끝은 잡은 칸을 돌려주며, 카운터 저장소
  * 장애는 LLM 없이 503이다. Redis 장애는 API 테스트로 만들기 어렵다 - Redis가 죽으면 로그인부터 503이라 Access 토큰을 받을
- * 수 없다.
+ * 수 없다. 호출 수 상한과 분당 제한은 KAN-322다.
  */
 class TranslationServiceQuotaTest {
+
+    private static final int RATE_LIMIT = PropertiesFixture.defaults().translation().rateLimitPerMinute();
 
     private final UUID userId = UUID.randomUUID();
     private final FakeQuota quota = new FakeQuota();
@@ -33,7 +38,7 @@ class TranslationServiceQuotaTest {
     private final List<TranslationRecord> records = new CopyOnWriteArrayList<>();
     private Function<String, DialectTranslator.Reply> llm = DialectTranslator.Reply::translated;
 
-    private final TranslationService service = new TranslationService(new DialectTranslator() {
+    private final DialectTranslator translator = new DialectTranslator() {
         @Override
         public Reply translate(String text, TranslationDirection direction) {
             llmInputs.add(text);
@@ -44,7 +49,10 @@ class TranslationServiceQuotaTest {
         public String model() {
             return "fake-model";
         }
-    }, quota, records::add, Clock.systemUTC(), new SimpleMeterRegistry());
+    };
+
+    /** 칸과 호출 수의 규칙만 보는 서비스 - 분당 제한은 아래 전용 테스트가 실제 한도로 본다. */
+    private final TranslationService service = serviceWith(mock(RateLimits.class));
 
     @Test
     void 성공하면_칸을_돌려주지_않고_남은_수를_준다() {
@@ -98,16 +106,91 @@ class TranslationServiceQuotaTest {
     @Test
     void 소진이면_LLM_없이_429이고_LIMITED로_기록한다() {
         quota.used = 5;
-        assertCode(ErrorCode.TRANSLATION_DAILY_LIMIT_EXCEEDED, () -> translate("밥 먹었어?"));
+        ApiException limited = assertThrows(ApiException.class, () -> translate("밥 먹었어?"));
+        assertEquals(ErrorCode.TRANSLATION_DAILY_LIMIT_EXCEEDED, limited.code());
+        assertEquals(ErrorCode.TRANSLATION_DAILY_LIMIT_EXCEEDED.defaultMessage(), limited.getMessage());
 
         assertTrue(llmInputs.isEmpty());
         assertEquals(TranslationResult.LIMITED, records.get(0).result());
     }
 
+    @Test
+    void 거절이_연속으로_와도_칸은_그대로이고_호출_상한_다음은_LLM_없이_429다() {
+        llm = text -> DialectTranslator.Reply.of(DialectTranslator.Kind.REFUSED);
+        int limit = AccenturyProperties.Translation.DAILY_CALL_LIMIT;
+        for (int i = 0; i < limit; i++) {
+            assertCode(ErrorCode.TRANSLATION_REJECTED, () -> translate("심한 욕설이 들어간 문장"));
+        }
+        assertEquals(0, quota.used, "거절된 번역은 성공 칸을 쓰지 않는다");
+        assertEquals(limit, quota.calls, "호출 수는 돌려주지 않는다");
+
+        ApiException limited = assertThrows(ApiException.class, () -> translate("심한 욕설이 들어간 문장"));
+        assertEquals(ErrorCode.TRANSLATION_DAILY_LIMIT_EXCEEDED, limited.code());
+        assertEquals("오늘 번역 요청 횟수(20회)를 다 썼습니다. 내일 다시 시도해 주세요.", limited.getMessage(),
+                "성공이 5건 미만이니 「5회를 다 썼다」고 하지 않는다");
+
+        assertEquals(limit, llmInputs.size(), "상한 다음 요청은 LLM을 부르지 않는다");
+        assertEquals(TranslationResult.LIMITED, records.getLast().result());
+    }
+
+    @Test
+    void 분당_한도를_넘으면_칸도_기록도_LLM도_없이_429다() {
+        TranslationService limited = serviceWith(realRateLimits());
+        llm = text -> DialectTranslator.Reply.of(DialectTranslator.Kind.REFUSED);
+        for (int i = 0; i < RATE_LIMIT; i++) {
+            assertCode(ErrorCode.TRANSLATION_REJECTED, () -> translate(limited, "밥 먹었어?"));
+        }
+        records.clear();
+        llmInputs.clear();
+        int acquired = quota.acquired;
+
+        assertCode(ErrorCode.RATE_LIMITED, () -> translate(limited, "밥 먹었어?"));
+
+        assertTrue(llmInputs.isEmpty());
+        assertTrue(records.isEmpty(), "분당 제한을 넘긴 요청은 기록하지 않는다");
+        assertEquals(acquired, quota.acquired);
+    }
+
+    @Test
+    void 분당_제한은_길이_초과도_세어_기록이_쌓이지_않게_한다() {
+        TranslationService limited = serviceWith(realRateLimits());
+        for (int i = 0; i < RATE_LIMIT; i++) {
+            assertCode(ErrorCode.TRANSLATION_TOO_LONG, () -> translate(limited, "가".repeat(101)));
+        }
+        records.clear();
+
+        assertCode(ErrorCode.RATE_LIMITED, () -> translate(limited, "가".repeat(101)));
+
+        assertTrue(records.isEmpty());
+    }
+
+    @Test
+    void 형식이_틀린_요청은_분당_제한을_쓰지_않는다() {
+        TranslationService limited = serviceWith(realRateLimits());
+        for (int i = 0; i <= RATE_LIMIT; i++) {
+            assertCode(ErrorCode.VALIDATION_FAILED, () -> translate(limited, "   "));
+        }
+
+        assertEquals(4, translate(limited, "밥 먹었어?").remaining());
+    }
+
+    private TranslationService serviceWith(RateLimits rateLimits) {
+        return new TranslationService(translator, quota, records::add, rateLimits, Clock.systemUTC(),
+                new SimpleMeterRegistry());
+    }
+
+    private static RateLimits realRateLimits() {
+        return new RateLimits(PropertiesFixture.defaults(), new SimpleMeterRegistry());
+    }
+
     private TranslationResponse translate(String text) {
+        return translate(service, text);
+    }
+
+    private TranslationResponse translate(TranslationService target, String text) {
         AppUser user = mock(AppUser.class);
         when(user.id()).thenReturn(userId);
-        return service.translate(user, new TranslationRequest(text, null));
+        return target.translate(user, new TranslationRequest(text, null));
     }
 
     private static void assertCode(ErrorCode expected, Runnable call) {
@@ -120,6 +203,7 @@ class TranslationServiceQuotaTest {
 
         int used;
         int acquired;
+        int calls;
         boolean down;
         final List<Slot> released = new ArrayList<>();
 
@@ -128,10 +212,14 @@ class TranslationServiceQuotaTest {
             if (down) {
                 throw new StoreUnavailable("down");
             }
-            if (used >= 5) {
+            if (used >= AccenturyProperties.Translation.DAILY_LIMIT) {
                 throw new Exhausted();
             }
+            if (calls >= AccenturyProperties.Translation.DAILY_CALL_LIMIT) {
+                throw new Exhausted(true);
+            }
             acquired++;
+            calls++;
             return new Slot("trq:test", ++used);
         }
 
@@ -143,7 +231,7 @@ class TranslationServiceQuotaTest {
 
         @Override
         public int remaining(Slot slot) {
-            return Slot.remainingAfter(used);
+            return Math.min(Slot.remainingAfter(used), Slot.callsRemainingAfter(calls));
         }
     }
 }

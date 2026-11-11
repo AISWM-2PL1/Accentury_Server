@@ -24,7 +24,7 @@ CloudFront 앞단 WAF 웹 ACL(KAN-149, KAN-244)과 전송 구간, 엣지 보안 
 
 | 우선순위 | 규칙 | 하는 일 | 예외 |
 | --- | --- | --- | --- |
-| 10 | `rate-limit-costly-posts` | IP당 5분 창에 `POST /v0/sessions` + 음성 업로드 두 경로(`POST …/recording`, `POST …/recordings`) + `POST …/feedback` 합산 `waf_rate_limit`건 초과 시 429 | 폴링, 어휘 답안, 단어 학습, 정적 자산은 세지 않음 |
+| 10 | `rate-limit-costly-posts` | IP당 5분 창에 `POST /v0/sessions` + 음성 업로드 두 경로(`POST …/recording`, `POST …/recordings`) + `POST …/feedback` + `POST /v0/translations` 합산 `waf_rate_limit`건 초과 시 429 | 폴링, 어휘 답안, 단어 학습, 정적 자산은 세지 않음 |
 | 15 | `rate-limit-auth` | IP당 5분 창에 `POST /v0/auth/login` + `POST /v0/auth/refresh` 합산 `waf_auth_rate_limit`건 초과 시 429 (KAN-244) | 다른 메서드는 세지 않음 |
 | 16 | `rate-limit-admin` | IP당 5분 창에 `/admin/` 아래 요청 `waf_admin_rate_limit`건 초과 시 429 (KAN-244) | 없음 (메서드 무관) |
 | 20 | `aws-common` | `AWSManagedRulesCommonRuleSet` (본문 8KB 상한, XSS, LFI/RFI, 경로 조작 등. SQLi 규칙은 이 그룹에 없음) | 본문 규칙 5개(`SizeRestrictions_BODY`, `CrossSiteScripting_BODY`, `GenericLFI_BODY`, `GenericRFI_BODY`, `EC2MetaDataSSRF_BODY`)만 Count로 바꿔 라벨만 남김. 나머지 검사는 모든 경로에 그대로 |
@@ -152,6 +152,9 @@ fields @timestamp, @message
   검사가 multipart 파싱 뒤(컨트롤러 인자 해석)에 돌아 미인증 홍수도 backend가 본문을 받아 버린다.
   별도 규칙으로 나누지 않고 임계값을 올리는 쪽을 골랐다 (2026-10-30 결정) - 규칙 수와 변수를 늘리지
   않는 대신, 같은 IP의 학습 홍수가 레벨테스트 몫을 깎을 수 있다는 점은 받아들였다.
+- 번역(`POST /v0/translations`, KAN-322)을 같은 규칙에 세는 이유: 건마다 프로젝트 몫 Gemini 무료 한도를 쓰고,
+  backend의 제한은 계정 단위라 계정을 바꿔 가며 두드리는 IP 홍수를 막지 못한다. 정상 사용은 계정당 하루 5건이라
+  공유 Wi-Fi 몫에 거의 더해지지 않아 임계값은 400 그대로다.
 - backend가 먼저 잡는 층: 레벨테스트 업로드와 세션 생성은 IP당 분당 30(5분 150), 억양 학습 업로드는
   IP당 분당 60(5분 300, `UploadRateLimitFilter`, KAN-299)이라 보통의 초과는 backend가 먼저 잡아 정식
   429 봉투를 낸다. backend 한도는 태스크별이라 태스크 수만큼 풀리고, WAF는 400에서 태스크 수와 무관하게

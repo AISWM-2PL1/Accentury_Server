@@ -24,7 +24,8 @@ class AuthServiceUnderAgeTest {
     void IdP_생년월일이_만_14세_미만이면_저장_전에_400이다() {
         LocalDate thirteen = LocalDate.now(UserService.ZONE).minusYears(14).plusDays(1);
         AuthService service = new AuthService(verifiersGiving(thirteen), null, null, null,
-                new RateLimits(PropertiesFixture.defaults(), new SimpleMeterRegistry()), null, PropertiesFixture.defaults());
+                new RateLimits(PropertiesFixture.defaults(), new SimpleMeterRegistry()), null, null,
+                PropertiesFixture.defaults());
 
         ApiException e = assertThrows(ApiException.class, () -> service.login(
                 new LoginRequest("KAKAO", null, "kakao-token", null, null, null, true,
@@ -48,7 +49,7 @@ class AuthServiceUnderAgeTest {
 
             @Override
             public IdpProfile verify(IdpCredential credential) {
-                return new IdpProfile(provider, "child-sub", null, null, birthDate, null, null, null);
+                return new IdpProfile(provider, "child-sub", null, null, birthDate, null, null);
             }
         };
     }

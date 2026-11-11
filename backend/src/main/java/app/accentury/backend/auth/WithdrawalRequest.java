@@ -7,8 +7,11 @@ import org.jspecify.annotations.Nullable;
  *
  * @param appleAuthorizationCode 애플 계정만 - 탈퇴 직전 애플 로그인으로 받은 authorization code. 서버가 교환해 애플
  *                               토큰을 revoke한다 ({@link AppleTokenRevoker}). 다른 IdP 계정이 보내면 무시한다.
+ * @param naverRefreshToken      네이버 계정만 - 네이버 SDK가 가진 refresh token (로그인 때 보내는 것과 같은 값). 서버가
+ *                               교환해 네이버 토큰을 삭제한다 ({@link IdpUnlinker}, KAN-343). 다른 IdP 계정이 보내면
+ *                               무시한다.
  */
-record WithdrawalRequest(@Nullable String appleAuthorizationCode) {
+record WithdrawalRequest(@Nullable String appleAuthorizationCode, @Nullable String naverRefreshToken) {
 
     @Override
     public String toString() {

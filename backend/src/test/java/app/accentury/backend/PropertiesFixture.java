@@ -146,7 +146,7 @@ public final class PropertiesFixture {
                 new AccenturyProperties.Learning(60, 20, 60, "sv-0.5", 90),
                 // 번역 키와 기록 버킷 없음 - 기본 상태다 (KAN-266). 번역은 503이고 기록 코드가 돌지 않는다.
                 new AccenturyProperties.Translation(null, AccenturyProperties.Translation.DEFAULT_MODEL,
-                        "https://generativelanguage.googleapis.com", Duration.ofSeconds(10), null, null),
+                        "https://generativelanguage.googleapis.com", Duration.ofSeconds(10), null, null, 6),
                 trustedProxies);
     }
 }

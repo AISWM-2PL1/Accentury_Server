@@ -217,7 +217,7 @@ class AuthApiTest extends IntegrationTest {
     // === 프로필 (§3.10, §3.11) ===
 
     @Test
-    void 다섯_항목을_채우면_COMPLETE가_되고_내_정보에서도_그렇다() throws Exception {
+    void 항목을_다_채우면_COMPLETE가_되고_내_정보에서도_그렇다() throws Exception {
         String access = body(login("KAKAO", uniqueSub(), true)).get("accessToken").asString();
 
         putProfile(access, profile())
@@ -252,9 +252,81 @@ class AuthApiTest extends IntegrationTest {
         assertEquals(firstCompletedAt, users.findById(userId).orElseThrow().profileCompletedAt());
     }
 
+    // 성별은 선택 항목이다 (KAN-328, App Store 심사 지침 5.1.1(v)) - 빼도, null로 보내도 프로필이 완료된다.
     @ParameterizedTest
-    @ValueSource(strings = {"email", "name", "birthDate", "gender", "region"})
-    void 한_항목이라도_빠지면_400이고_완료되지_않는다(String missing) throws Exception {
+    @ValueSource(booleans = {true, false})
+    void 성별_없이_저장해도_COMPLETE이고_세션을_만들_수_있다(boolean explicitNull) throws Exception {
+        JsonNode login = body(login("KAKAO", uniqueSub(), true));
+        String access = login.get("accessToken").asString();
+        UUID userId = UUID.fromString(login.get("user").get("id").asString());
+        Map<String, Object> request = profile();
+        if (explicitNull) {
+            request.put("gender", null);
+        } else {
+            request.remove("gender");
+        }
+
+        putProfile(access, request)
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.profileStatus").value("COMPLETE"))
+                .andExpect(jsonPath("$.user.gender").doesNotExist())
+                .andExpect(jsonPath("$.user.region").value("GYEONGNAM"));
+        me(access).andExpect(jsonPath("$.profileStatus").value("COMPLETE"));
+
+        AppUser saved = users.findById(userId).orElseThrow();
+        assertNull(saved.gender());
+        assertNotNull(saved.profileCompletedAt());
+        // 403 AUTH_PROFILE_INCOMPLETE가 아니다 - 성별이 없어도 테스트를 시작한다.
+        mockMvc.perform(post("/v0/sessions").header(HttpHeaders.AUTHORIZATION, "Bearer " + access))
+                .andExpect(status().isCreated());
+    }
+
+    // PUT은 화면 전체를 보내는 교체다 (§3.10) - 빠진 gender도 null과 같이 「선택 안 함」이라 있던 성별을 지운다.
+    @ParameterizedTest
+    @ValueSource(booleans = {true, false})
+    void 성별이_있던_계정이_성별을_빼거나_null로_다시_보내면_지워지고_COMPLETE는_그대로다(boolean explicitNull)
+            throws Exception {
+        JsonNode login = body(login("KAKAO", uniqueSub(), true));
+        String access = login.get("accessToken").asString();
+        UUID userId = UUID.fromString(login.get("user").get("id").asString());
+        putProfile(access, profile()).andExpect(jsonPath("$.user.gender").value("MALE"));
+
+        Map<String, Object> cleared = profile();
+        if (explicitNull) {
+            cleared.put("gender", null);
+        } else {
+            cleared.remove("gender");
+        }
+        putProfile(access, cleared)
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.profileStatus").value("COMPLETE"))
+                .andExpect(jsonPath("$.user.gender").doesNotExist());
+
+        assertNull(users.findById(userId).orElseThrow().gender());
+    }
+
+    @Test
+    void 성별_없이_완료한_계정은_재로그인_뒤에도_성별이_비어_있다() throws Exception {
+        String sub = uniqueSub();
+        JsonNode first = body(login("KAKAO", sub, true));
+        String access = first.get("accessToken").asString();
+        UUID userId = UUID.fromString(first.get("user").get("id").asString());
+        Map<String, Object> request = profile();
+        request.put("gender", null);
+        putProfile(access, request).andExpect(jsonPath("$.profileStatus").value("COMPLETE"));
+
+        login("KAKAO", sub, false)
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.isNewUser").value(false))
+                .andExpect(jsonPath("$.profileStatus").value("COMPLETE"))
+                .andExpect(jsonPath("$.user.gender").doesNotExist());
+
+        assertNull(users.findById(userId).orElseThrow().gender());
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"email", "name", "birthDate", "region"})
+    void 필수_항목이_하나라도_빠지면_400이고_완료되지_않는다(String missing) throws Exception {
         String access = body(login("KAKAO", uniqueSub(), true)).get("accessToken").asString();
         Map<String, Object> request = profile();
         request.remove(missing);
@@ -281,6 +353,13 @@ class AuthApiTest extends IntegrationTest {
                     .andExpect(status().isBadRequest())
                     .andExpect(jsonPath("$.code").value("VALIDATION_FAILED"));
         }
+        // 성별은 빼거나 null이면 받지만, 빈 문자열은 값을 보낸 것이라 400이다 (KAN-328).
+        Map<String, Object> blankGender = profile();
+        blankGender.put("gender", "");
+        putProfile(access, blankGender)
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("VALIDATION_FAILED"));
+        me(access).andExpect(jsonPath("$.profileStatus").value("INCOMPLETE"));
         Map<String, Object> future = profile();
         future.put("birthDate", LocalDate.now(ZoneId.of("Asia/Seoul")).plusDays(1).toString());
         putProfile(access, future).andExpect(status().isBadRequest());
@@ -572,6 +651,40 @@ class AuthApiTest extends IntegrationTest {
         me(login.get("accessToken").asString()).andExpect(status().isUnauthorized());
     }
 
+    /**
+     * 탈퇴는 제공자 쪽 연결도 끊으려 한다 (KAN-343). 테스트 설정에는 어드민 키와 네이버 Client 값이 없어 실제 호출은
+     * 나가지 않고, 탈퇴가 그 제공자의 해제 경로를 탔다는 것만 로그로 본다. 호출 자체는 {@link IdpUnlinkerTest}가 본다.
+     */
+    @Test
+    void 카카오와_네이버_계정은_연결_해제를_시도하고_미설정이면_WARN만_남기고_탈퇴한다(CapturedOutput output) throws Exception {
+        JsonNode kakao = body(login("KAKAO", uniqueSub(), true));
+        JsonNode naver = body(login("NAVER", uniqueSub(), true));
+
+        withdraw(kakao.get("accessToken").asString(), null).andExpect(status().isNoContent());
+        withdraw(naver.get("accessToken").asString(), Map.of("naverRefreshToken", "naver-refresh-value"))
+                .andExpect(status().isNoContent());
+
+        // 응답이 먼저다 - 연결 해제는 전용 실행기에서 뒤에 돈다 (PR #70 리뷰). 그래서 로그는 기다려서 본다.
+        me(kakao.get("accessToken").asString()).andExpect(status().isUnauthorized());
+        me(naver.get("accessToken").asString()).andExpect(status().isUnauthorized());
+        awaitLog(output, "카카오 연결 해제 건너뜀 - 미설정 userId=" + kakao.get("user").get("id").asString());
+        awaitLog(output, "네이버 연결 해제 건너뜀 - 미설정 userId=" + naver.get("user").get("id").asString());
+        assertFalse(output.getOut().contains("naver-refresh-value"), "네이버 토큰은 로그에 남기지 않는다");
+        // 로그 줄의 스레드 이름이 전용 실행기의 것이다 (왼쪽을 공백으로 채워 찍으므로 이름만 본다).
+        assertTrue(output.getOut().contains("idp-unlink-"), "연결 해제는 요청 스레드가 아니라 전용 실행기에서 돈다");
+    }
+
+    @Test
+    void 구글_계정의_탈퇴는_제공자_호출이_없다(CapturedOutput output) throws Exception {
+        JsonNode google = body(login("GOOGLE", uniqueSub(), true));
+
+        withdraw(google.get("accessToken").asString(), null).andExpect(status().isNoContent());
+
+        String userId = google.get("user").get("id").asString();
+        assertTrue(output.getOut().contains("탈퇴 userId=" + userId + " provider=GOOGLE"));
+        assertFalse(output.getOut().contains("연결 해제 건너뜀 - 미설정 userId=" + userId));
+    }
+
     @Test
     void 로그아웃과_새_로그인은_사용자_색인을_정리한다() throws Exception {
         String sub = uniqueSub();
@@ -775,6 +888,17 @@ class AuthApiTest extends IntegrationTest {
                 .header(HttpHeaders.AUTHORIZATION, "Bearer " + access)
                 .contentType(MediaType.APPLICATION_JSON)
                 .content(objectMapper.writeValueAsString(Map.of("refreshToken", refreshToken))));
+    }
+
+    /** 비동기로 남는 로그를 기다린다 - 넘으면 실패다. */
+    private static void awaitLog(CapturedOutput output, String expected) throws InterruptedException {
+        long deadline = System.nanoTime() + java.time.Duration.ofSeconds(5).toNanos();
+        while (!output.getOut().contains(expected)) {
+            if (System.nanoTime() > deadline) {
+                throw new AssertionError("로그가 남지 않았다: " + expected);
+            }
+            Thread.sleep(20);
+        }
     }
 
     private ResultActions withdraw(String access, Map<String, Object> request) throws Exception {

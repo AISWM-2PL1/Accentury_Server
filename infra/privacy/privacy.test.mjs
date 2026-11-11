@@ -172,6 +172,12 @@ test('1항 표의 보유 기간이 행마다 코드와 맞는다', () => {
     ['테스트 세션', ['30분', '완료', '24시간'], 'session/SessionService.java, TestSession.java'],
     // 계정은 탈퇴까지 (KAN-223 V2__app_user.sql, 탈퇴는 KAN-241). 정리 잡이 없으므로 기간이 아니라 사건이 기준이다.
     ['계정 (앱)', ['탈퇴'], 'auth/AppUser.java, V2__app_user.sql'],
+    // 게스트 계정은 Refresh가 전부 만료되면(30일 동안 회전 없음) 정리 잡이 6시간마다 걷어 간다 (KAN-329).
+    ['게스트 계정 (앱)', ['30일', '하루 안에'], 'auth/GuestAccountRetention.java, application.yml auth.refresh-token-ttl'],
+    // 게스트 발급 상한의 Redis 카운터는 다음 날 KST 01시에 만료된다 (KAN-329).
+    ['게스트 계정 발급 횟수 (앱)', ['다음 날 오전 1시'], 'auth/GuestQuota.java EXPIRE_AT'],
+    // 번역 신고는 1년 뒤 정리 잡이 지운다 (KAN-343, AccenturyProperties.Translation.REPORT_RETENTION).
+    ['번역 신고 기록 (앱)', ['1년'], 'AccenturyProperties.Translation.REPORT_RETENTION, TranslationReportRetention.java'],
     // Refresh 토큰 수명 (application.yml auth.refresh-token-ttl: 30d, RefreshTokens의 Redis TTL).
     ['로그인 토큰', ['30일', '로그아웃'], 'application.yml auth.refresh-token-ttl, auth/RefreshTokens.java'],
     ['테스트 결과와 어휘 답안', ['24시간'], 'application.yml analysis.retention: 24h'],
@@ -687,6 +693,11 @@ test('사투리 번역기 절이 있고 구글 전송, 보관 항목, 장소, �
   assert.ok(translator.includes('서버 운영 로그에 남기지 않습니다'), '로그에 텍스트를 남기지 않는다는 말이 없다');
   assert.ok(translator.includes('Amazon S3') && translator.includes('ap-northeast-2'), '보관 장소가 없다');
   assert.ok(translator.includes('기간 제한 없이 보관'), '보유 기간이 없다 (만료 없음)');
+  // 횟수 제한 (KAN-322, RedisTranslationQuota). 호출 수는 번역이 안 된 요청까지 세므로 번역된 횟수만 적으면 거짓 고지다.
+  for (const item of ['하루 5번까지', '번역이 된 경우만', '하루 20번까지', '짧은 시간에 요청이 몰리면', '그날 번역 서버에 보낸 요청 횟수']) {
+    assert.ok(translator.includes(item), `사투리 번역기 절의 횟수 제한에 「${item}」이 없다`);
+  }
+  assert.ok(html.replace(/\s+/g, ' ').includes('그날 번역된 횟수, 그날 번역 서버에 보낸 요청 횟수</td>'), '1항 표에 호출 수 보관이 없다');
 
   const provision = section('<h2>2. 개인정보의 제3자 제공', '<h2>3. 개인정보 처리의 위탁').replace(/\s+/g, ' ');
   assert.ok(provision.includes('Google LLC (Gemini API)'), '2항에 Gemini API 제공이 없다');
@@ -744,6 +755,18 @@ test('1항에 계정 절이 있고 수집 항목과 목적과 보유 기간을 �
   }
   assert.ok(account.includes('탈퇴하실 때까지'), '계정 절에 보유 기간(탈퇴까지)이 없다');
   assert.ok(account.includes('만 14세 미만 가입 제한'), '생년월일의 목적(만 14세 미만 가입 제한)이 없다');
+  // 성별은 선택 항목이다 (KAN-328) - 프로필 완료 판정(AppUser.hasAllProfileFields)이 성별을 보지 않는다.
+  // 「성별을 채워야 시작한다」가 남으면 필수가 아닌 항목을 필수로 고지하는 것이다.
+  assert.ok(account.includes('성별 (선택 항목)'), '계정 절의 성별에 선택 항목 표기가 없다');
+  assert.ok(account.includes('이메일, 이름, 생년월일, 출신 지역을 모두 채워야 테스트를 시작할 수 있습니다'),
+    '계정 절에 테스트 시작에 필요한 필수 네 항목이 없다');
+  assert.ok(account.includes('성별은 선택 항목이라 입력하지 않으셔도 테스트를 시작할 수 있습니다'),
+    '계정 절에 성별 없이도 테스트를 시작할 수 있다는 문장이 없다');
+  assert.ok(!account.includes('생년월일, 성별, 출신 지역을 모두 채워야'), '성별을 필수로 적은 옛 문장이 남아 있다');
+  // 로그인 제공자가 준 성별은 저장하지 않는다 (KAN-328 리뷰 반영) - IdpProfile에 성별 자리가 없다.
+  assert.ok(account.includes('성별은 고르신 경우에만 저장하고, 로그인 제공자가 성별을 주더라도 그 값은 쓰지 않습니다'),
+    '계정 절에 로그인 제공자의 성별을 쓰지 않는다는 문장이 없다');
+  assert.ok(!account.includes('이메일, 이름, 생년월일, 성별은 로그인 제공자가 주면'), '제공자의 성별을 쓴다는 옛 문장이 남아 있다');
   // 앱 세션은 계정에 붙지만 24시간 규칙은 같다. 로그에 세션과 계정의 대응을 남기지 않는 것은
   // SessionService의 「세션 생성」 로그가 지킨다 (AuthApiTest의 세션 생성 로그 검사).
   assert.ok(account.includes('계정에 지난 테스트 결과가 쌓이지 않습니다'), '계정 세션의 보유 기간 서술이 없다');
@@ -756,6 +779,85 @@ test('1항에 계정 절이 있고 수집 항목과 목적과 보유 기간을 �
   assert.ok(account.includes('어느 세션이 어느 계정의 것인지를 남기지 않습니다'), '로그의 세션-계정 대응 미기록 문구가 없다');
 });
 
+test('1항에 게스트 계정 절이 있고 쓸 수 있는 기능, 두는 정보, 자동 파기, 발급 횟수가 코드와 맞는다 (KAN-329)', () => {
+  assert.ok(html.includes('<h3>게스트 계정 (앱)</h3>'), '1항 아래 「게스트 계정 (앱)」 절이 없다');
+  const guest = section('<h3>게스트 계정 (앱)</h3>', '<h3>익명 통계</h3>').replace(/\s+/g, ' ');
+  // 게스트는 사투리 번역기만 쓴다 (@AuthenticatedUser(allowGuest = true)는 번역, 내 계정, 로그아웃, 탈퇴뿐이다).
+  assert.ok(guest.includes('게스트 계정으로는 사투리 번역기만 쓰실 수 있으며'), '게스트가 쓸 수 있는 기능이 없다');
+  // AppUser.guest가 채우는 것은 식별자와 동의 기록뿐이다. 발급 요청(GuestRequest)도 동의 두 필드만 받는다.
+  assert.ok(guest.includes('이 방침에 대한 동의를 받고'), '게스트 발급 때 동의를 받는다는 문장이 없다');
+  for (const item of ['계정 식별자', '방침 동의 시각', '방침 버전']) {
+    assert.ok(guest.includes(item), `게스트 계정 절에 「${item}」이 없다`);
+  }
+  assert.ok(guest.includes('이메일, 이름, 생년월일, 성별, 출신 지역은 받지 않으며'), '게스트가 받지 않는 항목이 없다');
+  // 게스트 토큰은 세션에 귀속되지 않는다 (AccountTokens.forSession이 403).
+  assert.ok(guest.includes('게스트 계정은 테스트 세션에 연결되지 않습니다'), '게스트와 테스트 세션의 관계가 없다');
+  // GuestAccountRetention - Refresh가 전부 만료된 게스트를 6시간마다 탈퇴와 같은 절차로 지운다.
+  assert.ok(guest.includes('30일 동안 이용하지 않으시면'), '게스트 계정의 파기 조건(30일 미이용)이 없다');
+  assert.ok(guest.includes('하루 안에 게스트 계정을 탈퇴와 같은 방법으로 자동 파기합니다'), '게스트 계정의 자동 파기가 없다');
+  assert.ok(guest.includes('연결 기록도 이때 함께 지웁니다'), '게스트 파기 때 번역 연결 기록을 지운다는 문장이 없다');
+  // GuestQuota - 키에 IP 원문이 아니라 서버 비밀값으로 낸 HMAC-SHA256을 두고 다음 날 KST 01시에 만료한다.
+  assert.ok(guest.includes('접속 IP 주소의 해시값'), '게스트 발급 횟수의 키가 IP 해시라는 것이 없다');
+  assert.ok(guest.includes('IP 주소 원문은 이 기록에 두지 않습니다'), 'IP 원문을 두지 않는다는 문장이 없다');
+  assert.ok(guest.includes('다음 날 오전 1시(한국 시간)에 자동으로 삭제합니다'), '게스트 발급 횟수의 삭제 시각이 없다');
+  // 방침은 발급 상한의 숫자를 적지 않는다 - 숫자가 들어가면 AccenturyProperties.Auth.GUEST_DAILY_LIMIT_PER_IP와 묶어야 한다.
+  assert.ok(!/하루(에)? ?10(개|번|회)/.test(guest), '게스트 발급 상한의 숫자가 방침에 들어왔다 - 상수와 묶는 검사를 더한다');
+
+  const flat = html.replace(/\s+/g, ' ');
+  // 번역기는 게스트 계정으로도 쓴다 - 「로그인해 이용하는 앱에서만」이 남으면 게스트의 번역 전송이 고지에서 빠진다.
+  assert.ok(flat.includes('사투리 번역기는 로그인해 이용하는 앱에서 로그인한 계정이나 게스트 계정으로 쓸 수 있습니다'),
+    '번역기 절이 게스트 계정을 적지 않는다');
+  assert.ok(flat.includes('게스트 계정의 연결 기록은 게스트 계정이 파기될 때 함께 지웁니다'), '번역기 절에 게스트 연결 기록의 파기가 없다');
+  // 5, 6, 7, 12항.
+  assert.ok(flat.includes('게스트 계정: 30일 동안 이용하지 않으시면 그때부터 하루 안에 자동으로 파기합니다'), '5항에 게스트 계정의 파기가 없다');
+  assert.ok(flat.includes('게스트 계정 발급 횟수: 다음 날 오전 1시(한국 시간)에 자동으로 사라집니다'), '5항에 게스트 발급 횟수의 파기가 없다');
+  assert.ok(flat.includes('요청을 받아 삭제하는 대신'), '6항에 게스트 계정의 권리 행사 방법이 없다');
+  assert.ok(flat.includes('게스트 계정은 생년월일을 받지 않아 나이를 확인하지 않으며'), '7항에 게스트 계정의 나이 확인이 없다');
+  assert.ok(flat.includes('게스트 계정은 로그인 화면에서 「로그인 없이 둘러보기」를 고르실 때 이 방침에 대한 동의를 받습니다'),
+    '12항에 게스트 계정의 동의 방식이 없다');
+});
+
+test('탈퇴 경로가 앱 안이고 제공자 연결 해제와 번역 신고 기록이 코드와 맞는다 (KAN-343)', () => {
+  const flat = html.replace(/\s+/g, ' ');
+  // 앱 안 탈퇴(KAN-241, 앱 KAN-251)가 나온 뒤에도 「준비 중」이 남으면 있는 기능을 없다고 고지하는 것이다.
+  assert.ok(!flat.includes('탈퇴하는 기능은 준비하고 있습니다'), '6항에 「준비 중」 문구가 남아 있다');
+  assert.ok(!flat.includes('앱 안의 탈퇴 기능이 나오기 전까지는'), '5항에 「탈퇴 기능이 나오기 전까지」가 남아 있다');
+  const rights = section('<h2>6. 정보주체의 권리', '<h2>7. 만 14세 미만').replace(/\s+/g, ' ');
+  assert.ok(rights.includes('탈퇴는 앱 안에서 바로 하실 수 있습니다'), '6항에 앱 안 탈퇴가 없다');
+  assert.ok(rights.includes('「설정」 화면에서 「계정」 아래의 「회원 탈퇴」'), '6항에 앱 안 탈퇴 경로가 없다');
+  // 이메일 요청은 앱을 쓸 수 없는 경우의 대안으로 남는다.
+  assert.ok(rights.includes('앱을 쓰실 수 없는 경우에는'), '6항에 이메일 요청 대안이 없다');
+  // WithdrawalService - 애플은 revoke, 카카오와 네이버는 IdpUnlinker. 네이버는 앱이 토큰을 실어야 하고 구글은 대상이 아니다.
+  assert.ok(rights.includes('카카오와 애플로 로그인하신 계정은 탈퇴하실 때'), '6항에 카카오와 애플의 연결 해제가 없다');
+  assert.ok(rights.includes('네이버로 로그인하신 계정은 앱이 탈퇴 요청에 네이버 로그인 정보를 함께 보내는 버전부터'),
+    '6항에 네이버 연결 해제의 조건이 없다');
+  assert.ok(rights.includes('구글로 로그인하신 계정은 각 제공자의 계정 설정에서 직접'), '6항에 구글 계정의 안내가 없다');
+
+  // 번역 신고 - TranslationReports(V19)의 열과 TranslationReportSlackNotifier가 보내는 값.
+  const translator = section('<h3>사투리 번역기 (앱)</h3>', '<h3>억양 학습 (앱)</h3>').replace(/\s+/g, ' ');
+  for (const item of ['원문과 번역 결과', '번역 방향', '신고 시각', '계정 식별자']) {
+    assert.ok(translator.includes(item), `번역기 절의 신고 기록에 「${item}」이 없다`);
+  }
+  assert.ok(translator.includes('신고한 때로부터 1년이 지나면 정리 작업이 삭제합니다'), '번역 신고의 보유 기간이 없다');
+  assert.ok(translator.includes('신고 기록에서 계정 식별자를 지우며'), '탈퇴 시 신고의 계정 연결을 끊는다는 문장이 없다');
+  assert.ok(translator.includes('채널로는 계정 식별자의 앞자리만 보냅니다'), '슬랙으로 가는 계정 식별자의 범위가 없다');
+  assert.ok(translator.includes('신고하지 않으시면 이 기록은 남지 않습니다'), '신고하지 않으면 남지 않는다는 문장이 없다');
+  // 보유 기간은 코드 상수와 같아야 한다 - 상수를 바꾸면 방침의 「1년」도 함께 고친다.
+  const source = readFileSync(join(HERE, '../../backend/src/main/java/app/accentury/backend/common/AccenturyProperties.java'), 'utf8');
+  assert.ok(source.includes('REPORT_RETENTION = Duration.ofDays(365);'), '번역 신고 보존 기간 상수가 365일이 아니다');
+  // 4항 - 신고가 슬랙으로 간다.
+  const transfer = section('<h2>4. 개인정보의 국외 이전', '<h2>5. 개인정보의 파기').replace(/\s+/g, ' ');
+  assert.ok(transfer.includes('번역 결과를 신고하신 경우에도 신고하신 원문과 번역 결과가 같은 채널로 전달됩니다'),
+    '4항에 번역 신고의 국외 이전이 없다');
+  assert.ok(transfer.includes('번역 신고는 신고하신 원문과 번역 결과, 번역 방향, 계정 식별자의 앞자리'), '4항 이전 항목에 번역 신고가 없다');
+  // 5항.
+  const disposal = section('<h2>5. 개인정보의 파기', '<h2>6. 정보주체의 권리').replace(/\s+/g, ' ');
+  assert.ok(disposal.includes('번역 신고 기록: 신고한 때로부터 1년이 지나면 정리 작업이 삭제합니다'), '5항에 번역 신고의 파기가 없다');
+  assert.ok(disposal.includes('탈퇴는 앱 안에서 하실 수 있고'), '5항의 계정 파기에 앱 안 탈퇴가 없다');
+  // 선택 동의 음성과 연결 기록은 탈퇴 뒤에도 남는다 (KAN-269, 2026-11-10 유지 결정) - 이 문장이 사라지면 코드와 어긋난다.
+  assert.ok(flat.includes('식별자만 들어 있고, 탈퇴하신 뒤에도 남습니다'), '1항에 연결 기록이 탈퇴 뒤에도 남는다는 문장이 없다');
+});
+
 test('3항에 로그인 제공자 넷과 받는 정보, 애플 전달용 이메일이 있다 (KAN-240, auth/*IdpVerifier.java)', () => {
   const idp = section('<h3>소셜 로그인 제공자로부터 받는 정보</h3>', '<h2>4. 개인정보의 국외 이전');
   for (const provider of ['구글', '카카오', '네이버', '애플']) {
@@ -763,6 +865,11 @@ test('3항에 로그인 제공자 넷과 받는 정보, 애플 전달용 이메�
   }
   assert.ok(idp.includes('privaterelay.appleid.com'), '애플 전달용 이메일 설명이 없다');
   assert.ok(idp.includes('휴대전화 번호는 받더라도 저장하지 않습니다'), '네이버 휴대전화 번호 미저장 문구가 없다');
+  // 카카오와 네이버의 성별은 받더라도 저장하지 않는다 (KAN-328 리뷰 반영) - 표의 받는 정보에 성별을 적지 않는다.
+  const flatIdp = idp.replace(/\s+/g, ' ');
+  assert.ok(flatIdp.includes('카카오와 네이버는 이용자가 허용하시면 성별도 주지만, 저희는 그 값을 저장하지 않습니다'),
+    '3항에 카카오와 네이버 성별 미저장 문구가 없다');
+  assert.ok(!/<td>[^<]*성별[^<]*<\/td>/.test(idp), '3항 제공자 표의 받는 정보에 성별이 남아 있다');
 });
 
 test('5, 6, 7, 12항이 계정 기준으로 다시 쓰였다 (KAN-240)', () => {

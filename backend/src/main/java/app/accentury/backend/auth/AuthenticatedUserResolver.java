@@ -1,5 +1,7 @@
 package app.accentury.backend.auth;
 
+import app.accentury.backend.common.ApiException;
+import app.accentury.backend.common.ErrorCode;
 import org.jspecify.annotations.Nullable;
 import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.core.MethodParameter;
@@ -44,6 +46,12 @@ class AuthenticatedUserResolver implements HandlerMethodArgumentResolver {
     @Override
     public AppUser resolveArgument(MethodParameter parameter, @Nullable ModelAndViewContainer mavContainer,
                                    NativeWebRequest webRequest, @Nullable WebDataBinderFactory binderFactory) {
-        return accountTokens.getObject().authenticate(webRequest.getHeader(HttpHeaders.AUTHORIZATION));
+        AppUser user = accountTokens.getObject().authenticate(webRequest.getHeader(HttpHeaders.AUTHORIZATION));
+        AuthenticatedUser annotation = parameter.getParameterAnnotation(AuthenticatedUser.class);
+        // 인증(401)이 먼저다 - 토큰이 틀린 요청에 게스트 여부를 알려 주지 않는다.
+        if (user.isGuest() && (annotation == null || !annotation.allowGuest())) {
+            throw new ApiException(ErrorCode.AUTH_GUEST_NOT_ALLOWED);
+        }
+        return user;
     }
 }

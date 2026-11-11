@@ -14,6 +14,7 @@
  * 대신 대체 ID를 적고 대응표는 DB에 있다 ({@link app.accentury.backend.translation.TranslationSubjects}).
  * <p>
  * 계정당 하루 5건이고 성공한 번역만 센다 (2026-10-15 결정, {@link app.accentury.backend.translation.TranslationQuota}).
+ * LLM 호출 수는 결과와 상관없이 하루 20번까지이고 요청은 분당 6회까지다 (KAN-322).
  */
 @NullMarked
 package app.accentury.backend.translation;

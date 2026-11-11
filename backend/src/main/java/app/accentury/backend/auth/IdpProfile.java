@@ -11,19 +11,21 @@ import java.time.LocalDate;
  * 추가 정보 화면(§3.10)이 채운다. 값은 여기서 {@code app_user} 열 길이에 맞게 정리된다: 이름과 닉네임은 길이
  * 상한에서 자르고(글자 단위), 형식이 이상하거나 너무 긴 이메일과 이미지 URL은 버린다. IdP가 준 값 때문에 저장이
  * 실패하면 로그인 자체가 막히는데, 그 값들은 없어도 되는 것들이다.
+ * <p>
+ * 성별은 담지 않는다 (KAN-328) - 선택 항목이라 사용자가 추가 정보 화면에서 고를 때만 저장한다. 카카오와 네이버가
+ * 성별을 줘도 검증기가 읽지 않으므로, 사용자가 고르기 전에 성별이 저장될 길이 없다.
  *
  * @param provider        어느 IdP인가
  * @param subject         IdP의 사용자 id (구글과 애플 {@code sub}, 카카오와 네이버 {@code id})
  * @param email           이메일 - 구글은 {@code email_verified}, 카카오는 유효와 인증이 둘 다 참일 때만 온다
  * @param name            이름 (애플은 요청 본문 {@code user.name})
  * @param birthDate       생년월일 - 출생연도와 생일이 둘 다 있을 때만(카카오는 양력일 때만) 온다
- * @param gender          성별
  * @param nickname        닉네임 (보조 정보)
  * @param profileImageUrl 프로필 이미지 URL (보조 정보)
  */
 public record IdpProfile(Provider provider, String subject,
                          @Nullable String email, @Nullable String name, @Nullable LocalDate birthDate,
-                         @Nullable Gender gender, @Nullable String nickname, @Nullable String profileImageUrl) {
+                         @Nullable String nickname, @Nullable String profileImageUrl) {
 
     static final int SUBJECT_MAX = 255;
     static final int EMAIL_MAX = 254;
@@ -47,7 +49,7 @@ public record IdpProfile(Provider provider, String subject,
 
     /** 정보 없이 식별자만 있는 프로필 - 가짜 IdP(§3.9)와 정보 동의를 하나도 안 한 사용자가 이 모양이다. */
     static IdpProfile subjectOnly(Provider provider, String subject) {
-        return new IdpProfile(provider, subject, null, null, null, null, null, null);
+        return new IdpProfile(provider, subject, null, null, null, null, null);
     }
 
     private static @Nullable String email(@Nullable String raw) {

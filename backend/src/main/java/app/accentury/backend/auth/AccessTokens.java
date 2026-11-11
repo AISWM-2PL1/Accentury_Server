@@ -94,6 +94,22 @@ public class AccessTokens {
         return random;
     }
 
+    /**
+     * 서명 키에서 다른 용도의 키를 끌어낸다 - {@code HMAC-SHA256(서명 키, 용도)}다. 서버만 아는 비밀값이 필요한 곳이
+     * 시크릿을 하나 더 두지 않고 쓴다 (게스트 발급 상한의 IP 해시, {@link GuestQuota}, KAN-329). 용도 문자열이 다르면
+     * 키가 달라 서로의 값을 만들 수 없고, 끌어낸 키로는 서명 키를 되짚지 못한다 - 끌어낸 키가 새도 토큰 위조로 이어지지
+     * 않는다. 서명 키가 설정되지 않은 로컬에서는 기동마다 다른 키가 나온다.
+     */
+    byte[] deriveKey(String purpose) {
+        try {
+            javax.crypto.Mac mac = javax.crypto.Mac.getInstance("HmacSHA256");
+            mac.init(new javax.crypto.spec.SecretKeySpec(secret, "HmacSHA256"));
+            return mac.doFinal(purpose.getBytes(StandardCharsets.UTF_8));
+        } catch (java.security.GeneralSecurityException e) {
+            throw new IllegalStateException("HMAC-SHA256을 쓸 수 없는 JVM", e);
+        }
+    }
+
     /** Access 토큰 수명(초) - 응답의 {@code accessTokenExpiresInSec} (§3.9, §3.12). */
     public long ttlSeconds() {
         return ttl.toSeconds();

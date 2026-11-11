@@ -405,6 +405,16 @@ public record AccenturyProperties(Session session,
 
         /** 게시 중인 개인정보처리방침 버전 - privacy.html의 {@code accentury-policy-version} 메타와 같은 값이다 (KAN-240). */
         public static final String PRIVACY_POLICY_VERSION = "2026-10-20";
+
+        /**
+         * 같은 IP(IPv6는 /64)가 하루(KST)에 만들 수 있는 게스트 계정 수 (KAN-329, 명세서 §2.5, §3.21, 2026-11-10 결정,
+         * PR #69 리뷰에서 다시 확인). 게스트마다 번역 하루 한도가 새로 생기므로 한 IP가 하루에 늘릴 수 있는 번역은 성공
+         * 기준 이 값의 5배(50건, {@link Translation#DAILY_LIMIT})이고, 번역 사업자의 하루 몫(500번)을 깎는 LLM 호출
+         * 기준으로는 20배(200번, {@link Translation#DAILY_CALL_LIMIT})다 - 최악의 경우 하루 몫의 40%라 더 올리지 않는다.
+         * 정상 사용은 기기당 한 번(재설치 때 한 번 더)이라 10이면 한 IP를 나눠 쓰는 몇 사람까지 받는다. 방침
+         * (privacy.html)이 이 숫자를 적지 않으므로 바꿔도 문구는 그대로다.
+         */
+        public static final int GUEST_DAILY_LIMIT_PER_IP = 10;
     }
 
     /**
@@ -451,13 +461,16 @@ public record AccenturyProperties(Session session,
      *                     빈도 대체 ID도 만들어지지 않는다</b> - staging, 로컬, 테스트가 이 상태다. SSM
      *                     {@code ACCENTURY_TRANSLATION_RECORDBUCKET}이 prod에만 있다. 빈 문자열은 설정 실수로 보고 기동을 세운다.
      * @param region       그 버킷의 리전. 비우면 SDK 기본 체인이다 ({@link Training#region()}과 같다).
+     * @param rateLimitPerMinute 계정당 분당 번역 요청 허용 횟수 (§2.5, KAN-322). Gemini 무료 등급 RPM 15가 프로젝트 전체 몫이라
+     *                     그 절반 미만으로 둔다. 정상 사용은 분당 1~2건이다.
      */
     public record Translation(@Nullable String apiKey,
                               @DefaultValue(Translation.DEFAULT_MODEL) String model,
                               @DefaultValue("https://generativelanguage.googleapis.com") String baseUrl,
                               @DefaultValue("10s") Duration timeout,
                               @Nullable String recordBucket,
-                              @Nullable String region) {
+                              @Nullable String region,
+                              @DefaultValue("6") int rateLimitPerMinute) {
 
         /** 2026-10-08 결정 모델 - 구글 모델 문서가 속도와 비용이 중요한 단순 텍스트 작업에 권장하는 최신 모델이다. */
         public static final String DEFAULT_MODEL = "gemini-3.5-flash-lite";
@@ -466,10 +479,43 @@ public record AccenturyProperties(Session session,
         public static final int MAX_INPUT_LENGTH = 100;
 
         /**
+         * 번역 신고(KAN-343, 명세서 §3.22)가 싣는 번역 결과의 길이 상한 - 코드 포인트 수다. 번역 결과는 한 문장이라
+         * 입력 상한의 세 배면 넉넉하다. {@code translation_report.result_text}(V19)의 길이와 같아야 한다.
+         */
+        public static final int MAX_REPORT_RESULT_LENGTH = 300;
+
+        /**
+         * 번역 신고의 보존 기간 (2026-11-10 결정) - 이용 후기와 같은 1년이다. 방침(privacy.html 1항 표의 「번역 신고
+         * 기록 (앱)」)이 이 기간을 적고 {@code privacy.test.mjs}가 묶는다. 바꾸면 방침도 함께 고친다.
+         */
+        public static final Duration REPORT_RETENTION = Duration.ofDays(365);
+
+        /**
+         * 계정당 분당 번역 신고 허용 횟수 (§2.5). 신고는 LLM을 부르지 않지만 건마다 슬랙 메시지가 하나 나간다 - 한 계정이
+         * 채널을 메우지 못하게 한다. 정상은 번역 한 건에 신고 한 번이고 번역이 분당 6건까지라 그보다 조금 넉넉하다.
+         */
+        public static final int REPORT_RATE_LIMIT_PER_MINUTE = 10;
+
+        /**
+         * IP당 분당 번역 신고 허용 횟수 (§2.5, 2026-11-10 결정, PR #70 리뷰). 계정 축과 같은 값이다 - 한 IP가 계정을
+         * 몇 개 쓰든 분당 이 값으로 묶인다. 다른 메모리 제한처럼 backend 태스크마다 세므로 태스크가 셋이면 세 배까지 풀린다.
+         */
+        public static final int REPORT_IP_RATE_LIMIT_PER_MINUTE = 10;
+
+        /**
          * 계정당 하루 번역 상한 - 성공한 번역만 세고 한국 시각 자정에 바뀐다 (명세서 §3.18, 2026-10-15 결정). 사업자 무료 한도
          * (prod RPD 500)를 한 사람이 다 쓰지 못하게 한다. 오류 메시지에 박혀 있는 값이라 설정이 아니라 상수다.
          */
         public static final int DAILY_LIMIT = 5;
+
+        /**
+         * 계정당 하루 LLM 호출 상한 - 결과와 상관없이 세고 돌려주지 않는다 (명세서 §2.5, §3.18, KAN-322). {@link #DAILY_LIMIT}은
+         * 성공만 세어 LLM이 거절하는 문장을 반복하면 걸리지 않고, 한 계정이 프로젝트 몫 RPD 500을 다 쓰면 그날 모든 사용자의
+         * 번역이 503이 된다. 20은 성공 5건의 4배라 번역 불가가 섞인 정상 사용을 막지 않으면서 어느 계정도 RPD의 4%를 넘지
+         * 못한다. Gemini 재시도 1회는 따로 세지 않아 재시도까지 치면 상한은 8%다 - 재시도는 연결 실패, 5xx, 시간 초과에서만
+         * 일어나 사용자가 고를 수 없다.
+         */
+        public static final int DAILY_CALL_LIMIT = 20;
 
         /** 키가 들어 있는가 - 비었거나 자리 표시 값이면 번역은 503이다. */
         public boolean apiKeyConfigured() {
