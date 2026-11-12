@@ -30,7 +30,8 @@ AWS 스택 2벌(staging, prod)을 같은 모듈에서 tfvars만 바꿔 짓는다
 infra/
   bootstrap/          계정 공유 리소스. 여기만 로컬 state.
                       state 백엔드(S3), ECR 리포지토리 3개, GitHub OIDC 공급자, ECS 서비스 연결 역할,
-                      음성 전용 버킷 accentury-voice-<계정>(voice.tf), CloudTrail과 GuardDuty(audit.tf)
+                      음성 전용 버킷 accentury-voice-<계정>(voice.tf), CloudTrail과 GuardDuty(audit.tf),
+                      GuardDuty 결과를 prod 슬랙 토픽으로 보내는 EventBridge 규칙(audit.tf)
   modules/
     network/          VPC, 서브넷, 보안 그룹 6종(alb, backend, rds, redis, ai_alb, ai), 내부 호출용 프라이빗 DNS 영역
     data/             RDS PostgreSQL 16, ElastiCache Redis 7.1 복제 그룹 - Refresh 토큰과 번역 일일 한도
@@ -167,7 +168,7 @@ Route 53 호스팅 영역 ── Porkbun에서 NS 위임 ── ACM 인증서 2�
   ├─ ai 호스트 스케일링 경보 2개 (ASG 정책용)
   ├─ 슬랙 Chatbot: 인프라 알림 채널, 스케일링 알림(EventBridge → Lambda scale_notify),
   │    음성 수집 리포트(Scheduler → Lambda voice_report, prod만)
-  ├─ 감사: CloudTrail(관리 이벤트), GuardDuty(S3 보호, RDS 로그인)
+  ├─ 감사: CloudTrail(관리 이벤트), GuardDuty(S3 보호, RDS 로그인, 심각도 4 이상은 인프라 알림 채널로)
   └─ Terraform: bootstrap + envs/{staging,prod}
      같은 모듈 x 2환경, 차이는 tfvars뿐. staging은 쓰지 않을 때 수동으로 끈다(destroy 아님, docs/ops/teardown.md)
 ```
@@ -190,6 +191,7 @@ Terraform 입력의 차이는 `diff -r infra/envs/staging infra/envs/prod`가 �
 | 번역 기록 S3 | 끔 | 켬 | `translation_records_enabled` - 버킷 `accentury-translator-prompt-<계정>`(prevent_destroy), 태스크 역할 PutObject, SSM `ACCENTURY_TRANSLATION_RECORDBUCKET` |
 | 음성 수집 리포트 | 끔 | 켬 | `voice_report_enabled` - slack-alerts 모듈의 리포트 Lambda와 Scheduler |
 | 슬랙 채널 설정 소유 | 소유 안 함 | 소유, staging 경보도 구독 | `slack_channel_configs_enabled`, `slack_infra_alerts_peer_envs = ["staging"]`. 채널당 Chatbot 설정이 1개라 prod가 갖는다 |
+| GuardDuty 결과 슬랙 허용 | 끔 | 켬 | `slack_guardduty_findings_enabled` - slack-alerts 모듈 infra 토픽 정책의 `events.amazonaws.com` 허용(bootstrap 규칙 ARN 조건). 규칙이 prod 토픽만 가리킨다 |
 | AI AMI 파이프라인 | 끔 | 켬(수동 실행, 쓰지 않음) | `ai_ami_pipeline_enabled` - `modules/ai-ami` |
 
 두 환경이 같은 값이라 표에서 뺀 것: backend 태스크 0.5 vCPU / 2 GB와 오토스케일링 1~3(`modules/fargate` 기본값), AI 호스트

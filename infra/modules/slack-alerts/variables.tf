@@ -49,3 +49,9 @@ variable "infra_alerts_peer_envs" {
   description = "#infra-alerts 채널 설정에 토픽을 함께 붙일 다른 환경 (channel_configs_enabled인 환경에서만 쓴다). 토픽 이름은 accentury-<env>-slack-infra-alerts 규칙이다."
   default     = []
 }
+
+variable "guardduty_findings_enabled" {
+  type        = bool
+  description = "bootstrap의 GuardDuty 결과 규칙(accentury-guardduty-findings, KAN-310)이 이 환경의 #infra-alerts 토픽에 publish하도록 토픽 정책에 허용할지. GuardDuty는 계정 단위라 규칙이 prod 토픽 하나만 가리키므로 prod만 true다."
+  default     = false
+}

@@ -80,6 +80,7 @@ terraform apply
 | ECS 서비스 연결 역할 `AWSServiceRoleForECS` | KAN-165. 계정에 1개뿐이다. 없으면 envs apply의 클러스터 생성이 실패한다 |
 | `AWSServiceRoleForApplicationAutoScaling_ECSService` | KAN-168. 같은 이유다. 없으면 envs apply의 scalable target 등록이 실패한다 |
 | CloudTrail trail `accentury-account-audit`, 로그 버킷 `accentury-cloudtrail-<account_id>`, GuardDuty detector | KAN-245 ([waf-edge.md "전송 구간과 엣지 보안"](waf-edge.md#전송-구간과-엣지-보안-kan-245)) |
+| GuardDuty 결과 EventBridge 규칙 `accentury-guardduty-findings` | KAN-310. 대상은 prod 슬랙 토픽이다 ([alarms.md "GuardDuty 결과"](alarms.md#guardduty-결과-kan-310)) |
 
 배포용 리포지토리 `accentury/backend`와 `accentury/ai`는 KAN-120이 콘솔에서 먼저 만들었다. `ecr.tf`의 import 블록이 첫 plan에서
 그 둘을 state로 흡수하므로 별도 import 명령이 없다. plan에 `scan_on_push`와 라이프사이클 정책이 갱신/생성으로 나오는 것은
@@ -332,6 +333,8 @@ destroy 전에:
   지워진다.
 - prod를 철거하면 prod가 소유한 슬랙 Chatbot 채널 설정(`#infra-alerts`, `#daily-user`)도 함께 지워져 staging 토픽의 슬랙
   구독까지 끊긴다 (채널당 계정에 설정이 하나뿐이라 prod가 두 환경 몫을 갖는다).
+  GuardDuty 결과 알림(KAN-310)도 대상인 prod 토픽이 없어져 끊긴다. bootstrap 규칙은 남고, prod를 다시 지으면 토픽 이름과
+  정책이 그대로라 다시 이어진다.
 - **destroy 직후 그 환경의 GitHub environment 변수 `DEPLOY_PAUSED`를 `true`로 둔다. 두 레포 모두다.** 환경이 없는데 병합이
   일어나면 배포 워크플로가 역할 부재로 `AssumeRoleWithWebIdentity` 거부라는 헷갈리는 메시지로 실패한다 (2026-08-27 실제 발생).
   이 레포(Accentury_Server)에서는 Image Deploy(`deploy.yml`)가, Accentury_App에서는 Web Deploy가 이 변수를 본다. 변수가

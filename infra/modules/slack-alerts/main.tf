@@ -1,6 +1,7 @@
 # 슬랙 알림 (KAN-273): AWS Chatbot(Amazon Q Developer in chat applications)이 SNS 토픽을 슬랙 채널로 옮긴다.
 #
 #   #infra-alerts  두 환경. AI ASG의 오토스케일링 확대/축소와 시작 실패(EventBridge -> Lambda scale_notify), ai-disk-high 경보(monitoring 모듈).
+#                  prod 토픽에는 GuardDuty 결과(심각도 4 이상)도 온다. 규칙은 bootstrap/audit.tf, 이 모듈은 토픽 정책 허용만 (KAN-310).
 #   #daily-user    prod만(report_enabled). 음성 버킷을 2시간마다 세는 Lambda의 응시 현황 리포트.
 #
 # 이메일 경보 토픽(monitoring 모듈의 alerts)과 토픽을 나눈다 - alerts에 Chatbot을 붙이면 모든 경보가 슬랙으로 간다.
@@ -82,9 +83,21 @@ resource "aws_sns_topic" "infra" {
   tags = { Name = "${local.name}-slack-infra-alerts" }
 }
 
+# GuardDuty 결과 규칙 (KAN-310). GuardDuty가 계정 단위라 규칙과 대상은 bootstrap/audit.tf에 있고, 이 모듈은 토픽 정책의
+# 허용만 갖는다. 규칙 ARN은 output으로 넘기지 않고 이름 규칙으로 조립한다 - bootstrap과 환경이 서로의 state를 읽지 않는
+# 구조를 유지한다. 규칙 이름을 바꾸면 bootstrap/audit.tf의 local.guardduty_findings_rule_name도 같이 바꾼다. 어긋나면 두
+# apply가 모두 성공하는데 publish만 거부되어 알림이 조용히 사라진다.
+locals {
+  guardduty_findings_rule_arn = "arn:aws:events:${data.aws_region.current.region}:${data.aws_caller_identity.current.account_id}:rule/accentury-guardduty-findings"
+}
+
 # 같은 계정(AWS:SourceOwner)의 publish만 허용한다 - CloudWatch 경보와 scale_notify Lambda(이 계정의 역할)가 여기에 든다.
-# 기본 정책과 같은 내용이지만 명시해 둔다. 스케일 이벤트를 EventBridge가 직접 넣던 시절의 events.amazonaws.com 허용은
-# Lambda로 바꾸면서 뺐다 (2026-10-13).
+# 기본 정책과 같은 내용이지만 명시해 둔다.
+#
+# EventBridge가 SNS 대상에 넣으려면 서비스 주체 events.amazonaws.com의 허용이 따로 있어야 한다 (EventBridge 문서
+# "Using resource-based policies"). 스케일 이벤트를 EventBridge가 직접 넣던 시절의 이 허용은 Lambda로 바꾸면서 뺐고
+# (2026-10-13), GuardDuty 결과 규칙 하나를 위해 되살렸다 (KAN-310). 조건이 그 규칙의 ARN이라 다른 규칙은 이 토픽에 넣지
+# 못한다. guardduty_findings_enabled인 환경(prod)에만 생긴다.
 data "aws_iam_policy_document" "infra_topic" {
   statement {
     sid       = "SameAccountPublish"
@@ -98,6 +111,25 @@ data "aws_iam_policy_document" "infra_topic" {
       test     = "StringEquals"
       variable = "AWS:SourceOwner"
       values   = [data.aws_caller_identity.current.account_id]
+    }
+  }
+
+  dynamic "statement" {
+    for_each = var.guardduty_findings_enabled ? [1] : []
+
+    content {
+      sid       = "GuardDutyFindingsRulePublish"
+      actions   = ["SNS:Publish"]
+      resources = [aws_sns_topic.infra.arn]
+      principals {
+        type        = "Service"
+        identifiers = ["events.amazonaws.com"]
+      }
+      condition {
+        test     = "ArnEquals"
+        variable = "aws:SourceArn"
+        values   = [local.guardduty_findings_rule_arn]
+      }
     }
   }
 }

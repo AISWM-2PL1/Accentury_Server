@@ -203,6 +203,10 @@ resource "aws_guardduty_detector_feature" "s3_data_events" {
 #   - EKS_AUDIT_LOGS, LAMBDA_NETWORK_LOGS: 끔. EKS와 Lambda를 쓰지 않는다.
 #   - EBS_MALWARE_PROTECTION: 끔. 발견 사항이 생길 때마다 EBS 스캔 요금이 붙는데, AI 호스트는 교체형이라 의심되면
 #     스캔보다 교체가 싸다.
+#   - RDS_LOGIN_EVENTS 밑의 RDS_DATA_RISK(RDS 데이터 활동 감시): 꺼진 채로 둔다. AWS가 하위 설정으로 꺼 둔 채 붙여
+#     두었는데, provider(6.61.0)가 additional_configuration 이름으로 RDS_DATA_RISK를 받지 않아 코드로 고정할 수 없다.
+#     코드에 없으면 plan이 매번 지우려 하므로 additional_configuration을 무시한다 (2026-11-12 KAN-310 apply 뒤 확인).
+#     그래서 콘솔에서 이것을 켜도 plan에 나오지 않는다. 켜고 끄는 것은 콘솔에서 한다.
 # 주의: 이 리소스를 지워도 기능은 꺼지지 않고 state에서만 빠진다 (provider 문서). 끄려면 DISABLED로 apply한다.
 resource "aws_guardduty_detector_feature" "managed" {
   for_each = {
@@ -215,6 +219,55 @@ resource "aws_guardduty_detector_feature" "managed" {
   detector_id = aws_guardduty_detector.this.id
   name        = each.key
   status      = each.value
+
+  lifecycle {
+    ignore_changes = [additional_configuration]
+  }
+}
+
+# ---- GuardDuty 결과 -> 슬랙 #infra-alerts (KAN-310) ----
+
+# 결과가 콘솔에만 쌓이면 사고가 나도 사람이 모른다. 심각도 4 이상(Medium, High, Critical)을 EventBridge로 prod의
+# #infra-alerts 토픽에 넣는다. Low(1~3.9)는 잡음이 많아 뺀다. 심각도 구간은 Low 1~3.9, Medium 4~6.9, High 7~8.9,
+# Critical 9~10이다 (GuardDuty 문서 "Severity levels of GuardDuty findings").
+#
+# 대상은 prod 토픽 하나다. GuardDuty가 계정 단위라 환경마다 보내면 같은 결과가 두 번 오고, 채널 설정도 prod가 갖는다
+# (KAN-273). bootstrap은 환경 state를 읽지 않으므로 토픽 ARN을 이름 규칙으로 조립한다. 토픽 정책의 허용(이 규칙의 ARN
+# 조건)은 prod의 slack-alerts 모듈이 갖는다(slack_guardduty_findings_enabled). 그래서 처음 적용은 prod env가 먼저다 -
+# 이쪽이 먼저면 그사이 결과는 publish가 거부되어 규칙의 FailedInvocations 지표에만 남는다. 규칙 이름을 바꾸면 그 모듈의
+# local.guardduty_findings_rule_arn도 같이 바꾼다.
+#
+# 입력 변환 없이 원본 이벤트를 그대로 보낸다. Chatbot이 GuardDuty 이벤트를 자체 형식으로 그린다 (Chatbot 관리자 안내서
+# "Using Amazon Q Developer in chat applications with other AWS services").
+#
+# 이미 있는 결과가 다시 생기면 GuardDuty가 6시간마다 묶어서 다시 보낸다(detector 기본 SIX_HOURS). 같은 결과가 6시간
+# 간격으로 다시 오면 아직 이어지고 있다는 뜻이다.
+data "aws_region" "current" {}
+
+locals {
+  guardduty_findings_rule_name = "accentury-guardduty-findings"
+  guardduty_findings_topic_arn = "arn:aws:sns:${data.aws_region.current.region}:${data.aws_caller_identity.current.account_id}:accentury-prod-slack-infra-alerts"
+}
+
+resource "aws_cloudwatch_event_rule" "guardduty_findings" {
+  name        = local.guardduty_findings_rule_name
+  description = "GuardDuty findings with severity >= 4 -> prod #infra-alerts (KAN-310)"
+
+  event_pattern = jsonencode({
+    source      = ["aws.guardduty"]
+    detail-type = ["GuardDuty Finding"]
+    detail = {
+      severity = [{ numeric = [">=", 4] }]
+    }
+  })
+
+  tags = { Name = local.guardduty_findings_rule_name }
+}
+
+resource "aws_cloudwatch_event_target" "guardduty_findings" {
+  rule      = aws_cloudwatch_event_rule.guardduty_findings.name
+  target_id = "slack-infra-alerts"
+  arn       = local.guardduty_findings_topic_arn
 }
 
 output "audit_bucket" {
