@@ -319,7 +319,8 @@ module "monitoring" {
 
 # 슬랙 알림 (KAN-273). #infra-alerts는 두 환경(AI 스케일 이벤트 + ai-disk-high), #daily-user는 voice_report_enabled인
 # 환경만(음성 버킷 응시 현황 2시간 리포트). Chatbot 채널 설정은 slack_channel_configs_enabled인 환경(prod)만 us-east-2
-# provider로 만든다.
+# provider로 만든다. GuardDuty 결과(KAN-310)는 bootstrap 규칙이 slack_guardduty_findings_enabled인 환경(prod)의
+# #infra-alerts 토픽에 넣는다.
 module "slack_alerts" {
   source = "../../modules/slack-alerts"
   providers = {
@@ -337,6 +338,8 @@ module "slack_alerts" {
   # 채널 설정은 채널당 계정에 하나뿐이라 한 환경만 갖는다 - 그 환경이 다른 환경의 토픽까지 붙인다.
   channel_configs_enabled = var.slack_channel_configs_enabled
   infra_alerts_peer_envs  = var.slack_infra_alerts_peer_envs
+  # bootstrap/audit.tf의 GuardDuty 결과 규칙이 이 토픽에 넣도록 토픽 정책에 허용한다 (KAN-310).
+  guardduty_findings_enabled = var.slack_guardduty_findings_enabled
 }
 
 # ---- 사투리 텍스트 번역 기록 S3 (KAN-266) ----
