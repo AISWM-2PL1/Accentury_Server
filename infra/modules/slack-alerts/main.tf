@@ -1,7 +1,7 @@
 # 슬랙 알림 (KAN-273): AWS Chatbot(Amazon Q Developer in chat applications)이 SNS 토픽을 슬랙 채널로 옮긴다.
 #
 #   #infra-alerts  두 환경. AI ASG의 오토스케일링 확대/축소와 시작 실패(EventBridge -> Lambda scale_notify), ai-disk-high 경보(monitoring 모듈).
-#                  prod 토픽에는 GuardDuty 결과(심각도 4 이상)도 온다. 규칙은 bootstrap/audit.tf, 이 모듈은 토픽 정책 허용만 (KAN-310).
+#                  prod 토픽에는 GuardDuty 결과(심각도 4 이상)도 온다. 규칙, 대상, 정책 허용, 전달 실패 경보 모두 이 모듈 (KAN-310).
 #   #daily-user    prod만(report_enabled). 음성 버킷을 2시간마다 세는 Lambda의 응시 현황 리포트.
 #
 # 이메일 경보 토픽(monitoring 모듈의 alerts)과 토픽을 나눈다 - alerts에 Chatbot을 붙이면 모든 경보가 슬랙으로 간다.
@@ -83,12 +83,67 @@ resource "aws_sns_topic" "infra" {
   tags = { Name = "${local.name}-slack-infra-alerts" }
 }
 
-# GuardDuty 결과 규칙 (KAN-310). GuardDuty가 계정 단위라 규칙과 대상은 bootstrap/audit.tf에 있고, 이 모듈은 토픽 정책의
-# 허용만 갖는다. 규칙 ARN은 output으로 넘기지 않고 이름 규칙으로 조립한다 - bootstrap과 환경이 서로의 state를 읽지 않는
-# 구조를 유지한다. 규칙 이름을 바꾸면 bootstrap/audit.tf의 local.guardduty_findings_rule_name도 같이 바꾼다. 어긋나면 두
-# apply가 모두 성공하는데 publish만 거부되어 알림이 조용히 사라진다.
-locals {
-  guardduty_findings_rule_arn = "arn:aws:events:${data.aws_region.current.region}:${data.aws_caller_identity.current.account_id}:rule/accentury-guardduty-findings"
+# GuardDuty 결과 (KAN-310). 심각도 4 이상(Medium, High, Critical)을 이 토픽에 넣는다. Low(1~3.9)는 잡음이 많아 뺀다.
+# 심각도 구간은 Low 1~3.9, Medium 4~6.9, High 7~8.9, Critical 9~10이다 (GuardDuty 문서 "Severity levels of GuardDuty findings").
+#
+# GuardDuty는 계정 단위지만 결과 이벤트는 기본 버스에 오므로 어느 스택의 규칙이든 받을 수 있다. 보낼 곳이 이 토픽 하나라
+# 규칙, 대상, 토픽 정책 허용, 전달 실패 경보를 이 모듈에 함께 두고 guardduty_findings_enabled인 환경(prod)만 만든다. 환경마다
+# 만들면 같은 결과가 두 번 온다. 처음에는 규칙을 bootstrap에 두고 이름 문자열로 정책과 이었는데, 한쪽 이름만 바뀌면 두 apply가
+# 모두 성공하면서 알림만 사라지는 구조라 옮겼다 (PR #72 리뷰).
+#
+# 입력 변환 없이 원본 이벤트를 그대로 보낸다. Chatbot이 GuardDuty 이벤트를 자체 형식으로 그린다 (Chatbot 관리자 안내서
+# "Using Amazon Q Developer in chat applications with other AWS services"). 이미 있는 결과가 다시 생기면 GuardDuty가
+# 6시간마다 묶어서 다시 보낸다(detector 기본 SIX_HOURS). 같은 결과가 6시간 간격으로 다시 오면 아직 이어지고 있다는 뜻이다.
+resource "aws_cloudwatch_event_rule" "guardduty_findings" {
+  count = var.guardduty_findings_enabled ? 1 : 0
+
+  name        = "${local.name}-guardduty-findings"
+  description = "GuardDuty findings with severity >= 4 -> #infra-alerts (KAN-310)"
+
+  event_pattern = jsonencode({
+    source      = ["aws.guardduty"]
+    detail-type = ["GuardDuty Finding"]
+    detail = {
+      severity = [{ numeric = [">=", 4] }]
+    }
+  })
+
+  tags = { Name = "${local.name}-guardduty-findings" }
+}
+
+resource "aws_cloudwatch_event_target" "guardduty_findings" {
+  count = var.guardduty_findings_enabled ? 1 : 0
+
+  rule      = aws_cloudwatch_event_rule.guardduty_findings[0].name
+  target_id = "slack-infra-alerts"
+  arn       = aws_sns_topic.infra.arn
+}
+
+# 전달 실패 경보. EventBridge는 publish가 실패하면 24시간 재시도한 뒤 이벤트를 버린다. 그러면 결과는 GuardDuty 콘솔에만
+# 남고(90일) 슬랙에는 오지 않는다. 실패가 한 번이라도 나면 이메일 토픽으로 알려 콘솔에서 결과를 보게 한다. 슬랙 토픽으로
+# 보내지 않는 이유는 실패한 곳이 그 토픽일 수 있어서다. 이벤트가 없는 동안은 지표가 나오지 않으므로 결측을 정상으로 센다.
+resource "aws_cloudwatch_metric_alarm" "guardduty_findings_failed" {
+  count = var.guardduty_findings_enabled ? 1 : 0
+
+  alarm_name        = "${local.name}-guardduty-delivery-failed"
+  alarm_description = "accentury ${var.env}: GuardDuty 결과를 슬랙 #infra-alerts 토픽에 넣지 못했습니다. 슬랙에 오지 않은 결과가 있으니 GuardDuty 콘솔에서 직접 확인하세요. (KAN-310)"
+
+  namespace   = "AWS/Events"
+  metric_name = "FailedInvocations"
+  dimensions = {
+    RuleName = aws_cloudwatch_event_rule.guardduty_findings[0].name
+  }
+  statistic           = "Sum"
+  period              = 300
+  evaluation_periods  = 1
+  comparison_operator = "GreaterThanThreshold"
+  threshold           = 0
+  treat_missing_data  = "notBreaching"
+
+  alarm_actions = [var.alerts_topic_arn]
+  ok_actions    = [var.alerts_topic_arn]
+
+  tags = { Name = "${local.name}-guardduty-delivery-failed" }
 }
 
 # 같은 계정(AWS:SourceOwner)의 publish만 허용한다 - CloudWatch 경보와 scale_notify Lambda(이 계정의 역할)가 여기에 든다.
@@ -96,7 +151,7 @@ locals {
 #
 # EventBridge가 SNS 대상에 넣으려면 서비스 주체 events.amazonaws.com의 허용이 따로 있어야 한다 (EventBridge 문서
 # "Using resource-based policies"). 스케일 이벤트를 EventBridge가 직접 넣던 시절의 이 허용은 Lambda로 바꾸면서 뺐고
-# (2026-10-13), GuardDuty 결과 규칙 하나를 위해 되살렸다 (KAN-310). 조건이 그 규칙의 ARN이라 다른 규칙은 이 토픽에 넣지
+# (2026-10-13), 위 GuardDuty 결과 규칙 하나를 위해 되살렸다 (KAN-310). 조건이 그 규칙의 ARN이라 다른 규칙은 이 토픽에 넣지
 # 못한다. guardduty_findings_enabled인 환경(prod)에만 생긴다.
 data "aws_iam_policy_document" "infra_topic" {
   statement {
@@ -128,7 +183,7 @@ data "aws_iam_policy_document" "infra_topic" {
       condition {
         test     = "ArnEquals"
         variable = "aws:SourceArn"
-        values   = [local.guardduty_findings_rule_arn]
+        values   = [aws_cloudwatch_event_rule.guardduty_findings[0].arn]
       }
     }
   }

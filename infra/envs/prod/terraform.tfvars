@@ -52,8 +52,7 @@ voice_report_enabled = true
 slack_channel_configs_enabled = true
 slack_infra_alerts_peer_envs  = ["staging"]
 
-# GuardDuty 결과 알림 (KAN-310). 규칙은 bootstrap/audit.tf에 있고 prod 토픽만 가리킨다. 이 토픽 정책에 그 규칙의 publish를
-# 허용한다. 처음 적용은 이 환경이 bootstrap보다 먼저다.
+# GuardDuty 결과 알림 (KAN-310). 심각도 4 이상을 #infra-alerts로 보내는 규칙과 전달 실패 경보를 이 환경만 만든다.
 slack_guardduty_findings_enabled = true
 
 ssm_prefix = "/accentury/prod"

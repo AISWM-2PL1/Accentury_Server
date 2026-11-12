@@ -9,8 +9,7 @@ CloudWatch 경보 전체 목록, 이메일(SNS)과 슬랙(AWS Chatbot) 알림 �
 - [`infra/modules/ai-host/main.tf`](../../infra/modules/ai-host/main.tf) - AI ASG 확대, 축소 경보 2개
 - [`infra/modules/fargate/main.tf`](../../infra/modules/fargate/main.tf) - backend 목표 추적 오토스케일링(경보 2개는 AWS가 만든다)
 - [`infra/modules/ai-host/ai-health-metric.sh`](../../infra/modules/ai-host/ai-health-metric.sh) - `accentury/ai` 지표를 올리는 호스트 타이머
-- [`infra/modules/slack-alerts`](../../infra/modules/slack-alerts) - 슬랙 토픽, Chatbot 채널 설정, EventBridge 규칙, Lambda `scale_notify`와 `voice_report`, Scheduler
-- [`infra/bootstrap/audit.tf`](../../infra/bootstrap/audit.tf) - GuardDuty 결과를 prod 슬랙 토픽으로 보내는 EventBridge 규칙 `accentury-guardduty-findings` (KAN-310)
+- [`infra/modules/slack-alerts`](../../infra/modules/slack-alerts) - 슬랙 토픽, Chatbot 채널 설정, EventBridge 규칙, Lambda `scale_notify`와 `voice_report`, Scheduler, GuardDuty 결과 규칙과 전달 실패 경보(prod만, KAN-310)
 - `infra/envs/*/variables.tf` - `alert_email`, `slack_team_id`, `slack_infra_alerts_channel_id`, `slack_daily_user_channel_id` 기본값
 - `infra/envs/*/terraform.tfvars` - `voice_report_enabled`, `slack_channel_configs_enabled`, `slack_infra_alerts_peer_envs`
 
@@ -63,6 +62,15 @@ AI 호스트가 내부 ALB 뒤에 있으므로(KAN-201) "받아 줄 healthy AI�
 ### backend 오토스케일링 경보 (2개, AWS 생성)
 
 `modules/fargate`의 목표 추적 정책(`ALBRequestCountPerTarget`)이 AlarmHigh(1분 x 3회), AlarmLow(1분 x 15회) 두 경보를 스스로 만든다. Terraform 리소스가 아니고 `alarm_names`에도 없다. 이름은 output `backend_autoscaling_alarm_names`로 본다.
+
+### slack-alerts 모듈 (1개, prod만)
+
+GuardDuty 결과를 `#infra-alerts`로 보내는 규칙의 전달 실패를 본다 (KAN-310, 아래 "GuardDuty 결과"). `slack_guardduty_findings_enabled`인
+환경(prod)만 만든다. 이메일 토픽으로만 가고 `alarm_names`에는 없다.
+
+| 경보 | 지표 | 조건 | 결측 처리 | 슬랙 |
+| --- | --- | --- | --- | --- |
+| `guardduty-delivery-failed` | `AWS/Events` `FailedInvocations` (RuleName `accentury-prod-guardduty-findings`) | 5분 합 > 0이 1회 | `notBreaching` | |
 
 ### 결측 처리와 해제의 특성
 
@@ -191,7 +199,7 @@ ALARM을 보고, `terraform apply`가 그 드리프트를 되돌리는 것으로
 | --- | --- | --- | --- |
 | `#infra-alerts` | 두 환경 | AI ASG 오토스케일링 확대와 축소, 시작 실패 | ASG 이벤트 -> EventBridge 규칙 3개 -> Lambda `accentury-{env}-scale-notify`(희망 용량 조회) -> `accentury-{env}-slack-infra-alerts` -> Chatbot |
 | `#infra-alerts` | 두 환경 | `ai-disk-high`와 `result-wait-high`(KAN-284)의 ALARM과 OK (이메일도 그대로 간다) | 경보 -> `accentury-{env}-slack-infra-alerts` -> Chatbot |
-| `#infra-alerts` | 계정 단위 (prod 토픽) | GuardDuty 결과 중 심각도 4 이상 (Medium, High, Critical) | GuardDuty -> EventBridge 규칙 `accentury-guardduty-findings`(bootstrap) -> `accentury-prod-slack-infra-alerts` -> Chatbot |
+| `#infra-alerts` | prod만 (`slack_guardduty_findings_enabled`, GuardDuty는 계정 단위) | GuardDuty 결과 중 심각도 4 이상 (Medium, High, Critical) | GuardDuty -> EventBridge 규칙 `accentury-prod-guardduty-findings` -> `accentury-prod-slack-infra-alerts` -> Chatbot |
 | `#daily-user` | prod만 (`voice_report_enabled`) | 응시 현황 리포트, KST 08시부터 24시까지 짝수 정각 | Scheduler -> Lambda `accentury-prod-voice-report` -> `accentury-prod-slack-daily-user` -> Chatbot |
 
 - 배포의 instance refresh(이미지 배포, AMI 교체)가 내는 시작과 종료는 알리지 않는다. 규칙이 이벤트의 `Cause`에
@@ -212,17 +220,18 @@ ALARM을 보고, `terraform apply`가 그 드리프트를 되돌리는 것으로
 GuardDuty 결과 중 **심각도 4 이상**만 `#infra-alerts`로 온다. 심각도 구간은 Low 1~3.9, Medium 4~6.9, High 7~8.9,
 Critical 9~10이다. Low는 잡음이 많아 보내지 않으므로 콘솔 GuardDuty에서만 본다.
 
-- GuardDuty는 계정 단위라 규칙이 bootstrap(`infra/bootstrap/audit.tf`)에 있고 prod 토픽 하나만 가리킨다. 환경 머리
+- GuardDuty는 계정 단위라 `slack_guardduty_findings_enabled = true`인 환경(prod) 하나만 규칙
+  `accentury-prod-guardduty-findings`를 만든다(slack-alerts 모듈). 두 환경을 다 켜면 같은 결과가 두 번 온다. 환경 머리
   `[staging]`/`[prod]`가 붙지 않는다. 결과의 리소스(인스턴스, 버킷, 역할 이름)로 환경을 가린다.
 - 메시지는 입력 변환 없이 Chatbot이 GuardDuty 이벤트를 자체 형식으로 그린다. 제목 줄(`GuardDuty Finding | <리전> | Account: <계정>`)이
   콘솔 링크이고, 본문에 Finding type, 설명, First Seen과 Last Seen, Severity(`HIGH`처럼 등급 이름), Threat Count, Affected Resource가 나온다.
 - 이미 있는 결과가 다시 생기면 GuardDuty가 6시간마다 묶어서 다시 보낸다(detector 기본 `SIX_HOURS`). 같은 결과가
   6시간 간격으로 다시 오면 아직 이어지고 있다는 뜻이다.
-- EventBridge가 토픽에 넣으려면 토픽 정책에 `events.amazonaws.com` 허용이 있어야 한다. 이 허용은 prod의
-  `slack_guardduty_findings_enabled = true`가 만들고, 조건이 규칙 ARN이라 다른 규칙은 넣지 못한다. 그래서 처음 적용은
-  prod env가 먼저, bootstrap이 나중이다. 반대로 하면 그사이 결과는 거부되어 규칙의 `FailedInvocations` 지표에만 남는다.
-- 규칙 이름(`accentury-guardduty-findings`)은 bootstrap `local.guardduty_findings_rule_name`과 slack-alerts 모듈
-  `local.guardduty_findings_rule_arn` 두 곳에 같은 문자열로 있다. 하나만 바꾸면 두 apply가 모두 성공하는데 알림만 사라진다.
+- EventBridge가 토픽에 넣으려면 토픽 정책에 `events.amazonaws.com` 허용이 있어야 한다. 조건이 규칙 ARN이라 다른 규칙은
+  넣지 못한다. 규칙, 대상, 이 허용, 전달 실패 경보가 같은 모듈에 있어 prod apply 한 번으로 같이 생기고 같이 지워진다.
+- **전달 실패 경보 `accentury-prod-guardduty-delivery-failed`.** EventBridge는 publish에 실패한 이벤트를 24시간 재시도한 뒤
+  버린다. 이 경보 메일(이메일 토픽)이 오면 슬랙에 오지 않은 결과가 있다는 뜻이니 GuardDuty 콘솔에서 결과를 직접 본다(90일
+  보관). 슬랙 토픽으로 보내지 않는 이유는 실패한 곳이 그 토픽일 수 있어서다.
 
 ### staging을 다시 지은 뒤
 
@@ -287,32 +296,42 @@ GuardDuty 알림은 샘플 결과로 시험한다. 샘플은 실제 리소스와
 `GeneratedFinding`이 들어가는 것으로만 구분된다. 시험 전에 채널에 미리 알린다.
 
 ```
-DETECTOR=$(aws guardduty list-detectors --query 'DetectorIds[0]' --output text)
+REGION=ap-northeast-2
+DETECTOR=$(aws guardduty list-detectors --region "$REGION" --query 'DetectorIds[0]' --output text)
 TYPE=UnauthorizedAccess:IAMUser/InstanceCredentialExfiltration.OutsideAWS
-aws guardduty create-sample-findings --detector-id "$DETECTOR" --finding-types "$TYPE"
+aws guardduty create-sample-findings --region "$REGION" --detector-id "$DETECTOR" --finding-types "$TYPE"
 
-# 규칙이 맞았는지와 토픽에 넣었는지 (몇 분 뒤, 실패가 0이어야 한다)
-aws cloudwatch get-metric-statistics --namespace AWS/Events --metric-name MatchedEvents \
-  --dimensions Name=RuleName,Value=accentury-guardduty-findings --statistics Sum --period 300 \
-  --start-time "$(date -u -v-30M +%FT%TZ)" --end-time "$(date -u +%FT%TZ)"
-# 같은 명령의 --metric-name을 FailedInvocations로 바꿔 실패도 본다
+# 규칙이 맞았는지와 토픽에 넣었는지 (1~2분 뒤, FailedInvocations가 0이어야 한다)
+# date -v는 macOS, date -d는 Linux 문법이라 되는 쪽을 쓴다
+START=$(date -u -v-30M +%FT%TZ 2>/dev/null || date -u -d '30 minutes ago' +%FT%TZ)
+for m in MatchedEvents Invocations FailedInvocations; do
+  echo "$m $(aws cloudwatch get-metric-statistics --region "$REGION" --namespace AWS/Events --metric-name "$m" \
+    --dimensions Name=RuleName,Value=accentury-prod-guardduty-findings --statistics Sum --period 300 \
+    --start-time "$START" --end-time "$(date -u +%FT%TZ)" --query 'sum(Datapoints[].Sum)' --output text)"
+done
 
-# 샘플 보관 처리. 같은 타입의 보관 안 된 결과를 모은 뒤 sample 표시가 있는 것만 남긴다 (진짜 결과를 보관하지 않도록)
-IDS=$(aws guardduty list-findings --detector-id "$DETECTOR" \
+# 샘플 보관 처리. 같은 타입의 보관 안 된 결과를 모은 뒤 sample 표시가 있는 것만 남긴다 (진짜 결과를 보관하지 않도록).
+# get-findings는 ID를 한 번에 50개까지만 받으므로 최근에 바뀐 50개만 본다. 비어 있으면 보관하지 않고 끝난다.
+IDS=$(aws guardduty list-findings --region "$REGION" --detector-id "$DETECTOR" \
   --finding-criteria "{\"Criterion\":{\"type\":{\"Eq\":[\"$TYPE\"]},\"service.archived\":{\"Eq\":[\"false\"]}}}" \
-  --query 'FindingIds' --output text)
-SAMPLES=$(aws guardduty get-findings --detector-id "$DETECTOR" --finding-ids $IDS \
-  --query "Findings[?Service.AdditionalInfo.Value && contains(Service.AdditionalInfo.Value, '\"sample\":true')].Id" --output text)
-echo "$SAMPLES"   # 비어 있으면 멈춘다 - 진짜 결과만 남았다는 뜻이다
-aws guardduty archive-findings --detector-id "$DETECTOR" --finding-ids $SAMPLES
+  --sort-criteria AttributeName=updatedAt,OrderBy=DESC --max-items 50 --query 'FindingIds' --output text)
+SAMPLES=""
+if [ -n "$IDS" ] && [ "$IDS" != "None" ]; then
+  SAMPLES=$(aws guardduty get-findings --region "$REGION" --detector-id "$DETECTOR" --finding-ids $IDS \
+    --query "Findings[?Service.AdditionalInfo.Value && contains(Service.AdditionalInfo.Value, '\"sample\":true')].Id" --output text)
+fi
+echo "보관할 샘플: ${SAMPLES:-없음}"
+if [ -n "$SAMPLES" ] && [ "$SAMPLES" != "None" ]; then
+  aws guardduty archive-findings --region "$REGION" --detector-id "$DETECTOR" --finding-ids $SAMPLES
+fi
 ```
 
 ### 끄기
 
 끄려면 채널 설정을 지운다(`aws_chatbot_slack_channel_configuration`). 리포트만 끄려면 prod tfvars의
 `voice_report_enabled = false`다.
-GuardDuty 알림만 끄려면 bootstrap의 규칙과 대상(`aws_cloudwatch_event_rule.guardduty_findings`, `_target`)을 지운 뒤
-prod tfvars의 `slack_guardduty_findings_enabled = false`로 토픽 정책 허용을 거둔다.
+GuardDuty 알림만 끄려면 prod tfvars의 `slack_guardduty_findings_enabled = false`로 apply한다. 규칙, 대상, 토픽 정책 허용,
+전달 실패 경보가 같이 지워진다.
 
 ## 비용
 
@@ -321,4 +340,5 @@ CloudWatch 표준 경보는 개당 월 0.10달러, 지표 math 경보는 지표 
 합산 월 5달러 안팎이라 상시 켜 둔다. 그 뒤 더해진 경보(`ai-alb-no-healthy-host`와 관측성 6종)와 지표의 몫은 [observability.md](./observability.md)의 비용을 본다.
 
 슬랙 알림의 EventBridge 규칙과 Scheduler, Lambda(리포트 하루 9회 + 스케일 이벤트마다 1회, 수 초), SNS는 모두 무료 한도 안이다.
-GuardDuty 결과 규칙(KAN-310)도 AWS 서비스가 기본 버스에 내는 이벤트라 EventBridge 요금이 없다.
+GuardDuty 결과 규칙(KAN-310)도 AWS 서비스가 기본 버스에 내는 이벤트라 EventBridge 요금이 없다. 전달 실패 경보는 prod에
+1개라 월 0.10달러다.

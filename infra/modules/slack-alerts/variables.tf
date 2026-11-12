@@ -52,6 +52,11 @@ variable "infra_alerts_peer_envs" {
 
 variable "guardduty_findings_enabled" {
   type        = bool
-  description = "bootstrap의 GuardDuty 결과 규칙(accentury-guardduty-findings, KAN-310)이 이 환경의 #infra-alerts 토픽에 publish하도록 토픽 정책에 허용할지. GuardDuty는 계정 단위라 규칙이 prod 토픽 하나만 가리키므로 prod만 true다."
+  description = "GuardDuty 결과(심각도 4 이상)를 이 환경의 #infra-alerts 토픽으로 보낼지 (KAN-310). 규칙, 대상, 토픽 정책 허용, 전달 실패 경보를 만든다. GuardDuty는 계정 단위라 한 환경(prod)만 true다 - 둘 다 켜면 같은 결과가 두 번 온다."
   default     = false
+}
+
+variable "alerts_topic_arn" {
+  type        = string
+  description = "GuardDuty 결과 전달 실패 경보를 보낼 이메일 토픽 (monitoring 모듈의 alerts_topic_arn). guardduty_findings_enabled가 false면 쓰지 않는다."
 }

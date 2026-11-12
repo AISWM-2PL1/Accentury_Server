@@ -30,8 +30,7 @@ AWS 스택 2벌(staging, prod)을 같은 모듈에서 tfvars만 바꿔 짓는다
 infra/
   bootstrap/          계정 공유 리소스. 여기만 로컬 state.
                       state 백엔드(S3), ECR 리포지토리 3개, GitHub OIDC 공급자, ECS 서비스 연결 역할,
-                      음성 전용 버킷 accentury-voice-<계정>(voice.tf), CloudTrail과 GuardDuty(audit.tf),
-                      GuardDuty 결과를 prod 슬랙 토픽으로 보내는 EventBridge 규칙(audit.tf)
+                      음성 전용 버킷 accentury-voice-<계정>(voice.tf), CloudTrail과 GuardDuty(audit.tf)
   modules/
     network/          VPC, 서브넷, 보안 그룹 6종(alb, backend, rds, redis, ai_alb, ai), 내부 호출용 프라이빗 DNS 영역
     data/             RDS PostgreSQL 16, ElastiCache Redis 7.1 복제 그룹 - Refresh 토큰과 번역 일일 한도
@@ -42,7 +41,8 @@ infra/
     edge/             internal ALB(대상 그룹 ip), VPC 오리진, CloudFront, web S3 버킷
     waf/              CloudFront 앞단 웹 ACL. us-east-1 프로바이더로 호출한다
     monitoring/       SNS 이메일과 CloudWatch 경보 16개, 운영 대시보드 1개
-    slack-alerts/     슬랙 Chatbot 채널 설정, 스케일링 알림 Lambda(scale_notify), 음성 수집 리포트 Lambda와 Scheduler
+    slack-alerts/     슬랙 Chatbot 채널 설정, 스케일링 알림 Lambda(scale_notify), 음성 수집 리포트 Lambda와 Scheduler,
+                      GuardDuty 결과 규칙과 전달 실패 경보(prod만)
     deploy/           GitHub Actions가 OIDC로 맡는 환경별 배포 역할
   envs/
     staging/          main.tf + terraform.tfvars
@@ -191,7 +191,7 @@ Terraform 입력의 차이는 `diff -r infra/envs/staging infra/envs/prod`가 �
 | 번역 기록 S3 | 끔 | 켬 | `translation_records_enabled` - 버킷 `accentury-translator-prompt-<계정>`(prevent_destroy), 태스크 역할 PutObject, SSM `ACCENTURY_TRANSLATION_RECORDBUCKET` |
 | 음성 수집 리포트 | 끔 | 켬 | `voice_report_enabled` - slack-alerts 모듈의 리포트 Lambda와 Scheduler |
 | 슬랙 채널 설정 소유 | 소유 안 함 | 소유, staging 경보도 구독 | `slack_channel_configs_enabled`, `slack_infra_alerts_peer_envs = ["staging"]`. 채널당 Chatbot 설정이 1개라 prod가 갖는다 |
-| GuardDuty 결과 슬랙 허용 | 끔 | 켬 | `slack_guardduty_findings_enabled` - slack-alerts 모듈 infra 토픽 정책의 `events.amazonaws.com` 허용(bootstrap 규칙 ARN 조건). 규칙이 prod 토픽만 가리킨다 |
+| GuardDuty 결과 슬랙 알림 | 끔 | 켬 | `slack_guardduty_findings_enabled` - slack-alerts 모듈의 GuardDuty 결과 규칙, 대상, infra 토픽 정책의 `events.amazonaws.com` 허용, 전달 실패 경보. GuardDuty가 계정 단위라 한 환경만 켠다 |
 | AI AMI 파이프라인 | 끔 | 켬(수동 실행, 쓰지 않음) | `ai_ami_pipeline_enabled` - `modules/ai-ami` |
 
 두 환경이 같은 값이라 표에서 뺀 것: backend 태스크 0.5 vCPU / 2 GB와 오토스케일링 1~3(`modules/fargate` 기본값), AI 호스트

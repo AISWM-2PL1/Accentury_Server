@@ -263,6 +263,6 @@ variable "slack_infra_alerts_peer_envs" {
 
 variable "slack_guardduty_findings_enabled" {
   type        = bool
-  description = "bootstrap의 GuardDuty 결과 규칙(KAN-310)이 이 환경의 #infra-alerts 토픽에 넣도록 토픽 정책에 허용할지. GuardDuty는 계정 단위라 규칙이 prod 토픽 하나만 가리키므로 prod만 true다."
+  description = "GuardDuty 결과(심각도 4 이상)를 이 환경의 #infra-alerts로 보낼지 (KAN-310). 규칙과 전달 실패 경보를 만든다. GuardDuty는 계정 단위라 prod만 true다 - 둘 다 켜면 같은 결과가 두 번 온다."
   default     = false
 }
