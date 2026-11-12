@@ -481,3 +481,8 @@ prod env apply(토픽 정책 1건) 뒤 bootstrap apply(규칙과 대상 2건, KA
 apply 직후 bootstrap plan에 `RDS_LOGIN_EVENTS`의 하위 설정 `RDS_DATA_RISK`(RDS 데이터 활동 감시, 꺼짐)를 지우려는 차이가
 나왔다. AWS가 꺼진 채로 붙여 둔 것인데 provider 6.61.0이 이 이름을 `additional_configuration`으로 받지 않아, 그 블록을
 `ignore_changes`로 두었다.
+
+같은 날 PR #72 리뷰로 규칙을 bootstrap에서 prod의 slack-alerts 모듈로 옮기고 이름을 `accentury-prod-guardduty-findings`로
+바꿨다. 처음 구조는 규칙(bootstrap)과 토픽 정책 허용(prod)이 이름 문자열로만 이어져, 한쪽 이름만 바뀌면 두 apply가 모두
+성공하면서 알림만 사라질 수 있었다. 전달 실패 경보 `accentury-prod-guardduty-delivery-failed`(이메일)도 이때 더했고,
+`ignore_changes`를 `RDS_LOGIN_EVENTS` 하나로 좁히려고 그 기능을 별도 리소스로 뗐다(`moved`).

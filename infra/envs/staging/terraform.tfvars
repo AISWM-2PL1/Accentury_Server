@@ -52,7 +52,7 @@ voice_report_enabled = false
 slack_channel_configs_enabled = false
 slack_infra_alerts_peer_envs  = []
 
-# GuardDuty 결과 알림 (KAN-310). 규칙(bootstrap)은 prod 토픽만 가리켜 staging 토픽에는 허용이 필요 없다.
+# GuardDuty 결과 알림 (KAN-310). GuardDuty는 계정 단위라 prod만 보낸다. 여기서도 켜면 같은 결과가 두 번 온다.
 slack_guardduty_findings_enabled = false
 
 ssm_prefix = "/accentury/staging"
