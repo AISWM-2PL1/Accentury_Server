@@ -26,9 +26,17 @@ const context = vm.createContext({});
 vm.runInContext(source + '\nglobalThis.__handler = handler;', context);
 const handler = context.__handler;
 
-/** 함수가 받는 event 모양은 uri 하나만 보면 충분하다. */
-function rewrite(uri) {
-  return handler({ request: { uri } }).uri;
+/**
+ * 함수가 받는 event에서 쓰는 것은 uri와 querystring 둘이다. querystring은 CloudFront가 넘기는 모양
+ * (`{ 키: { value } }`)을 그대로 만든다. 쿼리가 없는 요청에도 빈 객체가 온다.
+ */
+function run(uri, query = {}) {
+  const querystring = Object.fromEntries(Object.entries(query).map(([key, value]) => [key, { value }]));
+  return handler({ request: { uri, querystring } });
+}
+
+function rewrite(uri, query) {
+  return run(uri, query).uri;
 }
 
 test('확장자 없는 경로는 index.html로 돌아간다', () => {
@@ -64,6 +72,50 @@ test('/privacy.html은 재작성되지 않는다 (KAN-133)', () => {
 test('점 없는 이름이 우연히 비슷해도 예약 접두사가 아니면 재작성된다', () => {
   // `/well-known`(점 없음)은 RFC 8615의 그 자리가 아니다 — SPA 경로로 다뤄야 한다.
   assert.equal(rewrite('/well-known/foo'), '/index.html');
+});
+
+// ---------------------------------------------------------------------------
+// 루트는 사투리 이야기 목록, 테스트 화면은 /test (KAN-346)
+// ---------------------------------------------------------------------------
+
+test('쿼리 없는 루트는 사투리 이야기 목록이다 (KAN-346)', () => {
+  assert.equal(rewrite('/'), '/guide/index.html');
+});
+
+test('bridge 쿼리가 붙은 루트는 SPA다 - 스토어에 나간 앱의 진입 주소 (KAN-346)', () => {
+  // 이 줄이 깨지면 이미 배포된 앱의 WebView에 글 목록이 뜬다. 앱은 고칠 수 없으므로 여기서 지킨다.
+  assert.equal(rewrite('/', { bridge: '6', app: '1.4.0' }), '/index.html');
+  assert.equal(rewrite('/', { bridge: '6', app: '1.4.0', screen: 'home' }), '/index.html');
+  // 값이 빈 키도 CloudFront는 키로 넘긴다
+  assert.equal(rewrite('/', { bridge: '' }), '/index.html');
+});
+
+test('screen 쿼리가 붙은 루트는 SPA다 - 전환 전에 만들어진 웹 주소 (KAN-346)', () => {
+  assert.equal(rewrite('/', { screen: 'result', sessionId: 'abc' }), '/index.html');
+});
+
+test('SPA와 무관한 쿼리만 붙은 루트는 목록이다 (KAN-346)', () => {
+  // 광고와 공유 서비스가 붙이는 추적 쿼리가 글 목록을 SPA로 바꾸면 안 된다
+  assert.equal(rewrite('/', { utm_source: 'kakao' }), '/guide/index.html');
+  assert.equal(rewrite('/', { c: 'kko_share' }), '/guide/index.html');
+});
+
+test('/test는 SPA다 (KAN-346)', () => {
+  assert.equal(rewrite('/test'), '/index.html');
+  assert.equal(rewrite('/test', { screen: 'result', sessionId: 'abc' }), '/index.html');
+});
+
+test('/guide/index.html은 루트로 301을 보낸다 (KAN-346)', () => {
+  const response = run('/guide/index.html');
+  assert.equal(response.statusCode, 301);
+  assert.equal(response.headers.location.value, '/');
+  // 브라우저가 301을 기한 없이 기억하지 않게 기한을 준다 - 전환을 되돌릴 수 있어야 한다
+  assert.equal(response.headers['cache-control'].value, 'public, max-age=3600');
+});
+
+test('목록 말고 다른 글과 글의 자산은 그대로 지나간다 (KAN-346)', () => {
+  assert.equal(rewrite('/guide/faq.html'), '/guide/faq.html');
+  assert.equal(rewrite('/guide/assets/Jua-Regular.woff2'), '/guide/assets/Jua-Regular.woff2');
 });
 
 // ---------------------------------------------------------------------------
