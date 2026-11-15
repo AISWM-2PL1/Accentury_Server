@@ -16,8 +16,10 @@ import org.springframework.test.web.servlet.request.MockHttpServletRequestBuilde
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.ObjectMapper;
 
+import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.Map;
+import java.util.Set;
 import java.util.UUID;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -33,7 +35,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 /**
  * 억양 학습 콘텐츠 API의 실행 가능한 명세 (KAN-264, 명세서 §3.17) - 실제 PostgreSQL과 Redis 위에서 가짜 IdP로 돈다.
  * <p>
- * 기대값은 발행본 {@code in-gn-2026.10.1}(V10)을 {@link IntonationLearningRegistry}에서 읽는다 - 발행본이 재발행되면
+ * 기대값은 발행본 {@code in-gn-2026.11.1}(V20, KAN-345)을 {@link IntonationLearningRegistry}에서 읽는다 - 발행본이 재발행되면
  * 테스트가 조용히 옛 내용을 검사하지 않게 하려는 것이다.
  */
 @AutoConfigureMockMvc
@@ -110,18 +112,20 @@ class IntonationLearningApiTest extends IntegrationTest {
     }
 
     @Test
-    void 발행본은_검수한_레벨테스트_음성_풀_전부를_어절_수_레벨로_싣는다() {
+    void 발행본은_구간_다섯에_코스_다섯씩_카드_세_장씩_싣는다() {
         IntonationLearningDefinition current = registry.current().definition();
-        assertEquals("in-gn-2026.10.1", current.contentVersion());
-        // KAN-276이 같은 버전을 검수한 gn-2026.10.2의 음성 124문장으로 덮어썼다 (원래 gn-2026.10.1의 145문장).
-        assertEquals(124, current.courses().stream().mapToInt(course -> course.cards().size()).sum());
+        assertEquals("in-gn-2026.11.1", current.contentVersion());
+        // KAN-345 - 앱 학습 탭의 구간이 level이다. 구간마다 코스 5개, 코스마다 카드 3장이고 seq 순서가 쉬운 순이다.
+        assertEquals(25, current.courses().size());
+        Set<String> scriptKeys = new HashSet<>();
         for (IntonationLearningDefinition.Course course : current.courses()) {
-            assertTrue(course.cards().size() <= 10, course.courseId());
+            assertEquals((course.seq() - 1) / 5 + 1, course.level(), course.courseId());
+            assertEquals(3, course.cards().size(), course.courseId());
             for (IntonationLearningDefinition.Card card : course.cards()) {
-                int words = card.dialect().trim().split("\\s+").length;
-                assertEquals(Math.min(Math.max(words - 8, 1), 5), course.level(), card.cardId());
+                assertTrue(scriptKeys.add(card.scriptKey()), "한 문장이 두 코스에 들어갔다: " + card.cardId());
             }
         }
+        assertEquals(75, scriptKeys.size());
     }
 
     private IntonationLearningDefinition.Course firstCourse() {

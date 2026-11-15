@@ -18,9 +18,11 @@ import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.ObjectMapper;
 
 import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.UUID;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -37,7 +39,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 /**
  * 단어 학습 API의 실행 가능한 명세 (KAN-265, 명세서 §3.16) - 실제 PostgreSQL과 Redis 위에서 가짜 IdP로 돈다.
  * <p>
- * 정답표는 발행본 {@code wd-gn-2026.10.1}(V8)을 {@link WordLearningRegistry}에서 읽는다 - 리터럴로 박지 않는 것은 발행본이
+ * 정답표는 발행본 {@code wd-gn-2026.11.1}(V21, KAN-345)을 {@link WordLearningRegistry}에서 읽는다 - 리터럴로 박지 않는 것은 발행본이
  * 재발행되면 테스트가 조용히 옛 정답을 검사하게 되기 때문이다.
  */
 @AutoConfigureMockMvc
@@ -81,6 +83,25 @@ class WordLearningApiTest extends IntegrationTest {
                         .contentType(MediaType.APPLICATION_JSON).header("Idempotency-Key", "k").content("{\"choiceId\":\"x\"}"))
                 .andExpect(status().isUnauthorized());
         mockMvc.perform(post("/v0/learning/word-attempts/wa_x/complete")).andExpect(status().isUnauthorized());
+    }
+
+    // === 발행본 구성 (KAN-345) ===
+
+    @Test
+    void 발행본은_구간_다섯에_세트_넷씩_문항_세_개씩_싣는다() {
+        WordLearningDefinition current = registry.current().definition();
+        assertEquals("wd-gn-2026.11.1", current.contentVersion());
+        // 앱 학습 탭의 구간이 level이다. 구간마다 세트 4개, 세트마다 문항 3개이고 seq 순서가 쉬운 순이다.
+        assertEquals(20, current.sets().size());
+        Set<String> words = new HashSet<>();
+        for (WordLearningDefinition.Set set : current.sets()) {
+            assertEquals((set.seq() - 1) / 4 + 1, set.level(), set.setId());
+            assertEquals(3, set.items().size(), set.setId());
+            for (WordLearningDefinition.Card card : set.cards()) {
+                assertTrue(words.add(card.dialect()), "한 낱말이 두 세트에 들어갔다: " + card.cardId());
+            }
+        }
+        assertEquals(60, words.size());
     }
 
     // === 조회 (AC 1, AC 2) ===

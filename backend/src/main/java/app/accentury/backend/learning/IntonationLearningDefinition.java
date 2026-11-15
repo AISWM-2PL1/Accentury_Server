@@ -23,7 +23,8 @@ public record IntonationLearningDefinition(String contentVersion, String dialect
      *
      * @param courseId 코스 식별자 (예: ic01)
      * @param seq      목록 순서 (1부터, 레벨 오름차순)
-     * @param level    레벨 1부터 5 - 첫 발행본은 대사의 어절 수로 정했다 (2026-10-08 결정)
+     * @param level    레벨 1부터 5 - 앱 학습 탭의 구간 번호다. 실사용 점수로 쉬운 순을 정한다 (KAN-345, in-gn-2026.11.1부터).
+     *                 첫 발행본은 대사의 어절 수로 정했다 (2026-10-08 결정)
      * @param topic    주제 - 첫 발행본은 원천에 주제 정보가 없어 null이다
      * @param title    코스 제목
      * @param cards    대사 카드 (A-2) - seq 오름차순
