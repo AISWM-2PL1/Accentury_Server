@@ -104,6 +104,29 @@ class WordLearningApiTest extends IntegrationTest {
         assertEquals(60, words.size());
     }
 
+    @Test
+    void 발행본의_식별자는_앞선_발행본과_겹치지_않는다() {
+        // 시도 시작과 세트 상세는 세트를 현재 발행본에서만 찾는다 (WordLearningService). 식별자가 겹치면 배포 전에 받은
+        // 세트 상세로 낸 답이 같은 식별자의 다른 문항으로 오류 없이 채점된다 (PR #73 리뷰). 겹치지 않으면 404나 422다.
+        Set<String> previous = new HashSet<>();
+        for (WordLearningDefinition.Set set : registry.find("wd-gn-2026.10.1").orElseThrow().definition().sets()) {
+            previous.add(set.setId());
+            set.cards().forEach(card -> previous.add(card.cardId()));
+            for (WordLearningDefinition.Item item : set.items()) {
+                previous.add(item.itemId());
+                item.choices().forEach(choice -> previous.add(choice.choiceId()));
+            }
+        }
+        for (WordLearningDefinition.Set set : registry.current().definition().sets()) {
+            assertFalse(previous.contains(set.setId()), set.setId());
+            set.cards().forEach(card -> assertFalse(previous.contains(card.cardId()), card.cardId()));
+            for (WordLearningDefinition.Item item : set.items()) {
+                assertFalse(previous.contains(item.itemId()), item.itemId());
+                item.choices().forEach(choice -> assertFalse(previous.contains(choice.choiceId()), choice.choiceId()));
+            }
+        }
+    }
+
     // === 조회 (AC 1, AC 2) ===
 
     @Test

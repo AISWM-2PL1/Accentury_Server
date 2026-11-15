@@ -14,6 +14,11 @@ S3VocabAnswerSampleStore). 이 스크립트는 버킷에 닿지 않는다. 메�
 집계 규칙
     음성   원천 정의(--source-version)의 VOICE 문항을 scriptKey로 묶는다. 같은 scriptKey면 채점 기준 문장이
            같으므로 testVersion이 달라도(--pool-prefix로 시작하는 정의 전부) 한 문항으로 센다.
+           gn-2026.10.2가 낱말을 고친 넷(v10, v13, v68, v91)은 화면 대사가 gn-2026.10.1과 다른데, 2026-11-15
+           집계에서 이 넷의 gn-2026.10.1 응시는 0건이라 다른 문장이 섞이지 않았다. 다시 집계할 때 대사가
+           바뀐 문항에 옛 정의의 응시가 있으면 --pool-prefix를 원천 정의 하나로 좁힌다.
+           한 사람이 같은 문항을 다시 녹음한 것도 응시 한 건씩 센다 - NaN 비율이 녹음 한 번이 채점 불가로
+           끝날 확률이어야 하기 때문이다. 마지막 결과만 세면 NaN 뒤에 다시 녹음해 성공한 건이 사라진다.
            completed    채점이 끝나 점수가 있는 응시
            unscorable   점수가 NaN으로 나온 응시 (ANALYSIS_UNSCORABLE)
            misread      다른 문장을 읽은 응시 (ANALYSIS_MISREAD) - 문항이 아니라 응시자 쪽 사유라 비율에 넣지 않는다
@@ -36,25 +41,16 @@ import argparse
 import json
 import os
 import re
+import sys
 from pathlib import Path
 
-DOLLAR_QUOTED = re.compile(r"\$(\w*)\$(.*?)\$\1\$", re.S)
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from build_intonation_learning import source_definition  # noqa: E402
+
 QUOTED_WORD = re.compile(r"^'([^']+)'")
 UNSCORABLE = "ANALYSIS_UNSCORABLE"
 MISREAD = "ANALYSIS_MISREAD"
 TOO_QUIET = "AUDIO_TOO_QUIET"
-
-
-def source_definition(migration: Path, test_version: str) -> dict:
-    """마이그레이션 SQL에서 testVersion이 맞는 정의 본문을 찾는다."""
-    for match in DOLLAR_QUOTED.finditer(migration.read_text(encoding="utf-8")):
-        try:
-            body = json.loads(match.group(2))
-        except json.JSONDecodeError:
-            continue
-        if isinstance(body, dict) and body.get("testVersion") == test_version:
-            return body
-    raise SystemExit(f"{migration}에서 testVersion {test_version}의 정의를 찾지 못했다")
 
 
 def dialect_word(item: dict) -> str:

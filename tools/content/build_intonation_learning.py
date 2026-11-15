@@ -50,8 +50,8 @@ def balanced_chunks(count: int, max_size: int) -> list[int]:
     return [base + (1 if i < extra else 0) for i in range(parts)]
 
 
-def source_voice_items(migration: Path, test_version: str) -> list[dict]:
-    """마이그레이션 SQL에서 testVersion이 맞는 정의 본문을 찾아 VOICE 문항을 seq 순으로 돌려준다."""
+def source_definition(migration: Path, test_version: str) -> dict:
+    """마이그레이션 SQL에서 testVersion이 맞는 정의 본문을 찾는다 - 원천 정의를 읽는 도구가 모두 이것을 쓴다."""
     for match in DOLLAR_QUOTED.finditer(migration.read_text(encoding="utf-8")):
         try:
             body = json.loads(match.group(2))
@@ -60,11 +60,17 @@ def source_voice_items(migration: Path, test_version: str) -> list[dict]:
         if isinstance(body, dict) and body.get("testVersion") == test_version:
             if body.get("dialect") != DIALECT:
                 raise SystemExit(f"원천 정의의 dialect가 {body.get('dialect')}다 - 경남만 발행한다")
-            items = sorted((i for i in body["items"] if i["type"] == "VOICE"), key=lambda i: i["seq"])
-            if not items:
-                raise SystemExit(f"{test_version}에 VOICE 문항이 없다")
-            return items
+            return body
     raise SystemExit(f"{migration}에서 testVersion {test_version}의 정의를 찾지 못했다")
+
+
+def source_voice_items(migration: Path, test_version: str) -> list[dict]:
+    """원천 정의의 VOICE 문항을 seq 순으로 돌려준다."""
+    body = source_definition(migration, test_version)
+    items = sorted((i for i in body["items"] if i["type"] == "VOICE"), key=lambda i: i["seq"])
+    if not items:
+        raise SystemExit(f"{test_version}에 VOICE 문항이 없다")
+    return items
 
 
 def build_courses(items: list[dict]) -> list[dict]:
