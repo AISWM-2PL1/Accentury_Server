@@ -24,6 +24,14 @@
                 뒤로 갈수록 어렵다.
     동점        쉬움이 같으면 평균 점수(억양)가 높은 쪽, 그래도 같으면 원천 순서가 앞이다.
 
+식별자와 제목 (2026-11-15, PR #73 리뷰)
+    식별자      발행본마다 겹치지 않게 버전 표식을 넣는다 - in-gn-2026.11.1이면 표식이 26111이고 코스는
+                ic-26111-01, 카드는 ic-26111-01c01, 세트는 ws-26111-01, 문항은 ws-26111-01q01이다. 서버의 녹음
+                업로드와 단어 시도 시작은 식별자를 현재 발행본에서만 찾는다. 식별자를 발행본마다 01부터 다시
+                매기면, 배포 전에 옛 발행본의 화면을 연 사람이 배포 뒤에 낸 녹음과 답이 같은 식별자의 다른
+                문장과 다른 문항으로 오류 없이 채점된다. 표식이 있으면 그 요청은 404가 된다.
+    제목        "코스 1 억양 1", "코스 1 단어 1" 꼴이다. 앞의 코스가 구간(level)이고 뒤가 구간 안의 순서다.
+
 단어 문항의 모양은 첫 발행본과 같다 (build_word_learning.py) - 표준어 → 사투리 한 방향, 보기 4개가 전부 사투리
 낱말이고 오답 3개는 같은 분류의 다른 낱말에서 contentVersion을 시드로 뽑는다. 세트가 분류를 섞으므로 세트의
 category는 "종합"이다.
@@ -45,6 +53,7 @@ from __future__ import annotations
 import argparse
 import json
 import random
+import re
 import sys
 from pathlib import Path
 
@@ -61,6 +70,14 @@ SETS_PER_STAGE = 4
 ITEMS_PER_SET = 3
 NAN_RATE_LIMIT = 0.05
 MIXED_CATEGORY = "종합"
+
+
+def version_tag(content_version: str) -> str:
+    """발행본 버전의 연, 월, 순번을 붙인 표식 - in-gn-2026.11.1 → 26111. 식별자가 발행본끼리 겹치지 않게 한다."""
+    match = re.fullmatch(r"(?:in|wd)-gn-20(\d{2})\.(\d{2})\.(\d+)", content_version)
+    if not match:
+        raise SystemExit(f"버전 꼴이 in-gn-YYYY.MM.N 또는 wd-gn-YYYY.MM.N이 아니다: {content_version}")
+    return "".join(match.groups())
 
 
 def evenly_spaced(ordered: list, count: int) -> list:
@@ -111,18 +128,19 @@ def word_plan(difficulty: dict) -> list[dict]:
     return evenly_spaced(entries, STAGES * SETS_PER_STAGE * ITEMS_PER_SET)
 
 
-def build_courses(plan: list[dict]) -> list[dict]:
+def build_courses(plan: list[dict], content_version: str) -> list[dict]:
+    tag = version_tag(content_version)
     courses = []
     for index in range(0, len(plan), CARDS_PER_COURSE):
         seq = len(courses) + 1
         level = (seq - 1) // COURSES_PER_STAGE + 1
-        course_id = f"ic{seq:02d}"
+        course_id = f"ic-{tag}-{seq:02d}"
         courses.append({
             "courseId": course_id,
             "seq": seq,
             "level": level,
             "topic": None,
-            "title": f"레벨 {level} 코스 {(seq - 1) % COURSES_PER_STAGE + 1}",
+            "title": f"코스 {level} 억양 {(seq - 1) % COURSES_PER_STAGE + 1}",
             "cards": [{
                 "cardId": f"{course_id}c{number:02d}",
                 "seq": number,
@@ -140,12 +158,16 @@ def build_sets(plan: list[dict], content_version: str) -> list[dict]:
     by_category: dict[str, list[str]] = {}
     for category, dialect, *_ in VOCABULARY:
         by_category.setdefault(category, []).append(dialect)
+    for category in {entry["category"] for entry in plan}:
+        if len(by_category[category]) < CHOICE_COUNT:
+            raise SystemExit(f"분류 '{category}'의 낱말이 {len(by_category[category])}개라 오답 3개를 뽑을 수 없다")
+    tag = version_tag(content_version)
     rng = random.Random(content_version)
     sets = []
     for index in range(0, len(plan), ITEMS_PER_SET):
         seq = len(sets) + 1
         level = (seq - 1) // SETS_PER_STAGE + 1
-        set_id = f"ws{seq:02d}"
+        set_id = f"ws-{tag}-{seq:02d}"
         cards, items = [], []
         for number, entry in enumerate(plan[index:index + ITEMS_PER_SET], start=1):
             dialect, standard = entry["dialect"], entry["standard"]
@@ -171,7 +193,7 @@ def build_sets(plan: list[dict], content_version: str) -> list[dict]:
             "seq": seq,
             "level": level,
             "category": MIXED_CATEGORY,
-            "title": f"레벨 {level} 단어 {(seq - 1) % SETS_PER_STAGE + 1}",
+            "title": f"코스 {level} 단어 {(seq - 1) % SETS_PER_STAGE + 1}",
             "cards": cards,
             "items": items,
         })
@@ -277,7 +299,7 @@ def main() -> None:
     source_version = difficulty["sourceVersion"]
     voice, excluded = voice_plan(difficulty, source_voice_items(args.source_migration, source_version))
     words = word_plan(difficulty)
-    courses = build_courses(voice)
+    courses = build_courses(voice, args.intonation_version)
     sets = build_sets(words, args.word_version)
 
     intonation = {"contentVersion": args.intonation_version, "dialect": DIALECT, "courses": courses}

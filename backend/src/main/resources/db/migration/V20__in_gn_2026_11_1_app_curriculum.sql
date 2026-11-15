@@ -17,14 +17,14 @@ values ('in-gn-2026.11.1', 'GYEONGNAM', $definition${
   "dialect": "GYEONGNAM",
   "courses": [
     {
-      "courseId": "ic01",
+      "courseId": "ic-26111-01",
       "seq": 1,
       "level": 1,
       "topic": null,
-      "title": "레벨 1 코스 1",
+      "title": "코스 1 억양 1",
       "cards": [
         {
-          "cardId": "ic01c01",
+          "cardId": "ic-26111-01c01",
           "seq": 1,
           "standard": null,
           "dialect": "맨날천날 무릎팍이 아프다는 양반이 놀러 다닐 때는 안 아픈교?",
@@ -218,7 +218,7 @@ values ('in-gn-2026.11.1', 'GYEONGNAM', $definition${
           "referenceAudioPath": null
         },
         {
-          "cardId": "ic01c02",
+          "cardId": "ic-26111-01c02",
           "seq": 2,
           "standard": null,
           "dialect": "전구가 깜빡깜빡 하더니만 이제는 불이 나가삤는데, 여기 와서 이거 함 봐래이.",
@@ -452,7 +452,7 @@ values ('in-gn-2026.11.1', 'GYEONGNAM', $definition${
           "referenceAudioPath": null
         },
         {
-          "cardId": "ic01c03",
+          "cardId": "ic-26111-01c03",
           "seq": 3,
           "standard": null,
           "dialect": "올해는 부모님 용돈 좀 많이 챙겨드렸으면 하는데, 얼마 정도 드리면 되겠는교?",
@@ -688,14 +688,14 @@ values ('in-gn-2026.11.1', 'GYEONGNAM', $definition${
       ]
     },
     {
-      "courseId": "ic02",
+      "courseId": "ic-26111-02",
       "seq": 2,
       "level": 1,
       "topic": null,
-      "title": "레벨 1 코스 2",
+      "title": "코스 1 억양 2",
       "cards": [
         {
-          "cardId": "ic02c01",
+          "cardId": "ic-26111-02c01",
           "seq": 1,
           "standard": null,
           "dialect": "저 위에 폭포에서 널찌는 물이 얼어서 얼음된 거 한번 보이소.",
@@ -909,7 +909,7 @@ values ('in-gn-2026.11.1', 'GYEONGNAM', $definition${
           "referenceAudioPath": null
         },
         {
-          "cardId": "ic02c02",
+          "cardId": "ic-26111-02c02",
           "seq": 2,
           "standard": null,
           "dialect": "고추장하고 된장 같은 장은 집에서 직접 다 담가 잡수십니까?",
@@ -1103,7 +1103,7 @@ values ('in-gn-2026.11.1', 'GYEONGNAM', $definition${
           "referenceAudioPath": null
         },
         {
-          "cardId": "ic02c03",
+          "cardId": "ic-26111-02c03",
           "seq": 3,
           "standard": null,
           "dialect": "어제 술을 많이 잡수신 거 같던데, 아침에 해장은 하고 나오셨는교?",
@@ -1319,14 +1319,14 @@ values ('in-gn-2026.11.1', 'GYEONGNAM', $definition${
       ]
     },
     {
-      "courseId": "ic03",
+      "courseId": "ic-26111-03",
       "seq": 3,
       "level": 1,
       "topic": null,
-      "title": "레벨 1 코스 3",
+      "title": "코스 1 억양 3",
       "cards": [
         {
-          "cardId": "ic03c01",
+          "cardId": "ic-26111-03c01",
           "seq": 1,
           "standard": null,
           "dialect": "짜게 먹는 것은 건강에 안 좋으니까, 우야든동 싱겁게 먹도록 하이소.",
@@ -1540,7 +1540,7 @@ values ('in-gn-2026.11.1', 'GYEONGNAM', $definition${
           "referenceAudioPath": null
         },
         {
-          "cardId": "ic03c02",
+          "cardId": "ic-26111-03c02",
           "seq": 2,
           "standard": null,
           "dialect": "예전에 여기 고추나 마늘 같은 거 말고, 감자 이런 거는 먹을 만큼만 심었습니까?",
@@ -1814,7 +1814,7 @@ values ('in-gn-2026.11.1', 'GYEONGNAM', $definition${
           "referenceAudioPath": null
         },
         {
-          "cardId": "ic03c03",
+          "cardId": "ic-26111-03c03",
           "seq": 3,
           "standard": null,
           "dialect": "동네에 있는 강이 기프고 깨끗해서, 친구들하고 낚시질해서 물고기 많이 잡아먹고 그랬지예.",
@@ -2050,14 +2050,14 @@ values ('in-gn-2026.11.1', 'GYEONGNAM', $definition${
       ]
     },
     {
-      "courseId": "ic04",
+      "courseId": "ic-26111-04",
       "seq": 4,
       "level": 1,
       "topic": null,
-      "title": "레벨 1 코스 4",
+      "title": "코스 1 억양 4",
       "cards": [
         {
-          "cardId": "ic04c01",
+          "cardId": "ic-26111-04c01",
           "seq": 1,
           "standard": null,
           "dialect": "음식 먹으면 계속 설사하고 토하고 할 때는, 물 많이 잡수고 병원에 가 봐야 합니데이.",
@@ -2351,7 +2351,7 @@ values ('in-gn-2026.11.1', 'GYEONGNAM', $definition${
           "referenceAudioPath": null
         },
         {
-          "cardId": "ic04c02",
+          "cardId": "ic-26111-04c02",
           "seq": 2,
           "standard": null,
           "dialect": "겨울에는 길이 미끄러우이까네, 살살 다녀야지 어디서 이래 다쳤노?",
@@ -2525,7 +2525,7 @@ values ('in-gn-2026.11.1', 'GYEONGNAM', $definition${
           "referenceAudioPath": null
         },
         {
-          "cardId": "ic04c03",
+          "cardId": "ic-26111-04c03",
           "seq": 3,
           "standard": null,
           "dialect": "사월 초파일은 동네 사람들하고 어울려서, 불공도 드리고 설법도 듣고 그래예.",
@@ -2741,14 +2741,14 @@ values ('in-gn-2026.11.1', 'GYEONGNAM', $definition${
       ]
     },
     {
-      "courseId": "ic05",
+      "courseId": "ic-26111-05",
       "seq": 5,
       "level": 1,
       "topic": null,
-      "title": "레벨 1 코스 5",
+      "title": "코스 1 억양 5",
       "cards": [
         {
-          "cardId": "ic05c01",
+          "cardId": "ic-26111-05c01",
           "seq": 1,
           "standard": null,
           "dialect": "아침을 조금 늦게 먹었으이까네, 점심 좀 늦게 차려도 괜찮겠지예?",
@@ -2942,7 +2942,7 @@ values ('in-gn-2026.11.1', 'GYEONGNAM', $definition${
           "referenceAudioPath": null
         },
         {
-          "cardId": "ic05c02",
+          "cardId": "ic-26111-05c02",
           "seq": 2,
           "standard": null,
           "dialect": "내가 남편한테 한 마디 했더니, 삐져서 가삐던데 오늘 왜 그라는교?",
@@ -3156,7 +3156,7 @@ values ('in-gn-2026.11.1', 'GYEONGNAM', $definition${
           "referenceAudioPath": null
         },
         {
-          "cardId": "ic05c03",
+          "cardId": "ic-26111-05c03",
           "seq": 3,
           "standard": null,
           "dialect": "동짓달에 팥죽을 끓이면 신줏단지 앞에 갖다 놓기도 하고, 나눠 먹기도 하고 그래예.",
@@ -3412,14 +3412,14 @@ values ('in-gn-2026.11.1', 'GYEONGNAM', $definition${
       ]
     },
     {
-      "courseId": "ic06",
+      "courseId": "ic-26111-06",
       "seq": 6,
       "level": 2,
       "topic": null,
-      "title": "레벨 2 코스 1",
+      "title": "코스 2 억양 1",
       "cards": [
         {
-          "cardId": "ic06c01",
+          "cardId": "ic-26111-06c01",
           "seq": 1,
           "standard": null,
           "dialect": "다 끓으면 고기를 덜어내고, 뼈는 추려가꼬 내버리고 살을 다시 끓이면 된다.",
@@ -3653,7 +3653,7 @@ values ('in-gn-2026.11.1', 'GYEONGNAM', $definition${
           "referenceAudioPath": null
         },
         {
-          "cardId": "ic06c02",
+          "cardId": "ic-26111-06c02",
           "seq": 2,
           "standard": null,
           "dialect": "여기는 봄만 되면 진달래하고 참나리가 온데만데 피가 억수로 이뻐예.",
@@ -3847,7 +3847,7 @@ values ('in-gn-2026.11.1', 'GYEONGNAM', $definition${
           "referenceAudioPath": null
         },
         {
-          "cardId": "ic06c03",
+          "cardId": "ic-26111-06c03",
           "seq": 3,
           "standard": null,
           "dialect": "우리는 명주로 자식들 옷 해 입히고, 공부시키고 시집 갈 때 이불까지 다 해가 보냈어예.",
@@ -4143,14 +4143,14 @@ values ('in-gn-2026.11.1', 'GYEONGNAM', $definition${
       ]
     },
     {
-      "courseId": "ic07",
+      "courseId": "ic-26111-07",
       "seq": 7,
       "level": 2,
       "topic": null,
-      "title": "레벨 2 코스 2",
+      "title": "코스 2 억양 2",
       "cards": [
         {
-          "cardId": "ic07c01",
+          "cardId": "ic-26111-07c01",
           "seq": 1,
           "standard": null,
           "dialect": "내가 항상 도와줘야 되지, 내 없으면 너희 어머니는 혼자서 아무것도 못한다.",
@@ -4384,7 +4384,7 @@ values ('in-gn-2026.11.1', 'GYEONGNAM', $definition${
           "referenceAudioPath": null
         },
         {
-          "cardId": "ic07c02",
+          "cardId": "ic-26111-07c02",
           "seq": 2,
           "standard": null,
           "dialect": "계단을 내려가다가 허리를 삐끗해서, 욱신욱신하는데 침이라도 맞아야 합니까?",
@@ -4558,7 +4558,7 @@ values ('in-gn-2026.11.1', 'GYEONGNAM', $definition${
           "referenceAudioPath": null
         },
         {
-          "cardId": "ic07c03",
+          "cardId": "ic-26111-07c03",
           "seq": 3,
           "standard": null,
           "dialect": "옷에 기름도 묻고 너무 더러워서 많이 빨았는데, 왜 이래 때가 안 지노?",
@@ -4814,14 +4814,14 @@ values ('in-gn-2026.11.1', 'GYEONGNAM', $definition${
       ]
     },
     {
-      "courseId": "ic08",
+      "courseId": "ic-26111-08",
       "seq": 8,
       "level": 2,
       "topic": null,
-      "title": "레벨 2 코스 3",
+      "title": "코스 2 억양 3",
       "cards": [
         {
-          "cardId": "ic08c01",
+          "cardId": "ic-26111-08c01",
           "seq": 1,
           "standard": null,
           "dialect": "여보, 이따 읍내 나가시는 길에 저 좀 우체국까지 태워 주실 수 있으신교?",
@@ -5075,7 +5075,7 @@ values ('in-gn-2026.11.1', 'GYEONGNAM', $definition${
           "referenceAudioPath": null
         },
         {
-          "cardId": "ic08c02",
+          "cardId": "ic-26111-08c02",
           "seq": 2,
           "standard": null,
           "dialect": "아들아, 사람이 일을 해야 즐겁지, 아무 일도 안 하고 가만히 있으면 재미도 없다이.",
@@ -5349,7 +5349,7 @@ values ('in-gn-2026.11.1', 'GYEONGNAM', $definition${
           "referenceAudioPath": null
         },
         {
-          "cardId": "ic08c03",
+          "cardId": "ic-26111-08c03",
           "seq": 3,
           "standard": null,
           "dialect": "과수원에 원두막이 하나 있는데, 기둥도 기울고 지붕도 낡아서 손을 좀 봐야 돼예.",
@@ -5605,14 +5605,14 @@ values ('in-gn-2026.11.1', 'GYEONGNAM', $definition${
       ]
     },
     {
-      "courseId": "ic09",
+      "courseId": "ic-26111-09",
       "seq": 9,
       "level": 2,
       "topic": null,
-      "title": "레벨 2 코스 4",
+      "title": "코스 2 억양 4",
       "cards": [
         {
-          "cardId": "ic09c01",
+          "cardId": "ic-26111-09c01",
           "seq": 1,
           "standard": null,
           "dialect": "당신이 기다리고 있는 줄도 모르고 천천히 준비해서 나왔는데, 정말 미안하구마.",
@@ -5826,7 +5826,7 @@ values ('in-gn-2026.11.1', 'GYEONGNAM', $definition${
           "referenceAudioPath": null
         },
         {
-          "cardId": "ic09c02",
+          "cardId": "ic-26111-09c02",
           "seq": 2,
           "standard": null,
           "dialect": "나락농사 말고 밭농사도 많이 짓던데, 밭농사는 주로 어떤 걸 짓습니까?",
@@ -6040,7 +6040,7 @@ values ('in-gn-2026.11.1', 'GYEONGNAM', $definition${
           "referenceAudioPath": null
         },
         {
-          "cardId": "ic09c03",
+          "cardId": "ic-26111-09c03",
           "seq": 3,
           "standard": null,
           "dialect": "가자미는 잡자마자 싱싱할 때 막 썰어서, 물회로 먹으면 얼마나 맛있다고예.",
@@ -6256,14 +6256,14 @@ values ('in-gn-2026.11.1', 'GYEONGNAM', $definition${
       ]
     },
     {
-      "courseId": "ic10",
+      "courseId": "ic-26111-10",
       "seq": 10,
       "level": 2,
       "topic": null,
-      "title": "레벨 2 코스 5",
+      "title": "코스 2 억양 5",
       "cards": [
         {
-          "cardId": "ic10c01",
+          "cardId": "ic-26111-10c01",
           "seq": 1,
           "standard": null,
           "dialect": "오늘 바람이 심하이까네, 밖에 있는 돼지를 빨리 우리 안으로 넣으이소.",
@@ -6477,7 +6477,7 @@ values ('in-gn-2026.11.1', 'GYEONGNAM', $definition${
           "referenceAudioPath": null
         },
         {
-          "cardId": "ic10c02",
+          "cardId": "ic-26111-10c02",
           "seq": 2,
           "standard": null,
           "dialect": "강에 큰 돌멩이를 살살 치우면 밑에 메구지가 가만 있는데, 그때 딱 잡으면 됩니다.",
@@ -6751,7 +6751,7 @@ values ('in-gn-2026.11.1', 'GYEONGNAM', $definition${
           "referenceAudioPath": null
         },
         {
-          "cardId": "ic10c03",
+          "cardId": "ic-26111-10c03",
           "seq": 3,
           "standard": null,
           "dialect": "비가 많이 와서 계곡 물이 많이 깊으니까, 너희들 절대로 물에 들가지 마래이.",
@@ -7007,14 +7007,14 @@ values ('in-gn-2026.11.1', 'GYEONGNAM', $definition${
       ]
     },
     {
-      "courseId": "ic11",
+      "courseId": "ic-26111-11",
       "seq": 11,
       "level": 3,
       "topic": null,
-      "title": "레벨 3 코스 1",
+      "title": "코스 3 억양 1",
       "cards": [
         {
-          "cardId": "ic11c01",
+          "cardId": "ic-26111-11c01",
           "seq": 1,
           "standard": null,
           "dialect": "옛날에 방에 드나들 때, 문지방 밟지 마라는 말을 어른들한테 많이 들었슴다.",
@@ -7248,7 +7248,7 @@ values ('in-gn-2026.11.1', 'GYEONGNAM', $definition${
           "referenceAudioPath": null
         },
         {
-          "cardId": "ic11c02",
+          "cardId": "ic-26111-11c02",
           "seq": 2,
           "standard": null,
           "dialect": "장례 관련해서 초상집 같은 데 가서, 하지 말아야 되는 게 있습니까?",
@@ -7482,7 +7482,7 @@ values ('in-gn-2026.11.1', 'GYEONGNAM', $definition${
           "referenceAudioPath": null
         },
         {
-          "cardId": "ic11c03",
+          "cardId": "ic-26111-11c03",
           "seq": 3,
           "standard": null,
           "dialect": "전에는 여기 재봉틀이 있었고 저기 책상이 있었는데, 오랜만에 오니까 많이 바꼈네.",
@@ -7718,14 +7718,14 @@ values ('in-gn-2026.11.1', 'GYEONGNAM', $definition${
       ]
     },
     {
-      "courseId": "ic12",
+      "courseId": "ic-26111-12",
       "seq": 12,
       "level": 3,
       "topic": null,
-      "title": "레벨 3 코스 2",
+      "title": "코스 3 억양 2",
       "cards": [
         {
-          "cardId": "ic12c01",
+          "cardId": "ic-26111-12c01",
           "seq": 1,
           "standard": null,
           "dialect": "이제 알아먹을 만큼 많이 이야기를 많이 했으이까네, 애들한테 야단 좀 그만 치시소.",
@@ -7979,7 +7979,7 @@ values ('in-gn-2026.11.1', 'GYEONGNAM', $definition${
           "referenceAudioPath": null
         },
         {
-          "cardId": "ic12c02",
+          "cardId": "ic-26111-12c02",
           "seq": 2,
           "standard": null,
           "dialect": "집 안에 소 먹일 때 쓰는 시설이나 도굿바는 어떤 게 있습니까?",
@@ -8213,7 +8213,7 @@ values ('in-gn-2026.11.1', 'GYEONGNAM', $definition${
           "referenceAudioPath": null
         },
         {
-          "cardId": "ic12c03",
+          "cardId": "ic-26111-12c03",
           "seq": 3,
           "standard": null,
           "dialect": "약초 캐면 우리가 집에서 먹기도 하고, 남으면 약방에 내다 팔기도 하고 그래예.",
@@ -8469,14 +8469,14 @@ values ('in-gn-2026.11.1', 'GYEONGNAM', $definition${
       ]
     },
     {
-      "courseId": "ic13",
+      "courseId": "ic-26111-13",
       "seq": 13,
       "level": 3,
       "topic": null,
-      "title": "레벨 3 코스 3",
+      "title": "코스 3 억양 3",
       "cards": [
         {
-          "cardId": "ic13c01",
+          "cardId": "ic-26111-13c01",
           "seq": 1,
           "standard": null,
           "dialect": "명절에 친척이 많으이까네, 방이 모자라서 마루에서도 자고 한 방에 모여서 자고 그랬어요.",
@@ -8730,7 +8730,7 @@ values ('in-gn-2026.11.1', 'GYEONGNAM', $definition${
           "referenceAudioPath": null
         },
         {
-          "cardId": "ic13c02",
+          "cardId": "ic-26111-13c02",
           "seq": 2,
           "standard": null,
           "dialect": "가스 냄새 같은 게 나이까네, 빨리 창문 열고 밸브 잠겼는지 확인해 주이소.",
@@ -8984,7 +8984,7 @@ values ('in-gn-2026.11.1', 'GYEONGNAM', $definition${
           "referenceAudioPath": null
         },
         {
-          "cardId": "ic13c03",
+          "cardId": "ic-26111-13c03",
           "seq": 3,
           "standard": null,
           "dialect": "이러쿠럼 무덥덥한 날에는 국물김치하고 소면만 있어도 맛있게 먹을 수 있는 거 아이가.",
@@ -9240,14 +9240,14 @@ values ('in-gn-2026.11.1', 'GYEONGNAM', $definition${
       ]
     },
     {
-      "courseId": "ic14",
+      "courseId": "ic-26111-14",
       "seq": 14,
       "level": 3,
       "topic": null,
-      "title": "레벨 3 코스 4",
+      "title": "코스 3 억양 4",
       "cards": [
         {
-          "cardId": "ic14c01",
+          "cardId": "ic-26111-14c01",
           "seq": 1,
           "standard": null,
           "dialect": "옛날에는 산에 올라갔다가 멧돼지 같은 길짐승을 만난 적이 많았습니까?",
@@ -9441,7 +9441,7 @@ values ('in-gn-2026.11.1', 'GYEONGNAM', $definition${
           "referenceAudioPath": null
         },
         {
-          "cardId": "ic14c02",
+          "cardId": "ic-26111-14c02",
           "seq": 2,
           "standard": null,
           "dialect": "베틀에 앉아 일하면 허리가 제일 아픕니까? 아니면 어디가 제일 많이 아픈교?",
@@ -9675,7 +9675,7 @@ values ('in-gn-2026.11.1', 'GYEONGNAM', $definition${
           "referenceAudioPath": null
         },
         {
-          "cardId": "ic14c03",
+          "cardId": "ic-26111-14c03",
           "seq": 3,
           "standard": null,
           "dialect": "아줌마가 약을 챙겨 먹을 생각을 안 하이까네, 병이 나을 리가 있겠는교?",
@@ -9911,14 +9911,14 @@ values ('in-gn-2026.11.1', 'GYEONGNAM', $definition${
       ]
     },
     {
-      "courseId": "ic15",
+      "courseId": "ic-26111-15",
       "seq": 15,
       "level": 3,
       "topic": null,
-      "title": "레벨 3 코스 5",
+      "title": "코스 3 억양 5",
       "cards": [
         {
-          "cardId": "ic15c01",
+          "cardId": "ic-26111-15c01",
           "seq": 1,
           "standard": null,
           "dialect": "땔감이 거의 떨졌는데, 내일 산에 가서 나무 좀 해 오실 수 있능교?",
@@ -10172,7 +10172,7 @@ values ('in-gn-2026.11.1', 'GYEONGNAM', $definition${
           "referenceAudioPath": null
         },
         {
-          "cardId": "ic15c02",
+          "cardId": "ic-26111-15c02",
           "seq": 2,
           "standard": null,
           "dialect": "알라 울리지 마라고 했는데, 니 한번만 더 동생한테 그러면 가만 안 나놓는데이.",
@@ -10426,7 +10426,7 @@ values ('in-gn-2026.11.1', 'GYEONGNAM', $definition${
           "referenceAudioPath": null
         },
         {
-          "cardId": "ic15c03",
+          "cardId": "ic-26111-15c03",
           "seq": 3,
           "standard": null,
           "dialect": "제사를 모실려면 돈이 많이 드는데, 그 돈은 우예 마련하는교?",
@@ -10622,14 +10622,14 @@ values ('in-gn-2026.11.1', 'GYEONGNAM', $definition${
       ]
     },
     {
-      "courseId": "ic16",
+      "courseId": "ic-26111-16",
       "seq": 16,
       "level": 4,
       "topic": null,
-      "title": "레벨 4 코스 1",
+      "title": "코스 4 억양 1",
       "cards": [
         {
-          "cardId": "ic16c01",
+          "cardId": "ic-26111-16c01",
           "seq": 1,
           "standard": null,
           "dialect": "여보, 지금 은행에 가려고 하는데, 지난번 빌린 곗돈 이자가 얼마라고 했노?",
@@ -10863,7 +10863,7 @@ values ('in-gn-2026.11.1', 'GYEONGNAM', $definition${
           "referenceAudioPath": null
         },
         {
-          "cardId": "ic16c02",
+          "cardId": "ic-26111-16c02",
           "seq": 2,
           "standard": null,
           "dialect": "이 구두 하나만 계속 신고 댕기이까네, 이제 굽이 닳아서 갈아야 되겠네.",
@@ -11097,7 +11097,7 @@ values ('in-gn-2026.11.1', 'GYEONGNAM', $definition${
           "referenceAudioPath": null
         },
         {
-          "cardId": "ic16c03",
+          "cardId": "ic-26111-16c03",
           "seq": 3,
           "standard": null,
           "dialect": "친구가 전선을 만지다가 감전이 되가, 의식이 없는데 우예 해야 됩니까?",
@@ -11313,14 +11313,14 @@ values ('in-gn-2026.11.1', 'GYEONGNAM', $definition${
       ]
     },
     {
-      "courseId": "ic17",
+      "courseId": "ic-26111-17",
       "seq": 17,
       "level": 4,
       "topic": null,
-      "title": "레벨 4 코스 2",
+      "title": "코스 4 억양 2",
       "cards": [
         {
-          "cardId": "ic17c01",
+          "cardId": "ic-26111-17c01",
           "seq": 1,
           "standard": null,
           "dialect": "옷은 과일 껍데기나 꽃이파리 같은 걸로 물들이는데, 직접 집에서 물들이가 입었어.",
@@ -11554,7 +11554,7 @@ values ('in-gn-2026.11.1', 'GYEONGNAM', $definition${
           "referenceAudioPath": null
         },
         {
-          "cardId": "ic17c02",
+          "cardId": "ic-26111-17c02",
           "seq": 2,
           "standard": null,
           "dialect": "어머니요, 이번 결혼기념일에는 아버지한테 여행 한번 가자고 하이소.",
@@ -11728,7 +11728,7 @@ values ('in-gn-2026.11.1', 'GYEONGNAM', $definition${
           "referenceAudioPath": null
         },
         {
-          "cardId": "ic17c03",
+          "cardId": "ic-26111-17c03",
           "seq": 3,
           "standard": null,
           "dialect": "많이 아프면 병원에 가 봐야지, 집에만 누워서 있으면 되겠는교?",
@@ -11924,14 +11924,14 @@ values ('in-gn-2026.11.1', 'GYEONGNAM', $definition${
       ]
     },
     {
-      "courseId": "ic18",
+      "courseId": "ic-26111-18",
       "seq": 18,
       "level": 4,
       "topic": null,
-      "title": "레벨 4 코스 3",
+      "title": "코스 4 억양 3",
       "cards": [
         {
-          "cardId": "ic18c01",
+          "cardId": "ic-26111-18c01",
           "seq": 1,
           "standard": null,
           "dialect": "엄마 손잡고 있는 머슴아가 초등학교에 다니는 우리 손자인데, 이 사진 좀 보이소.",
@@ -12185,7 +12185,7 @@ values ('in-gn-2026.11.1', 'GYEONGNAM', $definition${
           "referenceAudioPath": null
         },
         {
-          "cardId": "ic18c02",
+          "cardId": "ic-26111-18c02",
           "seq": 2,
           "standard": null,
           "dialect": "기둥 세우기 전에 주춧돌을 놓는데, 주춧돌은 주로 어떤 걸로 가져다 씁니까?",
@@ -12419,7 +12419,7 @@ values ('in-gn-2026.11.1', 'GYEONGNAM', $definition${
           "referenceAudioPath": null
         },
         {
-          "cardId": "ic18c03",
+          "cardId": "ic-26111-18c03",
           "seq": 3,
           "standard": null,
           "dialect": "지난 주말에는 감기에 걸려서 아무것도 못하고, 방안에 누워 있었다 아이가.",
@@ -12635,14 +12635,14 @@ values ('in-gn-2026.11.1', 'GYEONGNAM', $definition${
       ]
     },
     {
-      "courseId": "ic19",
+      "courseId": "ic-26111-19",
       "seq": 19,
       "level": 4,
       "topic": null,
-      "title": "레벨 4 코스 4",
+      "title": "코스 4 억양 4",
       "cards": [
         {
-          "cardId": "ic19c01",
+          "cardId": "ic-26111-19c01",
           "seq": 1,
           "standard": null,
           "dialect": "지방마다는 다를 겁니다만, 그래도 우리는 음력으로 명절을 많이 안 쉽니까?",
@@ -12856,7 +12856,7 @@ values ('in-gn-2026.11.1', 'GYEONGNAM', $definition${
           "referenceAudioPath": null
         },
         {
-          "cardId": "ic19c02",
+          "cardId": "ic-26111-19c02",
           "seq": 2,
           "standard": null,
           "dialect": "우리 가족이 일 년 정도 여기 살다가 장사하러 가서, 삼 년 동안 살림을 다 털어먹어 삐맀어예.",
@@ -13190,7 +13190,7 @@ values ('in-gn-2026.11.1', 'GYEONGNAM', $definition${
           "referenceAudioPath": null
         },
         {
-          "cardId": "ic19c03",
+          "cardId": "ic-26111-19c03",
           "seq": 3,
           "standard": null,
           "dialect": "길 가다가 차에 조금 부딪혔는데, 그래도 병원에서 진찰을 받아 보는 게 좋겠지요?",
@@ -13446,14 +13446,14 @@ values ('in-gn-2026.11.1', 'GYEONGNAM', $definition${
       ]
     },
     {
-      "courseId": "ic20",
+      "courseId": "ic-26111-20",
       "seq": 20,
       "level": 4,
       "topic": null,
-      "title": "레벨 4 코스 5",
+      "title": "코스 4 억양 5",
       "cards": [
         {
-          "cardId": "ic20c01",
+          "cardId": "ic-26111-20c01",
           "seq": 1,
           "standard": null,
           "dialect": "산불이 번져서, 집 주위에 물도 가무치고 가스통 치우고 정말 생난리가 났다 아닌교.",
@@ -13707,7 +13707,7 @@ values ('in-gn-2026.11.1', 'GYEONGNAM', $definition${
           "referenceAudioPath": null
         },
         {
-          "cardId": "ic20c02",
+          "cardId": "ic-26111-20c02",
           "seq": 2,
           "standard": null,
           "dialect": "논두렁에 전선이 늘어져 있거나, 정전이 됐을 때 두꺼비집을 무짜로 만지면 위험합니다.",
@@ -13941,7 +13941,7 @@ values ('in-gn-2026.11.1', 'GYEONGNAM', $definition${
           "referenceAudioPath": null
         },
         {
-          "cardId": "ic20c03",
+          "cardId": "ic-26111-20c03",
           "seq": 3,
           "standard": null,
           "dialect": "날씨가 많이 더우이까네 축사 창문 열어 놓고 오후에는 지붕에 물도 뿌리래이.",
@@ -14177,14 +14177,14 @@ values ('in-gn-2026.11.1', 'GYEONGNAM', $definition${
       ]
     },
     {
-      "courseId": "ic21",
+      "courseId": "ic-26111-21",
       "seq": 21,
       "level": 5,
       "topic": null,
-      "title": "레벨 5 코스 1",
+      "title": "코스 5 억양 1",
       "cards": [
         {
-          "cardId": "ic21c01",
+          "cardId": "ic-26111-21c01",
           "seq": 1,
           "standard": null,
           "dialect": "식구는 많고 먹을 건 없어서, 만날천날 쑥 캐 가지고 저녁 때마다 그걸로 해 먹었어예.",
@@ -14478,7 +14478,7 @@ values ('in-gn-2026.11.1', 'GYEONGNAM', $definition${
           "referenceAudioPath": null
         },
         {
-          "cardId": "ic21c02",
+          "cardId": "ic-26111-21c02",
           "seq": 2,
           "standard": null,
           "dialect": "옛날부터 나물 먼저 먹으면 흉년 진다 쿠고, 밥 먼저 먹으면 풍년진다 쿠더라고요.",
@@ -14732,7 +14732,7 @@ values ('in-gn-2026.11.1', 'GYEONGNAM', $definition${
           "referenceAudioPath": null
         },
         {
-          "cardId": "ic21c03",
+          "cardId": "ic-26111-21c03",
           "seq": 3,
           "standard": null,
           "dialect": "음식을 많이 장만하려고 하면, 일 손이 모자라서 음식 하기가 안 힘들었습니까?",
@@ -14968,14 +14968,14 @@ values ('in-gn-2026.11.1', 'GYEONGNAM', $definition${
       ]
     },
     {
-      "courseId": "ic22",
+      "courseId": "ic-26111-22",
       "seq": 22,
       "level": 5,
       "topic": null,
-      "title": "레벨 5 코스 2",
+      "title": "코스 5 억양 2",
       "cards": [
         {
-          "cardId": "ic22c01",
+          "cardId": "ic-26111-22c01",
           "seq": 1,
           "standard": null,
           "dialect": "처마가 길게 뻗어서 햇빛도 막아 주고, 비도 막아 주이까네 참 좋아예.",
@@ -15209,7 +15209,7 @@ values ('in-gn-2026.11.1', 'GYEONGNAM', $definition${
           "referenceAudioPath": null
         },
         {
-          "cardId": "ic22c02",
+          "cardId": "ic-26111-22c02",
           "seq": 2,
           "standard": null,
           "dialect": "할머니가 밭일하다가 쓰러지길래, 깜짝 놀라서 할머니를 바로 업고 병원에 데리고 갔어예.",
@@ -15443,7 +15443,7 @@ values ('in-gn-2026.11.1', 'GYEONGNAM', $definition${
           "referenceAudioPath": null
         },
         {
-          "cardId": "ic22c03",
+          "cardId": "ic-26111-22c03",
           "seq": 3,
           "standard": null,
           "dialect": "땡볕에 밭에서 일하다가 어지러우면, 바로 그늘에 가서 물 마시고 좀 쉬야 돼예.",
@@ -15699,14 +15699,14 @@ values ('in-gn-2026.11.1', 'GYEONGNAM', $definition${
       ]
     },
     {
-      "courseId": "ic23",
+      "courseId": "ic-26111-23",
       "seq": 23,
       "level": 5,
       "topic": null,
-      "title": "레벨 5 코스 3",
+      "title": "코스 5 억양 3",
       "cards": [
         {
-          "cardId": "ic23c01",
+          "cardId": "ic-26111-23c01",
           "seq": 1,
           "standard": null,
           "dialect": "할배 환갑 때 우리 과수밭에서 찍은 가족 사진은 어디 두었어예?",
@@ -15920,7 +15920,7 @@ values ('in-gn-2026.11.1', 'GYEONGNAM', $definition${
           "referenceAudioPath": null
         },
         {
-          "cardId": "ic23c02",
+          "cardId": "ic-26111-23c02",
           "seq": 2,
           "standard": null,
           "dialect": "잔치국수를 워낙 좋아해서 입에 넣은 걸 넘기지도 않고, 또 집어넣고 이런다이까네.",
@@ -16154,7 +16154,7 @@ values ('in-gn-2026.11.1', 'GYEONGNAM', $definition${
           "referenceAudioPath": null
         },
         {
-          "cardId": "ic23c03",
+          "cardId": "ic-26111-23c03",
           "seq": 3,
           "standard": null,
           "dialect": "배추는 뽑으면 김장해 가지고 보관해 놓고, 무는 마당 귀퉁이에 묻어 놔요.",
@@ -16390,14 +16390,14 @@ values ('in-gn-2026.11.1', 'GYEONGNAM', $definition${
       ]
     },
     {
-      "courseId": "ic24",
+      "courseId": "ic-26111-24",
       "seq": 24,
       "level": 5,
       "topic": null,
-      "title": "레벨 5 코스 4",
+      "title": "코스 5 억양 4",
       "cards": [
         {
-          "cardId": "ic24c01",
+          "cardId": "ic-26111-24c01",
           "seq": 1,
           "standard": null,
           "dialect": "아침 저녁으로 춥고 비도 조금 온다고 하이까네, 옷 따시게 입고 온나.",
@@ -16631,7 +16631,7 @@ values ('in-gn-2026.11.1', 'GYEONGNAM', $definition${
           "referenceAudioPath": null
         },
         {
-          "cardId": "ic24c02",
+          "cardId": "ic-26111-24c02",
           "seq": 2,
           "standard": null,
           "dialect": "음식이 목에 걸려서 숨을 못 쉴 때는 뒤에서 안고, 배 부분을 위로 밀어 올려서 빼내야 합니다.",
@@ -16965,7 +16965,7 @@ values ('in-gn-2026.11.1', 'GYEONGNAM', $definition${
           "referenceAudioPath": null
         },
         {
-          "cardId": "ic24c03",
+          "cardId": "ic-26111-24c03",
           "seq": 3,
           "standard": null,
           "dialect": "장독은 공기가 안으로 통하이까네, 장 같은 건 장독에 보관해야 된데이.",
@@ -17181,14 +17181,14 @@ values ('in-gn-2026.11.1', 'GYEONGNAM', $definition${
       ]
     },
     {
-      "courseId": "ic25",
+      "courseId": "ic-26111-25",
       "seq": 25,
       "level": 5,
       "topic": null,
-      "title": "레벨 5 코스 5",
+      "title": "코스 5 억양 5",
       "cards": [
         {
-          "cardId": "ic25c01",
+          "cardId": "ic-26111-25c01",
           "seq": 1,
           "standard": null,
           "dialect": "과일나무 키울 때는 어떤 비료를 쓰면, 나무가 잘 자랍니까?",
@@ -17382,7 +17382,7 @@ values ('in-gn-2026.11.1', 'GYEONGNAM', $definition${
           "referenceAudioPath": null
         },
         {
-          "cardId": "ic25c02",
+          "cardId": "ic-26111-25c02",
           "seq": 2,
           "standard": null,
           "dialect": "이 정도 기와집을 지을라 하면, 인부 몇 명이 얼마 동안 일해야 합니까?",
@@ -17636,7 +17636,7 @@ values ('in-gn-2026.11.1', 'GYEONGNAM', $definition${
           "referenceAudioPath": null
         },
         {
-          "cardId": "ic25c03",
+          "cardId": "ic-26111-25c03",
           "seq": 3,
           "standard": null,
           "dialect": "예전하고 요즘하고 나락 타작하는 방법이 우예 달라졌는지 이야기해 주이소.",
