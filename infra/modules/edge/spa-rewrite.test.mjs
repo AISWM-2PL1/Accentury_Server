@@ -94,10 +94,16 @@ test('screen 쿼리가 붙은 루트는 SPA다 - 전환 전에 만들어진 웹 
   assert.equal(rewrite('/', { screen: 'result', sessionId: 'abc' }), '/index.html');
 });
 
-test('SPA와 무관한 쿼리만 붙은 루트는 목록이다 (KAN-346)', () => {
-  // 광고와 공유 서비스가 붙이는 추적 쿼리가 글 목록을 SPA로 바꾸면 안 된다
+test('c 쿼리가 붙은 루트는 SPA다 - 공유 유입 계측 코드 (KAN-346)', () => {
+  // 목록으로 보내면 목록의 테스트 버튼이 쿼리 없는 /test라 계측 코드가 사라진다
+  assert.equal(rewrite('/', { c: 'kko_share' }), '/index.html');
+  assert.equal(rewrite('/', { c: 'ig_ad_c', utm_source: 'ig' }), '/index.html');
+});
+
+test('SPA가 읽지 않는 쿼리만 붙은 루트는 목록이다 (KAN-346)', () => {
+  // 밖에서 들어오는 링크가 붙이는 추적 쿼리가 첫 화면을 SPA로 바꾸면 안 된다
   assert.equal(rewrite('/', { utm_source: 'kakao' }), '/guide/index.html');
-  assert.equal(rewrite('/', { c: 'kko_share' }), '/guide/index.html');
+  assert.equal(rewrite('/', { utm_source: 'ig', utm_medium: 'paid', fbclid: 'x' }), '/guide/index.html');
 });
 
 test('/test는 SPA다 (KAN-346)', () => {
@@ -105,12 +111,35 @@ test('/test는 SPA다 (KAN-346)', () => {
   assert.equal(rewrite('/test', { screen: 'result', sessionId: 'abc' }), '/index.html');
 });
 
-test('/guide/index.html은 루트로 301을 보낸다 (KAN-346)', () => {
-  const response = run('/guide/index.html');
-  assert.equal(response.statusCode, 301);
-  assert.equal(response.headers.location.value, '/');
-  // 브라우저가 301을 기한 없이 기억하지 않게 기한을 준다 - 전환을 되돌릴 수 있어야 한다
-  assert.equal(response.headers['cache-control'].value, 'public, max-age=3600');
+test('목록의 옛 주소는 루트로 301을 보낸다 (KAN-346)', () => {
+  // 확장자 없는 두 주소를 빼면 아래 규칙이 SPA를 내줘서 목록의 주소에 테스트 화면이 뜬다
+  for (const uri of ['/guide/index.html', '/guide', '/guide/']) {
+    const response = run(uri);
+    assert.equal(response.statusCode, 301, uri);
+    assert.equal(response.headers.location.value, '/', uri);
+    // 브라우저가 301을 기한 없이 기억하지 않게 기한을 준다 - 전환을 되돌릴 수 있어야 한다
+    assert.equal(response.headers['cache-control'].value, 'public, max-age=3600', uri);
+  }
+});
+
+test('301이 쿼리를 그대로 싣는다 (KAN-346)', () => {
+  // 버리면 utm이 붙은 옛 링크의 유입이 분석 도구에서 직접 방문으로 잡힌다
+  assert.equal(
+    run('/guide/index.html', { utm_source: 'naver', utm_campaign: 'x' }).headers.location.value,
+    '/?utm_source=naver&utm_campaign=x',
+  );
+  // 값은 CloudFront가 넘긴 그대로(인코딩된 채) 붙이고, 값이 빈 키는 키만 적는다
+  assert.equal(run('/guide/', { q: '%EC%82%AC%ED%88%AC%EB%A6%AC', flag: '' }).headers.location.value, '/?q=%EC%82%AC%ED%88%AC%EB%A6%AC&flag');
+});
+
+test('301이 같은 키가 여러 번 온 쿼리를 전부 싣는다 (KAN-346)', () => {
+  const response = handler({
+    request: {
+      uri: '/guide/index.html',
+      querystring: { tag: { value: 'a', multiValue: [{ value: 'a' }, { value: 'b' }] } },
+    },
+  });
+  assert.equal(response.headers.location.value, '/?tag=a&tag=b');
 });
 
 test('목록 말고 다른 글과 글의 자산은 그대로 지나간다 (KAN-346)', () => {
