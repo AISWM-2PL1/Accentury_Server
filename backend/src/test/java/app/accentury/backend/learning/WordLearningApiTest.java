@@ -4,6 +4,7 @@ import app.accentury.backend.IntegrationTest;
 import app.accentury.backend.RedisTestcontainer;
 import app.accentury.backend.common.AccenturyProperties;
 import org.junit.jupiter.api.Test;
+import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
 import org.springframework.context.annotation.Import;
@@ -17,6 +18,7 @@ import org.springframework.test.web.servlet.request.MockHttpServletRequestBuilde
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.ObjectMapper;
 
+import java.time.Instant;
 import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
@@ -29,6 +31,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
@@ -486,12 +489,12 @@ class WordLearningApiTest extends IntegrationTest {
     }
 
     @Test
-    void 마이그레이션_뒤에도_보기가_있는_기존_답안_행은_그대로_읽히고_보기_열만_null을_허용한다() throws Exception {
+    void 마이그레이션_뒤에도_보기가_있는_기존_답안_행은_그대로_읽힌다() throws Exception {
         String access = signUp();
         WordLearningDefinition.Set set = firstSet();
         String attemptId = startAttempt(access, set.setId());
         WordLearningDefinition.Item item = set.items().get(0);
-        // 마이그레이션 전 모양의 행(보기가 있는 답안)을 표에 직접 넣는다.
+        // 마이그레이션 전 모양의 행(보기가 있는 답안)을 표에 직접 넣는다. 열의 null 허용 대조는 SchemaBaselineTest가 맡는다.
         jdbc.update("""
                         insert into word_attempt_answer
                             (id, attempt_id, item_id, choice_id, is_correct, idempotency_key, created_at)
@@ -506,20 +509,29 @@ class WordLearningApiTest extends IntegrationTest {
         answer(access, attemptId, item.itemId(), "legacy-key", item.correctChoiceId())
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.correct").value(true));
+    }
 
-        assertEquals("YES", jdbc.queryForObject("""
-                select is_nullable from information_schema.columns
-                 where table_name = 'word_attempt_answer' and column_name = 'choice_id'
-                """, String.class));
-        // 다른 열과 레벨테스트 어휘 답안의 보기 열은 그대로 NOT NULL이다.
-        assertEquals("NO", jdbc.queryForObject("""
-                select is_nullable from information_schema.columns
-                 where table_name = 'word_attempt_answer' and column_name = 'is_correct'
-                """, String.class));
-        assertEquals("NO", jdbc.queryForObject("""
-                select is_nullable from information_schema.columns
-                 where table_name = 'vocab_answer' and column_name = 'choice_id'
-                """, String.class));
+    @Test
+    void 보기가_없는데_정답인_답안_행은_DB가_거부한다() throws Exception {
+        String access = signUp();
+        WordLearningDefinition.Set set = firstSet();
+        String attemptId = startAttempt(access, set.setId());
+        List<WordLearningDefinition.Item> items = set.items();
+        String insert = """
+                insert into word_attempt_answer
+                    (id, attempt_id, item_id, choice_id, is_correct, idempotency_key, created_at)
+                values (?, ?, ?, null, ?, 'direct-key', now())
+                """;
+
+        // 엔티티 생성자를 거치지 않는 쓰기도 시간 초과를 정답으로 넣지 못한다 (V22의 check 제약).
+        DataIntegrityViolationException rejected = assertThrows(DataIntegrityViolationException.class,
+                () -> jdbc.update(insert, "waa_" + UUID.randomUUID(), attemptId, items.get(0).itemId(), true));
+        assertTrue(String.valueOf(rejected.getMessage()).contains("ck_word_attempt_answer_timeout_wrong"));
+        // 보기가 없는 오답은 받는다.
+        assertEquals(1, jdbc.update(insert, "waa_" + UUID.randomUUID(), attemptId, items.get(1).itemId(), false));
+        // 생성자도 같은 것을 막는다.
+        assertThrows(IllegalArgumentException.class, () -> new WordAttemptAnswer("waa_x", attemptId,
+                items.get(2).itemId(), null, true, "k", Instant.now()));
     }
 
     // === 오답 저장과 탈퇴 (AC 5) ===
