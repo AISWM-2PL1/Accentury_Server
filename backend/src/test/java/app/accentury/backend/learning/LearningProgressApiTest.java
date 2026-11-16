@@ -555,6 +555,271 @@ class LearningProgressApiTest extends IntegrationTest {
         assertEquals(next.setId(), home(account).get("recommendedSetId").asString());
     }
 
+    // === 세트 점수와 별, 구간 요약 (KAN-359) ===
+
+    @Test
+    void 토큰이_없으면_구간_요약은_401이다() throws Exception {
+        mockMvc.perform(get("/v0/learning/levels")).andExpect(status().isUnauthorized())
+                .andExpect(jsonPath("$.code").value("AUTH_TOKEN_INVALID"));
+    }
+
+    @Test
+    void 억양_세트_점수는_카드별_최고_점수의_평균이고_실패와_처리_중은_세지_않는다() throws Exception {
+        Account account = signUp();
+        IntonationLearningRegistry.Published current = intonationRegistry.current();
+        String version = current.definition().contentVersion();
+        IntonationLearningDefinition.Course course = coursesAtLowestLevel(current).get(0);
+        List<IntonationLearningDefinition.Card> cards = course.cards();
+        assertEquals(3, cards.size(), "이 테스트는 카드 3장짜리 코스를 전제로 점수를 고른다");
+        String card0 = cards.get(0).cardId();
+        String card1 = cards.get(1).cardId();
+        String card2 = cards.get(2).cardId();
+
+        // 완료하지 않은 코스는 점수가 null이고 별이 0이다.
+        JsonNode summary = find(courses(account).get("courses"), "courseId", course.courseId());
+        assertTrue(summary.get("score").isNull());
+        assertEquals(0, summary.get("stars").asInt());
+
+        // 카드 두 장만 마치면 아직 세트 점수가 없다. 실패와 처리 중 시도는 점수가 있어도 세지 않는다.
+        seedAttempt(account.userId(), version, card0, "COMPLETED", 70, Instant.now());
+        seedAttempt(account.userId(), version, card1, "COMPLETED", 70, Instant.now());
+        seedAttempt(account.userId(), version, card2, "FAILED", 100, Instant.now());
+        seedAttempt(account.userId(), version, card2, "RETRYABLE_FAILED", 100, Instant.now());
+        seedAttempt(account.userId(), version, card2, "PROCESSING", 100, Instant.now());
+        summary = find(courses(account).get("courses"), "courseId", course.courseId());
+        assertEquals(2, summary.get("completedCardCount").asInt());
+        assertFalse(summary.get("completed").asBoolean());
+        assertTrue(summary.get("score").isNull());
+        assertEquals(0, summary.get("stars").asInt());
+        // 처리 중으로 심은 행이 다른 테스트의 혼잡 판정에 잡히지 않게 종결해 둔다.
+        jdbc.update("update intonation_learning_attempt set status = 'FAILED' where user_id = ? and status = 'PROCESSING'",
+                account.userId());
+
+        // 세 장을 다 마치면 평균을 반올림한다 - (70 + 70 + 71) / 3 = 70.33 → 70.
+        seedAttempt(account.userId(), version, card2, "COMPLETED", 71, Instant.now());
+        summary = find(courses(account).get("courses"), "courseId", course.courseId());
+        assertTrue(summary.get("completed").asBoolean());
+        assertEquals(70, summary.get("score").asInt());
+        assertEquals(3, summary.get("stars").asInt());
+
+        // 점수가 내려간 재녹음은 세트 점수를 바꾸지 않는다. 실패한 재녹음도 마찬가지다.
+        seedAttempt(account.userId(), version, card0, "COMPLETED", 10, Instant.now());
+        seedAttempt(account.userId(), version, card1, "RETRYABLE_FAILED", null, Instant.now());
+        summary = find(courses(account).get("courses"), "courseId", course.courseId());
+        assertEquals(70, summary.get("score").asInt());
+        assertEquals(3, summary.get("stars").asInt());
+
+        // 카드 하나만 다시 녹음해 최고 점수가 오르면 세트 점수도 오른다. 다른 날의 시도도 합친다 -
+        // (71 + 70 + 71) / 3 = 70.67 → 71.
+        seedAttempt(account.userId(), version, card0, "COMPLETED", 71, Instant.now().minus(3, ChronoUnit.DAYS));
+        summary = find(courses(account).get("courses"), "courseId", course.courseId());
+        assertEquals(71, summary.get("score").asInt());
+
+        // 다른 발행본과 다른 계정의 시도는 섞이지 않는다.
+        Account other = signUp();
+        JsonNode otherSummary = find(courses(other).get("courses"), "courseId", course.courseId());
+        assertTrue(otherSummary.get("score").isNull());
+        assertEquals(0, otherSummary.get("stars").asInt());
+    }
+
+    @Test
+    void 억양_세트가_0점이어도_완료했으면_별_1개다() throws Exception {
+        Account account = signUp();
+        IntonationLearningRegistry.Published current = intonationRegistry.current();
+        IntonationLearningDefinition.Course course = coursesAtLowestLevel(current).get(0);
+        seedCourse(account.userId(), current.definition().contentVersion(), course, 0);
+
+        JsonNode summary = find(courses(account).get("courses"), "courseId", course.courseId());
+        assertEquals(0, summary.get("score").asInt());
+        assertEquals(1, summary.get("stars").asInt());
+    }
+
+    @Test
+    void 단어_세트_점수는_완료한_시도의_최고_정답률이고_완료_응답의_별은_이번_시도_기준이다() throws Exception {
+        Account account = signUp();
+        WordLearningDefinition.Set set = LearningProgress.recommend(wordRegistry.current().definition().sets(),
+                WordLearningDefinition.Set::level, candidate -> false, null);
+        int itemCount = set.items().size();
+
+        JsonNode summary = find(sets(account).get("sets"), "setId", set.setId());
+        assertTrue(summary.get("score").isNull());
+        assertEquals(0, summary.get("stars").asInt());
+
+        // 시작만 한 시도는 세지 않는다.
+        authed(post("/v0/learning/word-sets/" + set.setId() + "/attempts"), account.access())
+                .andExpect(status().isCreated());
+        summary = find(sets(account).get("sets"), "setId", set.setId());
+        assertTrue(summary.get("score").isNull());
+        assertEquals(0, summary.get("stars").asInt());
+
+        // 전부 맞히면 100점에 별 3개다.
+        JsonNode result = solve(account, set, 0);
+        assertEquals(100, result.get("accuracyPercent").asInt());
+        assertEquals(3, result.get("stars").asInt());
+        summary = find(sets(account).get("sets"), "setId", set.setId());
+        assertEquals(100, summary.get("score").asInt());
+        assertEquals(3, summary.get("stars").asInt());
+
+        // 다시 풀어 전부 틀리면 이번 시도는 0점에 별 1개이고, 목록의 세트 점수와 별은 최고 기록 그대로다.
+        result = solve(account, set, itemCount);
+        assertEquals(0, result.get("accuracyPercent").asInt());
+        assertEquals(1, result.get("stars").asInt());
+        summary = find(sets(account).get("sets"), "setId", set.setId());
+        assertEquals(0, summary.get("latestAccuracyPercent").asInt());
+        assertEquals(100, summary.get("score").asInt());
+        assertEquals(3, summary.get("stars").asInt());
+        assertTrue(summary.get("completed").asBoolean());
+    }
+
+    @Test
+    void 구간_요약은_구간_1부터_5를_주고_새_계정은_등급이_있어도_구간_1만_열려_있다() throws Exception {
+        Account account = signUp();
+        // 등급은 열림에 쓰지 않는다 - 가장 높은 등급이어도 구간 1부터다.
+        levelTestRecords.record(account.userId(), entry(5, Instant.now()));
+
+        JsonNode summary = levels(account);
+        assertEquals(0, summary.get("totalStars").asInt());
+        assertEquals(2, summary.get("starThresholds").size());
+        assertEquals(30, summary.get("starThresholds").get(0).asInt());
+        assertEquals(70, summary.get("starThresholds").get(1).asInt());
+        assertEquals(5, summary.get("levels").size());
+        for (int i = 0; i < 5; i++) {
+            JsonNode level = summary.get("levels").get(i);
+            assertEquals(i + 1, level.get("level").asInt());
+            assertEquals(9, level.get("setCount").asInt());
+            assertEquals(0, level.get("completedSetCount").asInt());
+            assertEquals(0, level.get("collectedStars").asInt());
+            assertEquals(21, level.get("requiredStars").asInt());
+            assertEquals(i == 0, level.get("unlocked").asBoolean(), "구간 " + (i + 1));
+        }
+        // 등급은 추천에만 영향을 준다.
+        int recommendedLevel = find(courses(account).get("courses"), "courseId",
+                home(account).get("recommendedCourseId").asString()).get("level").asInt();
+        assertEquals(5, recommendedLevel);
+    }
+
+    @Test
+    void 다음_구간은_별이_21개가_되는_순간_열리고_완주만으로는_열리지_않으며_다시_잠기지_않는다() throws Exception {
+        Account account = signUp();
+        IntonationLearningRegistry.Published intonation = intonationRegistry.current();
+        WordLearningRegistry.Published word = wordRegistry.current();
+        String intonationVersion = intonation.definition().contentVersion();
+        String wordVersion = word.definition().contentVersion();
+        List<IntonationLearningDefinition.Course> courses = coursesAtLowestLevel(intonation);
+        int lowest = courses.get(0).level();
+        List<WordLearningDefinition.Set> wordSets = word.definition().sets().stream()
+                .filter(set -> set.level() == lowest).toList();
+        assertEquals(1, lowest);
+        assertEquals(5, courses.size());
+        assertEquals(4, wordSets.size());
+
+        // 구간 1의 9세트를 모두 완료했지만 전부 0점이면 별은 9개다 - 완주만으로는 구간 2가 열리지 않는다.
+        for (IntonationLearningDefinition.Course course : courses) {
+            seedCourse(account.userId(), intonationVersion, course, 0);
+        }
+        for (WordLearningDefinition.Set set : wordSets) {
+            seedWordAttempt(account.userId(), wordVersion, set, 0);
+        }
+        JsonNode summary = levels(account);
+        assertEquals(9, level(summary, 1).get("completedSetCount").asInt());
+        assertEquals(9, level(summary, 1).get("collectedStars").asInt());
+        assertTrue(level(summary, 1).get("unlocked").asBoolean());
+        assertFalse(level(summary, 2).get("unlocked").asBoolean());
+
+        // 억양 5코스를 100점으로 올리면 15 + 4 = 19개, 단어 한 세트를 50점대로 올리면 20개 - 아직 잠겨 있다.
+        for (IntonationLearningDefinition.Course course : courses) {
+            seedCourse(account.userId(), intonationVersion, course, 100);
+        }
+        assertEquals(19, level(levels(account), 1).get("collectedStars").asInt());
+        WordLearningDefinition.Set raised = wordSets.get(0);
+        int itemCount = raised.items().size();
+        assertEquals(3, itemCount, "이 테스트는 문항 3개짜리 세트를 전제로 정답 수를 고른다");
+        seedWordAttempt(account.userId(), wordVersion, raised, 2);
+        summary = levels(account);
+        assertEquals(20, level(summary, 1).get("collectedStars").asInt());
+        assertFalse(level(summary, 2).get("unlocked").asBoolean());
+
+        // 그 세트를 전부 맞히면 21개 - 닿는 순간 구간 2가 열린다. 구간 3은 구간 2의 별로 정하므로 그대로 잠겨 있다.
+        seedWordAttempt(account.userId(), wordVersion, raised, itemCount);
+        summary = levels(account);
+        assertEquals(21, level(summary, 1).get("collectedStars").asInt());
+        assertEquals(21, level(summary, 1).get("requiredStars").asInt());
+        assertTrue(level(summary, 2).get("unlocked").asBoolean());
+        assertFalse(level(summary, 3).get("unlocked").asBoolean());
+
+        // 다시 풀어 점수가 내려가도 별이 줄지 않고 열린 구간이 다시 잠기지 않는다.
+        seedWordAttempt(account.userId(), wordVersion, raised, 0);
+        seedCourse(account.userId(), intonationVersion, courses.get(0), 5);
+        summary = levels(account);
+        assertEquals(21, level(summary, 1).get("collectedStars").asInt());
+        assertTrue(level(summary, 2).get("unlocked").asBoolean());
+
+        // 모은 별은 필요 별을 넘을 수 있다 - 9세트가 모두 별 3개면 27개다.
+        for (WordLearningDefinition.Set set : wordSets) {
+            seedWordAttempt(account.userId(), wordVersion, set, set.items().size());
+        }
+        summary = levels(account);
+        assertEquals(27, level(summary, 1).get("collectedStars").asInt());
+        assertEquals(21, level(summary, 1).get("requiredStars").asInt());
+
+        // 전체 별은 두 목록의 별 합과 같다.
+        assertEquals(starSum(courses(account).get("courses")) + starSum(sets(account).get("sets")),
+                summary.get("totalStars").asInt());
+        assertEquals(27, summary.get("totalStars").asInt());
+
+        // 다른 계정의 별은 섞이지 않는다.
+        assertEquals(0, levels(signUp()).get("totalStars").asInt());
+    }
+
+    @Test
+    void 잠긴_구간의_단어_세트도_시도_시작은_지금처럼_성공한다() throws Exception {
+        Account account = signUp();
+        JsonNode summary = levels(account);
+        JsonNode last = summary.get("levels").get(summary.get("levels").size() - 1);
+        assertFalse(last.get("unlocked").asBoolean());
+        WordLearningDefinition.Set locked = wordRegistry.current().definition().sets().stream()
+                .filter(set -> set.level() == last.get("level").asInt()).findFirst().orElseThrow();
+
+        authed(post("/v0/learning/word-sets/" + locked.setId() + "/attempts"), account.access())
+                .andExpect(status().isCreated());
+        // 잠긴 구간의 세트를 완료해 얻은 별도 그대로 센다 - 열림은 표시일 뿐이다.
+        JsonNode result = solve(account, locked, 0);
+        assertEquals(3, result.get("stars").asInt());
+        assertEquals(3, level(levels(account), last.get("level").asInt()).get("collectedStars").asInt());
+    }
+
+    @Test
+    void 카드마다_시도가_10건인_계정도_구간_요약을_조회마다_계산한다() throws Exception {
+        Account account = signUp();
+        IntonationLearningRegistry.Published intonation = intonationRegistry.current();
+        WordLearningRegistry.Published word = wordRegistry.current();
+        int courseCount = intonation.definition().courses().size();
+        int setCount = word.definition().sets().size();
+        for (int round = 0; round < 10; round++) {
+            for (IntonationLearningDefinition.Course course : intonation.definition().courses()) {
+                seedCourse(account.userId(), intonation.definition().contentVersion(), course, 40 + round * 5);
+            }
+            for (WordLearningDefinition.Set set : word.definition().sets()) {
+                seedWordAttempt(account.userId(), word.definition().contentVersion(), set,
+                        round == 9 ? set.items().size() : 0);
+            }
+        }
+        levels(account);
+        long started = System.nanoTime();
+        int rounds = 20;
+        JsonNode summary = null;
+        for (int i = 0; i < rounds; i++) {
+            summary = levels(account);
+        }
+        long averageMs = (System.nanoTime() - started) / rounds / 1_000_000;
+        System.out.println("KAN-359 구간 요약 평균 응답 시간(ms) = " + averageMs + " (억양 시도 "
+                + count("select count(*) from intonation_learning_attempt where user_id = ?", account.userId())
+                + "건, 단어 시도 "
+                + count("select count(*) from word_set_attempt where user_id = ?", account.userId()) + "건)");
+        // 최고 점수 85점과 정답률 100이라 모든 세트가 별 3개다.
+        assertEquals((courseCount + setCount) * 3, summary.get("totalStars").asInt());
+    }
+
     // === 탈퇴 (AC 5) ===
 
     @Test
@@ -612,7 +877,7 @@ class LearningProgressApiTest extends IntegrationTest {
     }
 
     /** 세트 하나를 시작부터 완료까지 푼다 - 앞의 {@code wrongCount}개 문항은 틀린다. */
-    private void solve(Account account, WordLearningDefinition.Set set, int wrongCount) throws Exception {
+    private JsonNode solve(Account account, WordLearningDefinition.Set set, int wrongCount) throws Exception {
         String attemptId = body(authed(post("/v0/learning/word-sets/" + set.setId() + "/attempts"), account.access())
                 .andExpect(status().isCreated())).get("attemptId").asString();
         for (int i = 0; i < set.items().size(); i++) {
@@ -627,18 +892,68 @@ class LearningProgressApiTest extends IntegrationTest {
                     .content("{\"choiceId\":\"" + choice + "\"}"), account.access())
                     .andExpect(status().isOk());
         }
-        authed(post("/v0/learning/word-attempts/" + attemptId + "/complete"), account.access())
-                .andExpect(status().isOk());
+        return body(authed(post("/v0/learning/word-attempts/" + attemptId + "/complete"), account.access())
+                .andExpect(status().isOk()));
     }
 
     private void seedAttempt(UUID userId, String contentVersion, String cardId, String status) {
-        Timestamp now = Timestamp.from(Instant.now());
+        seedAttempt(userId, contentVersion, cardId, status, null, Instant.now());
+    }
+
+    /** 변환 점수와 접수 시각을 정해 심는다 (KAN-359) - 세트 점수는 카드별 최고 점수로 계산한다. */
+    private void seedAttempt(UUID userId, String contentVersion, String cardId, String status, Integer score,
+                             Instant at) {
+        Timestamp time = Timestamp.from(at);
         jdbc.update("""
                         insert into intonation_learning_attempt
-                            (id, user_id, content_version, card_id, idempotency_key, status, created_at, finished_at)
-                        values (?, ?, ?, ?, ?, ?, ?, ?)
+                            (id, user_id, content_version, card_id, idempotency_key, status, created_at, finished_at,
+                             score)
+                        values (?, ?, ?, ?, ?, ?, ?, ?, ?)
                         """, "la_" + UUID.randomUUID(), userId, contentVersion, cardId, "k-" + UUID.randomUUID(),
-                status, now, now);
+                status, time, time, score);
+    }
+
+    /** 코스의 모든 카드에 같은 점수의 완료 시도를 하나씩 심는다. */
+    private void seedCourse(UUID userId, String contentVersion, IntonationLearningDefinition.Course course,
+                            int score) {
+        for (IntonationLearningDefinition.Card card : course.cards()) {
+            seedAttempt(userId, contentVersion, card.cardId(), "COMPLETED", score, Instant.now());
+        }
+    }
+
+    /** 완료한 단어 시도를 표에 직접 심는다 - 답안 API를 거치지 않아 요청 제한과 무관하게 여러 건을 만든다. */
+    private void seedWordAttempt(UUID userId, String contentVersion, WordLearningDefinition.Set set,
+                                 int correctCount) {
+        Timestamp now = Timestamp.from(Instant.now());
+        jdbc.update("""
+                        insert into word_set_attempt
+                            (id, user_id, content_version, set_id, item_count, correct_count, started_at, completed_at)
+                        values (?, ?, ?, ?, ?, ?, ?, ?)
+                        """, "wa_" + UUID.randomUUID(), userId, contentVersion, set.setId(), set.items().size(),
+                correctCount, now, now);
+    }
+
+    private JsonNode levels(Account account) throws Exception {
+        return body(authed(get("/v0/learning/levels"), account.access())
+                .andExpect(status().isOk())
+                .andExpect(header().string(HttpHeaders.CACHE_CONTROL, "no-store")));
+    }
+
+    private static JsonNode level(JsonNode levels, int level) {
+        for (JsonNode item : levels.get("levels")) {
+            if (item.get("level").asInt() == level) {
+                return item;
+            }
+        }
+        throw new AssertionError("구간 " + level + "이 요약에 없다: " + levels);
+    }
+
+    private static int starSum(JsonNode items) {
+        int sum = 0;
+        for (JsonNode item : items) {
+            sum += item.get("stars").asInt();
+        }
+        return sum;
     }
 
     private void seedAttendance(UUID userId, LocalDate... dates) {

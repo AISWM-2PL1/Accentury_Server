@@ -1,7 +1,7 @@
 # backend
 
 Spring Boot 4.1 (Java 25) + PostgreSQL 16 + Redis 7. 앱과 웹이 부르는 레벨테스트 API(세션, 업로드, 결과, 후기)와
-AI 서버 호출, 앱 전용 계정 API(소셜 로그인, 추가 정보, 탈퇴)와 학습 API(단어, 억양, 진도와 홈), 번역 API,
+AI 서버 호출, 앱 전용 계정 API(소셜 로그인, 추가 정보, 탈퇴)와 학습 API(단어, 억양, 진도와 홈, 별과 구간 열림), 번역 API,
 관리자 API(`/admin/v0`)를 맡는다. Redis는 Refresh 토큰과 번역 일일 한도에만 쓴다. API 정본은 Notion
 "App-Backend API 명세서"이고, 인프라와 배포는 [`infra/README.md`](../infra/README.md)가 정본이다.
 
@@ -94,7 +94,8 @@ AI 서버로 보내므로 `accentury.analysis.ai-base-url`과 `accentury.analysi
 - 발행 마이그레이션은 손으로 쓰지 않는다. 레벨테스트 정의는 `tools/content/build_definition.py`, 학습 발행본
   두 개(억양, 단어)는 `tools/content/build_app_curriculum.py`가 만든다. 학습 발행본도 발행 후 불변이고 활성
   포인터가 없다. 서버가 발행 시각이 가장 늦은 행을 쓴다. 그래서 새 학습 발행본은 배포만으로 바뀌고, 앞선
-  발행본의 진도는 목록에서 빠진다 (기록은 남는다).
+  발행본의 진도와 별은 목록과 구간 요약에서 빠진다 (기록은 남는다). 별과 세트 점수는 저장하지 않고 조회 때
+  시도 기록에서 계산하며, 별 구간과 필요 별 같은 정책 값은 `LearningStars` 한 곳에 있다.
 - 학습 발행본의 `level`은 앱 학습 탭의 구간 번호(1부터 5)다. 구간 1이 가장 쉽고 구간 안에서는 `seq`가 클수록
   어렵다. 순서의 근거는 레벨테스트 실사용 기록의 문항별 집계(`tools/content/item_difficulty.py`가 만든
   `difficulty_gn_2026_11.json`)이고, 문항별 배치는 `tools/content/curriculum_gn_2026_11.md`에 있다. 첫 발행본
