@@ -28,6 +28,7 @@ import java.util.UUID;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
@@ -312,6 +313,215 @@ class WordLearningApiTest extends IntegrationTest {
                 .andExpect(status().isForbidden());
     }
 
+    // === 시간 초과 답안 (KAN-360) ===
+
+    @Test
+    void 시간_초과_답안은_보기_없는_오답으로_저장되고_결과와_오답_기록에_남는다() throws Exception {
+        String access = signUp();
+        WordLearningDefinition.Set set = firstSet();
+        String attemptId = startAttempt(access, set.setId());
+        List<WordLearningDefinition.Item> items = set.items();
+        assertTrue(items.size() >= 3, "시간 초과, 고른 오답, 정답을 한 문항씩 낸다");
+        WordLearningDefinition.Item timedOutItem = items.get(0);
+        WordLearningDefinition.Item wrongItem = items.get(1);
+        String wrongChoice = wrongItem.choices().stream().map(WordLearningDefinition.Choice::choiceId)
+                .filter(id -> !id.equals(wrongItem.correctChoiceId())).findFirst().orElseThrow();
+
+        // 보기 없이 timedOut만 보내면 오답이고 정답과 해설이 온다.
+        JsonNode timedOut = body(timeout(access, attemptId, timedOutItem.itemId(), "k-timeout")
+                .andExpect(status().isOk()));
+        assertFalse(timedOut.get("correct").asBoolean());
+        assertEquals(timedOutItem.correctChoiceId(), timedOut.get("correctChoiceId").asString());
+        assertEquals(timedOutItem.correctText(), timedOut.get("correctText").asString());
+        assertEquals(timedOutItem.explanation(), timedOut.get("explanation").asString());
+        assertEquals(1, timedOut.get("answeredCount").asInt());
+
+        // 답안 행에는 보기가 없고, 오답 기록에는 보기를 고른 오답과 같이 남는다.
+        WordAttemptAnswer stored = answers.findByAttemptIdAndItemId(attemptId, timedOutItem.itemId()).orElseThrow();
+        assertNull(stored.choiceId());
+        assertTrue(stored.timedOut());
+        assertFalse(stored.correct());
+        assertEquals(1, wrongAnswers.findByUserIdAndContentVersionAndItemId(userIdOf(attemptId),
+                set(attemptId).contentVersion(), timedOutItem.itemId()).orElseThrow().wrongCount());
+
+        // 나머지 문항은 하나를 틀리고 그 밖은 맞힌다 - 시간 초과 문항이 있어도 세트를 완료할 수 있다.
+        answer(access, attemptId, wrongItem.itemId(), "k-wrong", wrongChoice).andExpect(status().isOk());
+        for (WordLearningDefinition.Item item : items.subList(2, items.size())) {
+            answer(access, attemptId, item.itemId(), "k-" + item.itemId(), item.correctChoiceId())
+                    .andExpect(status().isOk())
+                    .andExpect(jsonPath("$.correct").value(true));
+        }
+        JsonNode result = body(authed(post("/v0/learning/word-attempts/" + attemptId + "/complete"), access)
+                .andExpect(status().isOk()));
+        int itemCount = items.size();
+        assertEquals(itemCount - 2, result.get("correctCount").asInt());
+        assertEquals((int) Math.round((itemCount - 2) * 100.0 / itemCount), result.get("accuracyPercent").asInt());
+        assertEquals(2, result.get("wrongItems").size());
+
+        // 오답 항목은 문항 순이다. 시간 초과 문항은 고른 보기가 null이고 timedOut이 true다.
+        JsonNode timedOutEntry = result.get("wrongItems").get(0);
+        assertEquals(timedOutItem.itemId(), timedOutEntry.get("itemId").asString());
+        assertTrue(timedOutEntry.has("chosenChoiceId"), "필드는 빠지지 않고 null로 온다");
+        assertTrue(timedOutEntry.get("chosenChoiceId").isNull());
+        assertTrue(timedOutEntry.has("chosenText"));
+        assertTrue(timedOutEntry.get("chosenText").isNull());
+        assertTrue(timedOutEntry.get("timedOut").asBoolean());
+        assertEquals(timedOutItem.correctChoiceId(), timedOutEntry.get("correctChoiceId").asString());
+        assertEquals(timedOutItem.correctText(), timedOutEntry.get("correctText").asString());
+        assertEquals(timedOutItem.explanation(), timedOutEntry.get("explanation").asString());
+        // 보기를 고른 오답은 종전 그대로이고 timedOut이 false다.
+        JsonNode wrongEntry = result.get("wrongItems").get(1);
+        assertEquals(wrongItem.itemId(), wrongEntry.get("itemId").asString());
+        assertEquals(wrongChoice, wrongEntry.get("chosenChoiceId").asString());
+        assertEquals(wrongItem.choice(wrongChoice).orElseThrow().text(), wrongEntry.get("chosenText").asString());
+        assertFalse(wrongEntry.get("timedOut").asBoolean());
+
+        // 완료 뒤에는 시간 초과 제출도 409이고, 완료를 다시 부르면 같은 본문이다.
+        timeout(access, attemptId, timedOutItem.itemId(), "k-timeout")
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.code").value("LEARNING_ATTEMPT_COMPLETED"));
+        assertEquals(result, body(authed(post("/v0/learning/word-attempts/" + attemptId + "/complete"), access)
+                .andExpect(status().isOk())));
+    }
+
+    @Test
+    void 전_문항이_시간_초과여도_세트를_완료하고_정답률은_0이다() throws Exception {
+        String access = signUp();
+        WordLearningDefinition.Set set = firstSet();
+        String attemptId = startAttempt(access, set.setId());
+        for (WordLearningDefinition.Item item : set.items()) {
+            timeout(access, attemptId, item.itemId(), "k-" + item.itemId()).andExpect(status().isOk());
+        }
+
+        JsonNode result = body(authed(post("/v0/learning/word-attempts/" + attemptId + "/complete"), access)
+                .andExpect(status().isOk()));
+        assertEquals(0, result.get("correctCount").asInt());
+        assertEquals(0, result.get("accuracyPercent").asInt());
+        assertEquals(set.items().size(), result.get("wrongItems").size());
+        for (JsonNode entry : result.get("wrongItems")) {
+            assertTrue(entry.get("timedOut").asBoolean());
+        }
+    }
+
+    @Test
+    void timedOut과_choiceId의_조합은_정해진_대로_받거나_거절한다() throws Exception {
+        String access = signUp();
+        WordLearningDefinition.Set set = firstSet();
+        String attemptId = startAttempt(access, set.setId());
+        WordLearningDefinition.Item item = set.items().get(0);
+        String choice = item.correctChoiceId();
+
+        // timedOut이 true인데 choiceId도 있으면 400이다 - 빈 문자열도 값이 있는 것으로 본다.
+        for (String both : List.of("{\"timedOut\":true,\"choiceId\":\"" + choice + "\"}",
+                "{\"timedOut\":true,\"choiceId\":\"\"}")) {
+            raw(access, attemptId, item.itemId(), "k", both)
+                    .andExpect(status().isBadRequest())
+                    .andExpect(jsonPath("$.code").value("VALIDATION_FAILED"));
+        }
+        // timedOut이 없거나 false거나 null이면 지금처럼 choiceId가 필수다.
+        for (String missing : List.of("{}", "{\"timedOut\":false}", "{\"timedOut\":null}",
+                "{\"timedOut\":false,\"choiceId\":null}")) {
+            raw(access, attemptId, item.itemId(), "k", missing)
+                    .andExpect(status().isBadRequest())
+                    .andExpect(jsonPath("$.code").value("VALIDATION_FAILED"));
+        }
+        assertEquals(0, answers.countByAttemptId(attemptId));
+
+        // 시간 초과도 이 세트의 문항이어야 한다.
+        WordLearningDefinition.Item foreign = registry.current().definition().sets().get(1).items().get(0);
+        timeout(access, attemptId, foreign.itemId(), "k")
+                .andExpect(status().isUnprocessableContent())
+                .andExpect(jsonPath("$.code").value("ITEM_NOT_IN_VERSION"));
+        // Idempotency-Key는 시간 초과에도 필수다.
+        authed(post("/v0/learning/word-attempts/" + attemptId + "/items/" + item.itemId() + "/answer")
+                .contentType(MediaType.APPLICATION_JSON).content("{\"timedOut\":true}"), access)
+                .andExpect(status().isBadRequest());
+        assertEquals(0, answers.countByAttemptId(attemptId));
+
+        // choiceId를 null로 명시한 시간 초과와, timedOut을 false로 명시한 보기 제출은 받는다.
+        raw(access, attemptId, item.itemId(), "k-null", "{\"timedOut\":true,\"choiceId\":null}")
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.correct").value(false));
+        WordLearningDefinition.Item second = set.items().get(1);
+        raw(access, attemptId, second.itemId(), "k-false",
+                "{\"timedOut\":false,\"choiceId\":\"" + second.correctChoiceId() + "\"}")
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.correct").value(true));
+    }
+
+    @Test
+    void 시간_초과도_같은_키의_재전송은_처음_결과이고_보기와_바꿔_보내면_400이다() throws Exception {
+        String access = signUp();
+        WordLearningDefinition.Set set = firstSet();
+        String attemptId = startAttempt(access, set.setId());
+        WordLearningDefinition.Item item = set.items().get(0);
+
+        JsonNode first = body(timeout(access, attemptId, item.itemId(), "same-key").andExpect(status().isOk()));
+        JsonNode replay = body(timeout(access, attemptId, item.itemId(), "same-key").andExpect(status().isOk()));
+        assertEquals(first, replay);
+        assertEquals(1, answers.countByAttemptId(attemptId));
+        assertEquals(1, wrongAnswers.findByUserIdAndContentVersionAndItemId(userIdOf(attemptId),
+                set(attemptId).contentVersion(), item.itemId()).orElseThrow().wrongCount(), "재전송은 오답을 세지 않는다");
+
+        // 같은 키로 보기를 보내면 다른 답이라 400, 다른 키로 다시 내면 409다.
+        answer(access, attemptId, item.itemId(), "same-key", item.correctChoiceId())
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("VALIDATION_FAILED"));
+        answer(access, attemptId, item.itemId(), "other-key", item.correctChoiceId())
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.code").value("ITEM_ALREADY_ANSWERED"));
+        timeout(access, attemptId, item.itemId(), "other-key")
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.code").value("ITEM_ALREADY_ANSWERED"));
+
+        // 반대 방향도 같다 - 보기로 낸 문항에 같은 키로 시간 초과를 보내면 400이다.
+        WordLearningDefinition.Item chosen = set.items().get(1);
+        answer(access, attemptId, chosen.itemId(), "chosen-key", chosen.correctChoiceId()).andExpect(status().isOk());
+        timeout(access, attemptId, chosen.itemId(), "chosen-key")
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("VALIDATION_FAILED"));
+        assertTrue(answers.findByAttemptIdAndItemId(attemptId, chosen.itemId()).orElseThrow().correct());
+        assertNull(answers.findByAttemptIdAndItemId(attemptId, item.itemId()).orElseThrow().choiceId());
+        assertEquals(2, answers.countByAttemptId(attemptId));
+    }
+
+    @Test
+    void 마이그레이션_뒤에도_보기가_있는_기존_답안_행은_그대로_읽히고_보기_열만_null을_허용한다() throws Exception {
+        String access = signUp();
+        WordLearningDefinition.Set set = firstSet();
+        String attemptId = startAttempt(access, set.setId());
+        WordLearningDefinition.Item item = set.items().get(0);
+        // 마이그레이션 전 모양의 행(보기가 있는 답안)을 표에 직접 넣는다.
+        jdbc.update("""
+                        insert into word_attempt_answer
+                            (id, attempt_id, item_id, choice_id, is_correct, idempotency_key, created_at)
+                        values (?, ?, ?, ?, true, 'legacy-key', now())
+                        """, "waa_" + UUID.randomUUID(), attemptId, item.itemId(), item.correctChoiceId());
+
+        WordAttemptAnswer stored = answers.findByAttemptIdAndItemId(attemptId, item.itemId()).orElseThrow();
+        assertEquals(item.correctChoiceId(), stored.choiceId());
+        assertFalse(stored.timedOut());
+        assertTrue(stored.correct());
+        // 같은 키의 재전송으로도 읽힌다.
+        answer(access, attemptId, item.itemId(), "legacy-key", item.correctChoiceId())
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.correct").value(true));
+
+        assertEquals("YES", jdbc.queryForObject("""
+                select is_nullable from information_schema.columns
+                 where table_name = 'word_attempt_answer' and column_name = 'choice_id'
+                """, String.class));
+        // 다른 열과 레벨테스트 어휘 답안의 보기 열은 그대로 NOT NULL이다.
+        assertEquals("NO", jdbc.queryForObject("""
+                select is_nullable from information_schema.columns
+                 where table_name = 'word_attempt_answer' and column_name = 'is_correct'
+                """, String.class));
+        assertEquals("NO", jdbc.queryForObject("""
+                select is_nullable from information_schema.columns
+                 where table_name = 'vocab_answer' and column_name = 'choice_id'
+                """, String.class));
+    }
+
     // === 오답 저장과 탈퇴 (AC 5) ===
 
     @Test
@@ -383,6 +593,19 @@ class WordLearningApiTest extends IntegrationTest {
                 .contentType(MediaType.APPLICATION_JSON)
                 .header("Idempotency-Key", key)
                 .content("{\"choiceId\":\"" + choiceId + "\"}"), access);
+    }
+
+    /** 시간 초과 답안 - 보기 없이 timedOut만 싣는다 (KAN-360). */
+    private ResultActions timeout(String access, String attemptId, String itemId, String key) throws Exception {
+        return raw(access, attemptId, itemId, key, "{\"timedOut\":true}");
+    }
+
+    private ResultActions raw(String access, String attemptId, String itemId, String key, String json)
+            throws Exception {
+        return authed(post("/v0/learning/word-attempts/" + attemptId + "/items/" + itemId + "/answer")
+                .contentType(MediaType.APPLICATION_JSON)
+                .header("Idempotency-Key", key)
+                .content(json), access);
     }
 
     private ResultActions authed(MockHttpServletRequestBuilder request, String access) throws Exception {
