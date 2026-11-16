@@ -32,7 +32,7 @@ class WordLearningController {
         this.progress = progress;
     }
 
-    /** 어휘 세트 목록 (W-1) - 계정의 완료 표시, 최근 정답률, 추천 1개(KAN-268)를 채운다. 200 / 401. */
+    /** 어휘 세트 목록 (W-1) - 계정의 완료 표시, 최근 정답률, 추천 1개(KAN-268), 세트 점수와 별(KAN-359)을 채운다. 200 / 401. */
     @GetMapping("/word-sets")
     ResponseEntity<WordSetListResponse> listSets(@AuthenticatedUser AppUser user) {
         return noStore(progress.wordSets(user.id()));

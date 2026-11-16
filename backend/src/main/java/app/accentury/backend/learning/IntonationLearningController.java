@@ -18,7 +18,7 @@ import java.time.YearMonth;
  * 억양 학습 콘텐츠 API (KAN-264, 명세서 §3.17) - 전부 계정 Access 토큰 필수다 ({@link AuthenticatedUser}, 없으면 401).
  * <p>
  * 조회뿐이라 요청 제한(§2.5)을 걸지 않는다. 응답은 계정 상태에 따라 달라지므로(KAN-268의 완료 표시와 추천) 캐시하지
- * 않는다. 학습 홈 상태(§3.20)와 홈 달력 시트의 월별 출석(KAN-314)도 조회뿐이라 여기 둔다.
+ * 않는다. 학습 홈 상태(§3.20)와 홈 달력 시트의 월별 출석(KAN-314), 구간 요약(KAN-359)도 조회뿐이라 여기 둔다.
  */
 @RestController
 @RequestMapping("/v0/learning")
@@ -32,7 +32,7 @@ class IntonationLearningController {
         this.progress = progress;
     }
 
-    /** 코스 목록 (A-1) - 계정의 완료 표시와 추천 1개(KAN-268)를 채운다. 200 / 401. */
+    /** 코스 목록 (A-1) - 계정의 완료 표시와 추천 1개(KAN-268), 세트 점수와 별(KAN-359)을 채운다. 200 / 401. */
     @GetMapping("/intonation-courses")
     ResponseEntity<IntonationCourseListResponse> listCourses(@AuthenticatedUser AppUser user) {
         return noStore(progress.courses(user.id()));
@@ -42,6 +42,15 @@ class IntonationLearningController {
     @GetMapping("/home")
     ResponseEntity<LearningHomeResponse> home(@AuthenticatedUser AppUser user) {
         return noStore(progress.home(user.id()));
+    }
+
+    /**
+     * 구간 요약 (KAN-359, §3.20) - 사투리 여행 지도. 구간마다 모은 별과 필요 별과 열림, 전체 별 합계, 별 경계값.
+     * 열림은 표시용이라 잠긴 구간의 시도 시작을 막지 않는다. 200 / 401 / 403 {@code AUTH_GUEST_NOT_ALLOWED}.
+     */
+    @GetMapping("/levels")
+    ResponseEntity<LearningLevelsResponse> levels(@AuthenticatedUser AppUser user) {
+        return noStore(progress.levels(user.id()));
     }
 
     /**

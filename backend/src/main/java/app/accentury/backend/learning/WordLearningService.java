@@ -253,9 +253,8 @@ public class WordLearningService {
                     item.correctChoiceId(), item.correctText(), item.explanation()));
         }
         int correctCount = Objects.requireNonNull(attempt.correctCount(), "완료된 시도의 정답 수가 없다");
-        return new WordAttemptResultResponse(attempt.id(), attempt.contentVersion(), attempt.setId(),
-                attempt.itemCount(), correctCount,
-                WordAttemptResultResponse.accuracyPercent(correctCount, attempt.itemCount()), List.copyOf(wrong),
+        return WordAttemptResultResponse.of(attempt.id(), attempt.contentVersion(), attempt.setId(),
+                attempt.itemCount(), correctCount, List.copyOf(wrong),
                 Objects.requireNonNull(attempt.completedAt(), "완료된 시도의 완료 시각이 없다"));
     }
 

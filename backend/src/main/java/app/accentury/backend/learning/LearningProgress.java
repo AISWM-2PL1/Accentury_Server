@@ -19,6 +19,7 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
+import java.util.TreeMap;
 import java.util.UUID;
 import java.util.function.Function;
 import java.util.function.Predicate;
@@ -31,6 +32,12 @@ import java.util.function.ToIntFunction;
  * 있는 카드를 완료로 치고(점수와 무관, 2026-10-11 결정), 모든 카드가 완료면 코스 완료다. 단어 세트는 완료한 시도가 하나라도
  * 있으면 완료이고 최근 정답률은 가장 최근에 완료한 시도의 것이다. 둘 다 현재 발행본의 기록만 센다 - 카드와 세트 id는 발행본
  * 안에서만 뜻이 있다. 그래서 완료를 저장하는 API가 없고, 완료 뒤 목록을 다시 조회하면 바로 완료로 보인다.
+ * <p>
+ * <b>세트 점수와 별도 같은 기록에서 계산한다 (KAN-359).</b> 억양 코스의 세트 점수는 카드별 최고 점수의 평균이고(카드별
+ * 최고는 회차와 날짜가 달라도 합친다), 단어 세트의 세트 점수는 완료한 시도의 정답률 가운데 가장 높은 값이다. 최고 기록이라
+ * 다시 풀어 점수가 내려가도 줄지 않는다. 별은 세트 점수의 구간이고, 구간(level)마다 별을 필요한 만큼 모으면 다음 구간이
+ * 열린다({@link #levels}). 숫자와 규칙은 {@link LearningStars}에만 있고 여기는 기록을 모아 넘길 뿐이다. 발행본이 바뀌면
+ * 별은 0부터다. 열림은 표시용이라 시도 시작을 막지 않는다.
  * <p>
  * 추천 규칙은 {@link #recommend}에 있다. 기준 레벨은 계정의 최근 등급({@link LevelTestRecords})이다.
  */
@@ -175,36 +182,98 @@ public class LearningProgress {
         }
     }
 
+    /**
+     * 구간 요약 (KAN-359, §3.20) - 구간(level)마다 세트 수, 완료 세트 수, 모은 별, 필요 별, 열림과 전체 별 합계.
+     * <p>
+     * 두 목록({@link #courses}, {@link #wordSets})을 그대로 만들어 구간으로 접는다 - 같은 계산 경로라 요약과 목록의 값이
+     * 어긋나지 않는다. 추천은 쓰지 않으므로 등급을 읽지 않는다 (열림은 별만 본다, 등급과 무관). 억양 시도와 단어 시도를
+     * REPEATABLE READ 읽기 트랜잭션 하나로 묶어 같은 스냅샷에서 센다 ({@link #attendance}와 같은 이유).
+     */
+    @Transactional(readOnly = true, isolation = Isolation.REPEATABLE_READ)
+    LearningLevelsResponse levels(UUID userId) {
+        Map<Integer, LevelTally> byLevel = new TreeMap<>();
+        for (IntonationCourseListResponse.Summary course : courses(userId, null).courses()) {
+            byLevel.computeIfAbsent(course.level(), level -> new LevelTally()).add(course.completed(), course.stars());
+        }
+        for (WordSetListResponse.Summary set : wordSets(userId, null).sets()) {
+            byLevel.computeIfAbsent(set.level(), level -> new LevelTally()).add(set.completed(), set.stars());
+        }
+        List<LearningLevelsResponse.Level> levels = new ArrayList<>();
+        int totalStars = 0;
+        // 가장 낮은 구간은 늘 열려 있고, 그 밖은 바로 앞 구간의 별로 정한다.
+        boolean unlocked = true;
+        for (Map.Entry<Integer, LevelTally> entry : byLevel.entrySet()) {
+            LevelTally tally = entry.getValue();
+            levels.add(new LearningLevelsResponse.Level(entry.getKey(), tally.setCount, tally.completedSetCount,
+                    tally.stars, LearningStars.requiredStars(tally.setCount), unlocked));
+            totalStars += tally.stars;
+            unlocked = LearningStars.unlocksNext(tally.stars, tally.setCount);
+        }
+        return new LearningLevelsResponse(totalStars, LearningStars.THRESHOLDS, List.copyOf(levels));
+    }
+
+    /** 구간 하나의 합계 - 억양 코스와 단어 세트를 함께 센다. */
+    private static final class LevelTally {
+        private int setCount;
+        private int completedSetCount;
+        private int stars;
+
+        private void add(boolean completed, int setStars) {
+            setCount++;
+            if (completed) {
+                completedSetCount++;
+            }
+            stars += setStars;
+        }
+    }
+
     private IntonationCourseListResponse courses(UUID userId, @Nullable Integer rank) {
         IntonationLearningRegistry.Published current = intonationRegistry.current();
-        Set<String> doneCards = new HashSet<>(
-                intonationAttempts.findCompletedCardIds(userId, current.definition().contentVersion()));
+        // 채점을 마친 시도마다 한 행 - 행이 있는 카드가 완료이고(점수와 무관), 카드별 최고 점수가 세트 점수의 재료다.
+        Set<String> doneCards = new HashSet<>();
+        Map<String, Integer> bestByCard = new HashMap<>();
+        for (IntonationAttemptRepository.CardScore row : intonationAttempts.findCompletedCardScores(userId,
+                current.definition().contentVersion())) {
+            doneCards.add(row.getCardId());
+            Integer score = row.getScore();
+            if (score != null) {
+                bestByCard.put(row.getCardId(), LearningStars.best(bestByCard.get(row.getCardId()), score));
+            }
+        }
         Map<String, Integer> doneByCourse = new HashMap<>();
+        Map<String, Integer> scoreByCourse = new HashMap<>();
         for (IntonationLearningDefinition.Course course : current.definition().courses()) {
-            int done = (int) course.cards().stream().filter(card -> doneCards.contains(card.cardId())).count();
-            doneByCourse.put(course.courseId(), done);
+            List<String> cardIds = course.cards().stream().map(IntonationLearningDefinition.Card::cardId).toList();
+            doneByCourse.put(course.courseId(), (int) cardIds.stream().filter(doneCards::contains).count());
+            Integer score = LearningStars.intonationSetScore(cardIds, bestByCard);
+            if (score != null) {
+                scoreByCourse.put(course.courseId(), score);
+            }
         }
         IntonationCourseListResponse unstarted = current.listResponse();
         IntonationCourseListResponse.Summary pick = recommend(unstarted.courses(),
                 IntonationCourseListResponse.Summary::level,
                 course -> doneByCourse.getOrDefault(course.courseId(), 0) == course.cardCount(), rank);
-        return unstarted.withProgress(doneByCourse, pick == null ? null : pick.courseId());
+        return unstarted.withProgress(doneByCourse, scoreByCourse, pick == null ? null : pick.courseId());
     }
 
     private WordSetListResponse wordSets(UUID userId, @Nullable Integer rank) {
         WordLearningRegistry.Published current = wordRegistry.current();
         Map<String, Integer> latestAccuracy = new HashMap<>();
+        Map<String, Integer> bestAccuracy = new HashMap<>();
         for (WordSetAttempt attempt : wordAttempts.findCompletedNewestFirst(userId,
                 current.definition().contentVersion())) {
-            // 최근 완료가 앞이라 세트마다 처음 만난 시도가 최근 정답률이다.
-            latestAccuracy.computeIfAbsent(attempt.setId(), setId -> WordAttemptResultResponse.accuracyPercent(
+            int accuracy = WordAttemptResultResponse.accuracyPercent(
                     Objects.requireNonNull(attempt.correctCount(), "완료된 시도의 정답 수가 없다"),
-                    attempt.itemCount()));
+                    attempt.itemCount());
+            // 최근 완료가 앞이라 세트마다 처음 만난 시도가 최근 정답률이다. 세트 점수는 그와 달리 전 시도의 최고 값이다.
+            latestAccuracy.putIfAbsent(attempt.setId(), accuracy);
+            bestAccuracy.put(attempt.setId(), LearningStars.best(bestAccuracy.get(attempt.setId()), accuracy));
         }
         WordSetListResponse unstarted = current.listResponse();
         WordSetListResponse.Summary pick = recommend(unstarted.sets(), WordSetListResponse.Summary::level,
                 set -> latestAccuracy.containsKey(set.setId()), rank);
-        return unstarted.withProgress(latestAccuracy, pick == null ? null : pick.setId());
+        return unstarted.withProgress(latestAccuracy, bestAccuracy, pick == null ? null : pick.setId());
     }
 
     private @Nullable Integer baseRank(UUID userId) {

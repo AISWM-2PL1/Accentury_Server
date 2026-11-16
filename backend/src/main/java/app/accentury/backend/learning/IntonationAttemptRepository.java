@@ -1,6 +1,7 @@
 package app.accentury.backend.learning;
 
 import app.accentury.backend.analysis.AnalysisJobStatus;
+import org.jspecify.annotations.Nullable;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Modifying;
 import org.springframework.data.jpa.repository.Query;
@@ -100,15 +101,27 @@ public interface IntonationAttemptRepository extends JpaRepository<IntonationAtt
 
     /** 탈퇴 파기 (§3.14) - 계정의 시도를 전부 지운다. 호출부(탈퇴 트랜잭션)가 트랜잭션을 연다. */
     /**
-     * 진도 (KAN-268, §3.17) - 이 계정이 이 발행본에서 채점을 {@code COMPLETED}로 마친 카드. 점수는 보지 않는다
-     * (2026-10-11 결정 - 채점 완료 한 번이면 카드 완료). (user_id, content_version, card_id, created_at) 인덱스를 탄다.
+     * 진도와 세트 점수 (KAN-268, KAN-359, §3.17) - 이 계정이 이 발행본에서 채점을 {@code COMPLETED}로 마친 시도의 카드와
+     * 변환 점수. 시도마다 한 행이다 - 카드 완료는 행이 하나라도 있으면이고(점수와 무관, 2026-10-11 결정), 카드별 최고
+     * 점수는 호출부가 {@link LearningStars#best}로 접는다 (최고 기록 유지 규칙을 SQL에 두지 않는다). 실패와 처리 중 시도는
+     * 나오지 않는다. (user_id, content_version, card_id, created_at) 인덱스를 탄다.
      */
     @Query("""
-            select distinct a.cardId from IntonationAttempt a
+            select a.cardId as cardId, a.score as score from IntonationAttempt a
              where a.userId = :userId and a.contentVersion = :contentVersion
                    and a.status = app.accentury.backend.analysis.AnalysisJobStatus.COMPLETED
             """)
-    List<String> findCompletedCardIds(@Param("userId") UUID userId, @Param("contentVersion") String contentVersion);
+    List<CardScore> findCompletedCardScores(@Param("userId") UUID userId,
+                                            @Param("contentVersion") String contentVersion);
+
+    /** 채점을 마친 시도 하나의 카드와 변환 점수 - 인터페이스 프로젝션이다. */
+    interface CardScore {
+
+        String getCardId();
+
+        /** 변환 점수 (0~100) - 채점 완료 전이가 늘 채우지만 컬럼이 null을 허용해 타입은 nullable이다. */
+        @Nullable Integer getScore();
+    }
 
     /**
      * 출석 달력 (KAN-314, §3.20) - 이 계정이 [from, to) 사이에 채점을 {@code COMPLETED}로 마친 시도. 한 달 범위로
