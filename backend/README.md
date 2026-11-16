@@ -78,6 +78,7 @@ AI 서버로 보내므로 `accentury.analysis.ai-base-url`과 `accentury.analysi
 | `V19__translation_report.sql` | 번역 결과 신고 |
 | `V20__in_gn_2026_11_1_app_curriculum.sql` | 억양 학습 발행본 in-gn-2026.11.1, 앱 학습 구간 5개 x 코스 5개 x 카드 3장 |
 | `V21__wd_gn_2026_11_1_app_curriculum.sql` | 단어 학습 발행본 wd-gn-2026.11.1, 앱 학습 구간 5개 x 세트 4개 x 문항 3개 |
+| `V22__word_attempt_answer_timeout.sql` | 단어 답안의 보기 null 허용, 시간 초과 답안 |
 
 | 상황 | 하는 일 |
 | --- | --- |

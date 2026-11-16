@@ -1,5 +1,7 @@
 package app.accentury.backend.learning;
 
+import org.jspecify.annotations.Nullable;
+
 import java.time.Instant;
 import java.util.List;
 
@@ -23,9 +25,16 @@ public record WordAttemptResultResponse(String attemptId, String contentVersion,
                 LearningStars.stars(accuracy), wrongItems, completedAt);
     }
 
-    /** 오답 한 건 - 고른 보기와 정답, 해설을 함께 준다 (복습 안내는 FE 문구다). */
-    public record WrongItem(String itemId, String cardId, String prompt, String chosenChoiceId, String chosenText,
-                            String correctChoiceId, String correctText, String explanation) {
+    /**
+     * 오답 한 건 - 고른 보기와 정답, 해설을 함께 준다 (복습 안내는 FE 문구다).
+     *
+     * @param chosenChoiceId 고른 보기 - 시간 초과 문항이면 null
+     * @param chosenText     고른 보기의 낱말 - 시간 초과 문항이면 null
+     * @param timedOut       제한 시간 안에 보기를 고르지 않은 문항인지 (KAN-360)
+     */
+    public record WrongItem(String itemId, String cardId, String prompt, @Nullable String chosenChoiceId,
+                            @Nullable String chosenText, boolean timedOut, String correctChoiceId,
+                            String correctText, String explanation) {
     }
 
     static int accuracyPercent(int correctCount, int itemCount) {
