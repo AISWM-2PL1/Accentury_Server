@@ -17,7 +17,8 @@ import java.time.Instant;
  * 대조해 확정한다 - 발행본이 불변이라 완료 시점에 다시 대조해도 같다.
  * <p>
  * 시간 초과 답안(KAN-360, V22)은 고른 보기가 없어 {@code choiceId}가 null이고 늘 오답이다. 시간 초과 여부를 따로
- * 저장하지 않고 {@link #timedOut()}이 보기의 null로 판별한다.
+ * 저장하지 않고 {@link #timedOut()}이 보기의 null로 판별한다. 보기가 없는데 정답인 행은 생성자와 DB의 check 제약
+ * ({@code ck_word_attempt_answer_timeout_wrong})이 함께 막는다.
  */
 @Entity
 @Table(name = "word_attempt_answer",
