@@ -21,6 +21,15 @@ public interface DialectTranslator {
     String model();
 
     /**
+     * LLM을 부를 수 있게 설정됐는가 - API 키가 없는 배포의 번역기만 false다 (KAN-361). 서비스는 false면 한도 칸을 잡기 전에
+     * 503으로 끝낸다. 부르지도 않은 LLM 호출을 호출 수(KAN-322)에 세면, 키 없는 환경에서 503을 스무 번 받은 뒤 그날은
+     * 429로 바뀐다.
+     */
+    default boolean configured() {
+        return true;
+    }
+
+    /**
      * LLM의 답.
      *
      * @param kind   답의 종류

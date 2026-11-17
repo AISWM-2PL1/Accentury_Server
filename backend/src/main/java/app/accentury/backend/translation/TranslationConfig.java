@@ -33,7 +33,10 @@ class TranslationConfig {
     /** 프롬프트에 싣는 참고 대사 수 - 어미와 말투의 예로 이만큼이면 충분하고, 늘리면 요청마다 토큰과 지연이 는다. */
     static final int REFERENCE_SENTENCES = 40;
 
-    /** 키가 없는 배포의 번역기 - 부르면 언제나 503이다. */
+    /**
+     * 키가 없는 배포의 번역기 - {@link DialectTranslator#configured()}가 false라 서비스가 부르기 전에 503으로 끝낸다 (KAN-361).
+     * 그래도 불리면 언제나 503이다.
+     */
     static DialectTranslator unconfigured(String model) {
         return new DialectTranslator() {
             @Override
@@ -44,6 +47,11 @@ class TranslationConfig {
             @Override
             public String model() {
                 return model;
+            }
+
+            @Override
+            public boolean configured() {
+                return false;
             }
         };
     }
