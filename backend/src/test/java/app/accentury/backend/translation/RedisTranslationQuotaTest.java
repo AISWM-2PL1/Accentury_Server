@@ -168,6 +168,23 @@ class RedisTranslationQuotaTest extends IntegrationTest {
     }
 
     @Test
+    void Gemini에_닿지_않은_호출은_돌려줘_상한에_세지_않고_0_아래로_내려가지_않는다() {
+        RedisTranslationQuota quota = quotaAt(today().atTime(12, 0));
+        UUID user = UUID.randomUUID();
+        TranslationQuota.Slot last = null;
+        for (int i = 0; i < CALL_LIMIT + 1; i++) {
+            last = quota.acquire(user);
+            quota.releaseCall(last);
+            quota.release(last);
+        }
+
+        assertEquals("0", redis.opsForValue().get(callKey(last)), "설정 오류와 연결 실패는 계정의 호출로 남지 않는다 (KAN-361)");
+        assertEquals("0", redis.opsForValue().get(last.key()));
+        quota.releaseCall(last);
+        assertEquals("0", redis.opsForValue().get(callKey(last)));
+    }
+
+    @Test
     void 호출_상한에_걸리면_성공_칸을_되돌린다() {
         RedisTranslationQuota quota = quotaAt(today().atTime(12, 0));
         UUID user = UUID.randomUUID();

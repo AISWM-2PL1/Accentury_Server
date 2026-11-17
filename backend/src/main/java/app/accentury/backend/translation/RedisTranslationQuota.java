@@ -26,7 +26,7 @@ import java.util.UUID;
  * 키가 이미 사라져 있지 않게 한다.
  * <p>
  * LLM 호출 수는 {@code trc:{userId}:{yyyyMMdd}}에 따로 센다 (KAN-322). 칸을 잡는 스크립트가 함께 늘리고 {@link #release}는
- * 건드리지 않는다. 두 키를 한 스크립트에서 쓰므로 Redis 클러스터 모드로 옮기면 해시 태그가 필요하다 - 지금은 노드 하나다.
+ * 건드리지 않는다. 요청이 Gemini에 닿지 않은 실패만 {@link #releaseCall}이 같은 스크립트로 하나 돌려준다 (KAN-361). 두 키를 한 스크립트에서 쓰므로 Redis 클러스터 모드로 옮기면 해시 태그가 필요하다 - 지금은 노드 하나다.
  */
 @Component
 class RedisTranslationQuota implements TranslationQuota {
@@ -62,7 +62,7 @@ class RedisTranslationQuota implements TranslationQuota {
             return n
             """, Long.class);
 
-    /** 한 칸 돌려주기 - 0 아래로 내려가지 않는다. */
+    /** 한 칸(또는 호출 하나) 돌려주기 - 0 아래로 내려가지 않는다. */
     private static final RedisScript<Long> RELEASE = RedisScript.of("""
             local n = tonumber(redis.call('GET', KEYS[1]) or '0')
             if n > 0 then
@@ -117,6 +117,15 @@ class RedisTranslationQuota implements TranslationQuota {
             redis.execute(RELEASE, List.of(slot.key()));
         } catch (DataAccessException e) {
             log.warn("번역 한도 칸 반환 실패 - 그 칸은 자정까지 잃는다 ({})", e.getClass().getSimpleName());
+        }
+    }
+
+    @Override
+    public void releaseCall(Slot slot) {
+        try {
+            redis.execute(RELEASE, List.of(callKeyOf(slot)));
+        } catch (DataAccessException e) {
+            log.warn("번역 호출 수 반환 실패 - 그 호출은 자정까지 남는다 ({})", e.getClass().getSimpleName());
         }
     }
 

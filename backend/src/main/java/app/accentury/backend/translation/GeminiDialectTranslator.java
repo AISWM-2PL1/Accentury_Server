@@ -109,43 +109,66 @@ class GeminiDialectTranslator implements DialectTranslator {
     }
 
     @Override
+    public boolean configured() {
+        return true;
+    }
+
+    /**
+     * 실패마다 그 요청이 Gemini에 닿았을 수 있는지를 {@link Unavailable#consumed()}로 알린다 (KAN-361). 닿았을 수 있는 시도
+     * (시간 초과, 5xx, 429, 응답 뒤의 그 밖의 실패)가 하나라도 있었으면 true다. 요청을 만들지 못했거나, 연결 자체가 안 됐거나,
+     * 키와 모델 이름 같은 설정 오류(400, 401, 403, 404)만 있었으면 false다 - 서비스가 그 호출을 하루 호출 수에서 돌려준다.
+     */
+    @Override
     public Reply translate(String text, TranslationDirection direction) {
         String body = requestBody(text, direction);
         long deadline = System.nanoTime() + timeout.toNanos();
+        boolean consumed = false;
         for (int attempt = 1; ; attempt++) {
             Duration remaining = Duration.ofNanos(deadline - System.nanoTime());
             if (remaining.isNegative() || remaining.isZero()) {
-                throw new Unavailable("시간 상한 소진");
+                throw new Unavailable("시간 상한 소진", consumed);
             }
             boolean canRetry = attempt == 1;
+            HttpRequest request;
+            try {
+                request = HttpRequest.newBuilder(endpoint)
+                        .timeout(remaining)
+                        .header("Content-Type", "application/json")
+                        .header("x-goog-api-key", apiKey)
+                        .POST(HttpRequest.BodyPublishers.ofString(body, StandardCharsets.UTF_8))
+                        .build();
+            } catch (IllegalArgumentException e) {
+                // 헤더에 넣을 수 없는 문자가 키에 들어 있다(설정 값의 줄바꿈 등) - 요청은 나가지 않았다. 잡지 않으면 500으로
+                // 새고 번역 기록도 남지 않는다 (PR #77 리뷰). 예외 메시지에 키가 들어갈 수 있어 남기지 않는다.
+                error.increment();
+                log.warn("Gemini 요청을 만들지 못했다 - API 키 값을 확인한다 attempt={}", attempt);
+                throw new Unavailable("요청 생성 실패", consumed);
+            }
             HttpResponse<String> response;
-            CompletableFuture<HttpResponse<String>> pending = httpClient.sendAsync(HttpRequest.newBuilder(endpoint)
-                            .timeout(remaining)
-                            .header("Content-Type", "application/json")
-                            .header("x-goog-api-key", apiKey)
-                            .POST(HttpRequest.BodyPublishers.ofString(body, StandardCharsets.UTF_8))
-                            .build(),
-                    HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8));
+            CompletableFuture<HttpResponse<String>> pending =
+                    httpClient.sendAsync(request, HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8));
             try {
                 response = pending.get(remaining.toNanos(), TimeUnit.NANOSECONDS);
             } catch (TimeoutException | ExecutionException e) {
                 // 시간 초과(본문 지연 포함)와 연결 실패 - 예외 메시지에는 URI만 있고 키와 본문은 없다. 끝나지 않은 교환은
-                // 취소해 연결을 놓는다.
+                // 취소해 연결을 놓는다. 연결조차 안 된 실패만 Gemini에 닿지 않은 것으로 본다 - 시간 초과는 요청이 처리됐을 수 있다.
                 pending.cancel(true);
-                String reason = e instanceof ExecutionException && e.getCause() != null
-                        ? e.getCause().getClass().getSimpleName() : e.getClass().getSimpleName();
+                Throwable cause = e instanceof ExecutionException && e.getCause() != null ? e.getCause() : e;
+                consumed |= !neverConnected(cause);
+                String reason = cause.getClass().getSimpleName();
                 error.increment();
                 if (canRetry && retryBudgetLeft(deadline)) {
                     log.warn("Gemini 호출 실패 - 다시 부른다 attempt={} ({})", attempt, reason);
                     continue;
                 }
                 log.warn("Gemini 호출 실패 attempt={} ({})", attempt, reason);
-                throw new Unavailable(reason);
+                throw new Unavailable(reason, consumed);
             } catch (InterruptedException e) {
                 pending.cancel(true);
                 Thread.currentThread().interrupt();
                 error.increment();
-                throw new Unavailable("interrupted");
+                // 어디까지 갔는지 모른다 - 닿았을 수 있는 쪽으로 센다
+                throw new Unavailable("interrupted", true);
             }
 
             int status = response.statusCode();
@@ -156,17 +179,39 @@ class GeminiDialectTranslator implements DialectTranslator {
             if (status == 429) {
                 rateLimited.increment();
                 log.warn("Gemini 무료 한도 소진(429) - 다시 부르지 않는다");
-                throw new Unavailable("429");
+                throw new Unavailable("429", true);
             }
             error.increment();
+            if (CONFIGURATION_ERRORS.contains(status)) {
+                // 400(요청 형식, 모델 이름), 401, 403(키), 404(모델) - 다시 불러도 같고, 계정의 호출로 세지 않는다 (KAN-361).
+                // 응답 본문은 남기지 않는다 - 입력을 되풀이할 수 있다.
+                log.warn("Gemini 설정 오류로 거절 status={} attempt={} - 키와 모델 이름을 확인한다", status, attempt);
+                throw new Unavailable("status " + status, consumed);
+            }
+            consumed = true;
             if (status >= 500 && canRetry && retryBudgetLeft(deadline)) {
                 log.warn("Gemini {} - 다시 부른다 attempt={}", status, attempt);
                 continue;
             }
-            // 400(요청 형식, 모델 이름), 403(키) 등은 다시 불러도 같다. 응답 본문은 남기지 않는다 - 입력을 되풀이할 수 있다.
             log.warn("Gemini 호출 실패 status={} attempt={}", status, attempt);
-            throw new Unavailable("status " + status);
+            throw new Unavailable("status " + status, true);
         }
+    }
+
+    /** 키, 모델 이름, 요청 형식 같은 설정 오류 - 요청이 처리되지 않았고 다시 불러도 같다 (KAN-361). */
+    private static final Set<Integer> CONFIGURATION_ERRORS = Set.of(400, 401, 403, 404);
+
+    /** 연결조차 되지 않은 실패인가 - 원인 사슬에 연결 거부, 연결 시간 초과, 주소 해석 실패가 있다. */
+    private static boolean neverConnected(Throwable failure) {
+        for (Throwable t = failure; t != null; t = t.getCause()) {
+            if (t instanceof java.net.ConnectException
+                    || t instanceof java.net.http.HttpConnectTimeoutException
+                    || t instanceof java.net.UnknownHostException
+                    || t instanceof java.nio.channels.UnresolvedAddressException) {
+                return true;
+            }
+        }
+        return false;
     }
 
     private static boolean retryBudgetLeft(long deadline) {

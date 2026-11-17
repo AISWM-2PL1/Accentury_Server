@@ -12,7 +12,8 @@ import java.util.UUID;
  * 세면 동시 요청이 함께 확인을 통과해 하루 한도를 넘는다.
  * <p>
  * 칸을 잡을 때 LLM 호출 수도 함께 센다 - 계정당 하루 {@value AccenturyProperties.Translation#DAILY_CALL_LIMIT}번이고 결과와
- * 상관없이 돌려주지 않는다 (KAN-322). 칸만 세면 LLM이 거절하는 문장의 반복이 한도에 걸리지 않는다.
+ * 상관없이 돌려주지 않는다 (KAN-322). 칸만 세면 LLM이 거절하는 문장의 반복이 한도에 걸리지 않는다. 예외는 요청이 Gemini에
+ * 닿지 않았거나 설정 오류로 거절된 실패 하나다 - 그때만 {@link #releaseCall}로 돌려준다 (KAN-361).
  */
 interface TranslationQuota {
 
@@ -29,6 +30,13 @@ interface TranslationQuota {
      * 잃는다).
      */
     void release(Slot slot);
+
+    /**
+     * 이 칸을 잡을 때 늘린 호출 수 하나를 돌려준다 - LLM 요청이 Gemini에 닿지 않았거나 설정 오류(키, 모델 이름)로 거절됐을 때다
+     * ({@link DialectTranslator.Unavailable#consumed()}가 false, KAN-361). 0 아래로 내려가지 않고, 실패해도 예외를 내지 않는다
+     * (그 호출은 그날 자정까지 남는다).
+     */
+    void releaseCall(Slot slot);
 
     /**
      * 번역이 성공한 지금 그날 더 성공할 수 있는 건수 - 200 응답의 {@code remaining}이다. 남은 성공 칸과 남은 호출 수 가운데 작은

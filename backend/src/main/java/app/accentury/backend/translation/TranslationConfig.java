@@ -22,7 +22,8 @@ import java.util.Set;
 /**
  * 번역 LLM 호출의 배선 (KAN-266).
  * <p>
- * 키가 없거나 자리 표시 값이면 호출하지 않는 번역기({@link #UNCONFIGURED})로 뜬다 - 번역만 503이고 기동과 다른 기능은
+ * 키가 없거나 자리 표시 값이면 호출하지 않는 번역기({@link #unconfigured(String)})로 뜬다 - 서버 사전 검사(길이, 거절 문장)를
+ * 통과한 번역 요청만 503이고 기동과 다른 기능은
  * 영향이 없다 (키는 콘솔이 발급하는 값이라 apply 뒤에 넣는다, 후기 슬랙 URL과 같은 사정). 테스트는 이 빈을 가짜로 바꾼다.
  */
 @Configuration(proxyBeanMethods = false)
@@ -62,7 +63,7 @@ class TranslationConfig {
                                         MeterRegistry meterRegistry) {
         AccenturyProperties.Translation translation = properties.translation();
         if (!translation.apiKeyConfigured()) {
-            log.warn("번역 API 키가 없다 - 번역은 전부 503 TRANSLATION_UNAVAILABLE (SSM ACCENTURY_TRANSLATION_APIKEY, KAN-266)");
+            log.warn("번역 API 키가 없다 - 사전 검사를 통과한 번역은 503 TRANSLATION_UNAVAILABLE (SSM ACCENTURY_TRANSLATION_APIKEY, KAN-266)");
             return unconfigured(translation.model());
         }
         Map<TranslationDirection, String> systemInstructions = systemInstructions(vocabulary(words), sentences(intonation));
