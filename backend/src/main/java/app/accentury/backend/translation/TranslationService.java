@@ -43,7 +43,9 @@ class TranslationService {
 
     /**
      * 호출 수 상한의 429 문구 - 코드는 성공 5건 한도와 같은 {@code TRANSLATION_DAILY_LIMIT_EXCEEDED}이고 문구만 다르다 (PR #66
-     * 리뷰). 성공이 5건 미만인 사용자에게 「5회를 다 썼다」고 하지 않는다. 앱과 웹은 서버 문구를 그대로 보여 준다.
+     * 리뷰). 성공이 5건 미만인 사용자에게 「5회를 다 썼다」고 하지 않는다. 웹은 이 문구를 그대로 쓰지 않고 「요청 횟수(N회)」와
+     * {@code ErrorCode} 기본 문구의 「번역 횟수(N회)」로 한도 종류와 숫자를 읽어 해요체로 다시 쓴다 (KAN-361, Accentury_App
+     * {@code TranslatorScreen.limitBody}) - 두 문구의 그 부분을 바꾸면 웹 판별과 그 테스트를 같이 바꾼다.
      */
     static final String CALL_LIMIT_MESSAGE = "오늘 번역 요청 횟수(%d회)를 다 썼습니다. 내일 다시 시도해 주세요."
             .formatted(AccenturyProperties.Translation.DAILY_CALL_LIMIT);

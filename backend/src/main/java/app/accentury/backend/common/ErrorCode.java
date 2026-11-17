@@ -111,6 +111,7 @@ public enum ErrorCode {
     TRANSLATION_TOO_LONG(HttpStatus.UNPROCESSABLE_CONTENT, false, "문장이 너무 깁니다. (최대 100자)"),
     TRANSLATION_REJECTED(HttpStatus.UNPROCESSABLE_CONTENT, false, "올바른 문장을 넣어주세요."),
     TRANSLATION_UNAVAILABLE(HttpStatus.SERVICE_UNAVAILABLE, true, "번역을 할 수 없습니다. 잠시 뒤 다시 시도해 주세요."),
+    // 웹은 「번역 횟수(N회)」를 읽어 한도 카드 본문을 해요체로 다시 쓴다 (KAN-361, TranslationService.CALL_LIMIT_MESSAGE 주석).
     TRANSLATION_DAILY_LIMIT_EXCEEDED(HttpStatus.TOO_MANY_REQUESTS, false, "오늘 번역 횟수(5회)를 다 썼습니다. 내일 다시 시도해 주세요."),
 
     // === SHARE_* : 카카오톡 공유 웹훅 (§3.8, KAN-164) ===
