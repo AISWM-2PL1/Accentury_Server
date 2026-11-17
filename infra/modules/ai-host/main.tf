@@ -593,6 +593,50 @@ resource "aws_cloudwatch_metric_alarm" "scale_in" {
   tags = { Name = "${local.name}-scale-in" }
 }
 
+# ---- 피크 예약 (KAN-363) ----
+
+# 확대는 진행 중 분석이 쌓인 뒤에야 시작되고 새 인스턴스가 일하기까지 약 4분이 걸린다. 2026-11-17 22:10~22:22 KST
+# prod에서는 그사이 결과 대기 P95가 135초까지 올랐다. 몰리는 시간대를 미리 min_size 대수로 맞이한다.
+# 시작 예약은 희망 대수도 함께 올린다 - 최소만 올렸을 때 희망 대수가 따라 오르는지 AWS 문서에 명시가 없다. 그 시각에
+# 이미 더 많이 떠 있으면 희망 대수로 줄어들지만, 저녁 시작 시각에는 1대로 충분했다(2026-11-17 18:45~20:45 진행 중 최대 4).
+# 끝 예약은 최소 대수만 되돌린다(-1은 바꾸지 않음) - 늘어난 인스턴스는 축소 경보가 15분 한산한 뒤 줄인다.
+# 피크 동안 plan을 돌리면 ASG min_size를 되돌리는 변경이 보인다(예약이 바꾼 값). 그 시간대에는 이 모듈을 apply하지 않는다.
+# 배포 파이프라인(deploy.yml)은 reload 동안 HealthCheck, ReplaceUnhealthy, AlarmNotification만 멈추고 예약은 멈추지
+# 않는다 - 시작 예약 시각에 배포가 겹치면 reload 대상 목록 밖에서 인스턴스가 늘거나(3대였으면) 줄어 배포가 롤백될 수
+# 있다. 한시 적용이라 파이프라인은 고치지 않고, 시작 예약 시각 앞뒤 10분에는 Image Deploy를 하지 않는다 (Codex P2).
+resource "aws_autoscaling_schedule" "peak_start" {
+  count = var.peak_schedule == null ? 0 : 1
+
+  scheduled_action_name  = "${local.name}-peak-start"
+  autoscaling_group_name = aws_autoscaling_group.ai.name
+  recurrence             = var.peak_schedule.start
+  time_zone              = var.peak_schedule.time_zone
+  end_time               = var.peak_schedule.end_time
+  min_size               = var.peak_schedule.min_size
+  desired_capacity       = var.peak_schedule.min_size
+  max_size               = -1
+
+  lifecycle {
+    precondition {
+      condition     = var.peak_schedule.min_size <= var.max_size
+      error_message = "peak_schedule.min_size(${var.peak_schedule.min_size})는 max_size(${var.max_size}) 이하여야 합니다 (KAN-363)."
+    }
+  }
+}
+
+resource "aws_autoscaling_schedule" "peak_end" {
+  count = var.peak_schedule == null ? 0 : 1
+
+  scheduled_action_name  = "${local.name}-peak-end"
+  autoscaling_group_name = aws_autoscaling_group.ai.name
+  recurrence             = var.peak_schedule.end
+  time_zone              = var.peak_schedule.time_zone
+  end_time               = var.peak_schedule.end_time
+  min_size               = var.min_size
+  desired_capacity       = -1
+  max_size               = -1
+}
+
 # KAN-36 A단계에서는 이 리소스들이 role 변수로 갈리는 compute 모듈의 count 리소스였다. 살아 있는 state에서 주소만 옮긴다.
 moved {
   from = aws_launch_template.ai[0]

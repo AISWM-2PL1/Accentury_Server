@@ -159,6 +159,23 @@ variable "scale_out_warmup" {
   default     = 300
 }
 
+variable "peak_schedule" {
+  type = object({
+    min_size  = number # 피크 동안의 최소 대수. 시작 예약은 희망 대수도 이 값으로 둔다.
+    start     = string # 피크 시작 cron (time_zone 기준), 예 "0 20 * * *"
+    end       = string # 피크 끝 cron (time_zone 기준), 예 "0 0 * * *" - 최소 대수만 min_size 변수로 되돌린다.
+    time_zone = string # IANA 시간대, 예 "Asia/Seoul"
+    end_time  = string # 두 예약이 멈추는 UTC 시각 "YYYY-MM-DDThh:mm:ssZ" - 마지막 끝 예약 실행 뒤로 둔다.
+  })
+  description = "저녁 피크 예약 (KAN-363). null(기본)이면 예약이 없다. 시작 때 최소와 희망 대수를 min_size로 올리고, 끝날 때 최소 대수만 되돌려 축소 경보(15분 한산)가 줄이게 둔다 - 분석 중인 인스턴스를 바로 끊지 않는다. end_time이 지나면 AWS가 예약을 지우므로 그 뒤에는 이 값을 null로 되돌려야 plan이 No changes다."
+  default     = null
+
+  validation {
+    condition     = var.peak_schedule == null || try(var.peak_schedule.min_size >= 1, false)
+    error_message = "peak_schedule.min_size는 1 이상이어야 합니다."
+  }
+}
+
 variable "vpc_cidr" {
   type        = string
   description = "컨테이너 egress 허용 대역 - 그 밖(인터넷, IMDS)은 호스트 iptables가 버린다 (ai-egress-guard.sh, KAN-36)."
