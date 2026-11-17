@@ -52,6 +52,9 @@ voice_report_enabled = true
 slack_channel_configs_enabled = true
 slack_infra_alerts_peer_envs  = ["staging"]
 
+# GuardDuty 결과 알림 (KAN-310). 심각도 4 이상을 #infra-alerts로 보내는 규칙과 전달 실패 경보를 이 환경만 만든다.
+slack_guardduty_findings_enabled = true
+
 ssm_prefix = "/accentury/prod"
 
 # prod 역할은 ECR push 불가 (KAN-128 승격 모델). staging이 검증한 SHA만 반영한다.

@@ -32,7 +32,7 @@ class WordLearningController {
         this.progress = progress;
     }
 
-    /** 어휘 세트 목록 (W-1) - 계정의 완료 표시, 최근 정답률, 추천 1개(KAN-268)를 채운다. 200 / 401. */
+    /** 어휘 세트 목록 (W-1) - 계정의 완료 표시, 최근 정답률, 추천 1개(KAN-268), 세트 점수와 별(KAN-359)을 채운다. 200 / 401. */
     @GetMapping("/word-sets")
     ResponseEntity<WordSetListResponse> listSets(@AuthenticatedUser AppUser user) {
         return noStore(progress.wordSets(user.id()));
@@ -53,7 +53,7 @@ class WordLearningController {
 
     /**
      * 답안 제출과 채점 (W-4). {@code Idempotency-Key} 필수 - 누락 검증은 서비스가 맡아 공통 오류 봉투로 답하므로
-     * {@code required = false}다.
+     * {@code required = false}다. 시간 초과 답안(KAN-360)은 {@code choiceId} 없이 {@code timedOut: true}이고 오답이다.
      * <p>
      * 200 / 400 {@code VALIDATION_FAILED} / 401 / 403 {@code LEARNING_ATTEMPT_FORBIDDEN} / 404 {@code LEARNING_ATTEMPT_NOT_FOUND} /
      * 409 {@code LEARNING_ATTEMPT_COMPLETED}, {@code ITEM_ALREADY_ANSWERED} / 422 {@code ITEM_NOT_IN_VERSION} / 429.

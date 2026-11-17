@@ -26,7 +26,8 @@ import java.util.concurrent.TimeUnit;
  * 사투리 텍스트 번역 (KAN-266, 명세서 §3.18) - 두 방향이다 (KAN-316, {@link TranslationDirection}).
  * <p>
  * 순서: 형식 검사(400, {@code text}와 {@code direction}) → 분당 제한(429 {@code RATE_LIMITED}) → 길이(422 {@code TRANSLATION_TOO_LONG}) →
- * 서버 사전 검사(422 {@code TRANSLATION_REJECTED}) → 일일 한도(429 {@code TRANSLATION_DAILY_LIMIT_EXCEEDED}) →
+ * 서버 사전 검사(422 {@code TRANSLATION_REJECTED}) → API 키 확인(키가 없는 배포면 503 {@code TRANSLATION_UNAVAILABLE}, KAN-361) →
+ * 일일 한도(429 {@code TRANSLATION_DAILY_LIMIT_EXCEEDED}) →
  * LLM 호출(실패면 503 {@code TRANSLATION_UNAVAILABLE}) → 응답 검사(어기면 422 {@code TRANSLATION_REJECTED}) → 200.
  * 400과 분당 제한을 뺀 모든 끝에서 결과 종류를 지표로 세고 번역 기록을 넘긴다.
  * <p>
@@ -42,7 +43,9 @@ class TranslationService {
 
     /**
      * 호출 수 상한의 429 문구 - 코드는 성공 5건 한도와 같은 {@code TRANSLATION_DAILY_LIMIT_EXCEEDED}이고 문구만 다르다 (PR #66
-     * 리뷰). 성공이 5건 미만인 사용자에게 「5회를 다 썼다」고 하지 않는다. 앱과 웹은 서버 문구를 그대로 보여 준다.
+     * 리뷰). 성공이 5건 미만인 사용자에게 「5회를 다 썼다」고 하지 않는다. 웹은 이 문구를 그대로 쓰지 않고 「요청 횟수(N회)」와
+     * {@code ErrorCode} 기본 문구의 「번역 횟수(N회)」로 한도 종류와 숫자를 읽어 해요체로 다시 쓴다 (KAN-361, Accentury_App
+     * {@code TranslatorScreen.limitBody}) - 두 문구의 그 부분을 바꾸면 웹 판별과 그 테스트를 같이 바꾼다.
      */
     static final String CALL_LIMIT_MESSAGE = "오늘 번역 요청 횟수(%d회)를 다 썼습니다. 내일 다시 시도해 주세요."
             .formatted(AccenturyProperties.Translation.DAILY_CALL_LIMIT);
@@ -112,6 +115,13 @@ class TranslationService {
             finish(attempt, TranslationResult.REJECTED, null, null);
             throw new ApiException(ErrorCode.TRANSLATION_REJECTED);
         }
+        // 키가 없으면 LLM을 부를 수 없다 - 한도 칸과 호출 수를 건드리기 전에 끝낸다 (KAN-361). 키가 있는 판의 LLM 실패는
+        // 요청이 Gemini에 닿았을 수 있으면 호출 수에 남고(KAN-322, RPD를 실제로 썼을 수 있다), 닿지 않았거나 설정 오류면
+        // translateWithin이 돌려준다.
+        if (!translator.configured()) {
+            finish(attempt, TranslationResult.LLM_FAILED, null, null);
+            throw new ApiException(ErrorCode.TRANSLATION_UNAVAILABLE);
+        }
 
         TranslationQuota.Slot slot;
         try {
@@ -155,6 +165,11 @@ class TranslationService {
         try {
             reply = translator.translate(input, attempt.direction());
         } catch (DialectTranslator.Unavailable e) {
+            if (!e.consumed()) {
+                // 요청이 Gemini에 닿지 않았거나 키, 모델 이름 같은 설정 오류로 거절됐다 - 호출 수를 남기면 설정을 고쳐도 그 계정이
+                // 그날 429로 잠긴다 (KAN-361, PR #77 리뷰). 성공 칸은 부르는 쪽 finally가 돌려준다.
+                quota.releaseCall(slot);
+            }
             finish(attempt, TranslationResult.LLM_FAILED, null, elapsedMs(llmStarted));
             throw new ApiException(ErrorCode.TRANSLATION_UNAVAILABLE);
         }

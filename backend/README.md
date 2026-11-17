@@ -1,7 +1,7 @@
 # backend
 
 Spring Boot 4.1 (Java 25) + PostgreSQL 16 + Redis 7. 앱과 웹이 부르는 레벨테스트 API(세션, 업로드, 결과, 후기)와
-AI 서버 호출, 앱 전용 계정 API(소셜 로그인, 추가 정보, 탈퇴)와 학습 API(단어, 억양, 진도와 홈), 번역 API,
+AI 서버 호출, 앱 전용 계정 API(소셜 로그인, 추가 정보, 탈퇴)와 학습 API(단어, 억양, 진도와 홈, 별과 구간 열림), 번역 API,
 관리자 API(`/admin/v0`)를 맡는다. Redis는 Refresh 토큰과 번역 일일 한도에만 쓴다. API 정본은 Notion
 "App-Backend API 명세서"이고, 인프라와 배포는 [`infra/README.md`](../infra/README.md)가 정본이다.
 
@@ -76,6 +76,9 @@ AI 서버로 보내므로 `accentury.analysis.ai-base-url`과 `accentury.analysi
 | `V17__test_session_complete_requested_at.sql` | 세션의 첫 `/complete` 호출 시각 |
 | `V18__app_user_guest_provider.sql` | 계정 provider 허용 값에 GUEST 추가, 살아 있는 게스트 계정의 부분 색인 |
 | `V19__translation_report.sql` | 번역 결과 신고 |
+| `V20__in_gn_2026_11_1_app_curriculum.sql` | 억양 학습 발행본 in-gn-2026.11.1, 앱 학습 구간 5개 x 코스 5개 x 카드 3장 |
+| `V21__wd_gn_2026_11_1_app_curriculum.sql` | 단어 학습 발행본 wd-gn-2026.11.1, 앱 학습 구간 5개 x 세트 4개 x 문항 3개 |
+| `V22__word_attempt_answer_timeout.sql` | 단어 답안의 보기 null 허용, 시간 초과 답안 |
 
 | 상황 | 하는 일 |
 | --- | --- |
@@ -89,9 +92,15 @@ AI 서버로 보내므로 `accentury.analysis.ai-base-url`과 `accentury.analysi
   발행하고, 활성 전환은 배포 뒤 `PUT /admin/v0/active-version`이 따로 한다 (2단계 롤아웃).
   예외는 하나다. V15는 세션, 채점, 세트 구성이 바뀌지 않는 화면용 필드(`emotion`) 하나만 더하는 일이라
   gn-2026.10.2를 새 버전 없이 제자리에서 UPDATE한다. 활성 전환 없이 배포만으로 반영된다.
-- 발행 마이그레이션은 손으로 쓰지 않는다. 레벨테스트 정의는 `tools/content/build_definition.py`, 단어 학습
-  발행본은 `tools/content/build_word_learning.py`, 억양 학습 발행본은 `tools/content/build_intonation_learning.py`가
-  만든다. 학습 발행본도 발행 후 불변이고 활성 포인터가 없다. 서버가 발행 시각이 가장 늦은 행을 쓴다.
+- 발행 마이그레이션은 손으로 쓰지 않는다. 레벨테스트 정의는 `tools/content/build_definition.py`, 학습 발행본
+  두 개(억양, 단어)는 `tools/content/build_app_curriculum.py`가 만든다. 학습 발행본도 발행 후 불변이고 활성
+  포인터가 없다. 서버가 발행 시각이 가장 늦은 행을 쓴다. 그래서 새 학습 발행본은 배포만으로 바뀌고, 앞선
+  발행본의 진도와 별은 목록과 구간 요약에서 빠진다 (기록은 남는다). 별과 세트 점수는 저장하지 않고 조회 때
+  시도 기록에서 계산하며, 별 구간과 필요 별 같은 정책 값은 `LearningStars` 한 곳에 있다.
+- 학습 발행본의 `level`은 앱 학습 탭의 구간 번호(1부터 5)다. 구간 1이 가장 쉽고 구간 안에서는 `seq`가 클수록
+  어렵다. 순서의 근거는 레벨테스트 실사용 기록의 문항별 집계(`tools/content/item_difficulty.py`가 만든
+  `difficulty_gn_2026_11.json`)이고, 문항별 배치는 `tools/content/curriculum_gn_2026_11.md`에 있다. 첫 발행본
+  (V8, V10)을 만든 `build_word_learning.py`와 `build_intonation_learning.py`는 그 발행본을 다시 만들 때만 쓴다.
 - 정의를 품은 파일의 주석에 달러 인용 구분자 문자열을 적지 않는다. 앱, iOS, 웹의 발행본 전수 검사가 복사본
   (Accentury_App `fixtures/definitions/<버전>/`)에서 처음 만나는 구분자 두 개 사이를 정의 JSON으로 읽는다.
 - 테스트 전용 발행본은 `src/test/resources/db/testdata`(V899 더미 gn-2026.08.1과 테스트 활성 되돌림, V900

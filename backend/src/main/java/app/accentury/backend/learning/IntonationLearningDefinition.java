@@ -21,9 +21,11 @@ public record IntonationLearningDefinition(String contentVersion, String dialect
     /**
      * 코스 하나 = 같은 레벨의 대사 카드 묶음 (FR-CT-01).
      *
-     * @param courseId 코스 식별자 (예: ic01)
+     * @param courseId 코스 식별자 (예: ic-26111-01) - 발행본끼리 겹치지 않게 버전 표식을 넣는다 (KAN-345). 채점이 카드를
+     *                 현재 발행본에서만 찾으므로, 겹치면 옛 화면의 요청이 다른 문장으로 채점된다. 첫 발행본은 ic01 꼴이다
      * @param seq      목록 순서 (1부터, 레벨 오름차순)
-     * @param level    레벨 1부터 5 - 첫 발행본은 대사의 어절 수로 정했다 (2026-10-08 결정)
+     * @param level    레벨 1부터 5 - 앱 학습 탭의 구간 번호다. 실사용 점수로 쉬운 순을 정한다 (KAN-345, in-gn-2026.11.1부터).
+     *                 첫 발행본은 대사의 어절 수로 정했다 (2026-10-08 결정)
      * @param topic    주제 - 첫 발행본은 원천에 주제 정보가 없어 null이다
      * @param title    코스 제목
      * @param cards    대사 카드 (A-2) - seq 오름차순
@@ -35,7 +37,7 @@ public record IntonationLearningDefinition(String contentVersion, String dialect
     /**
      * 대사 카드 (FR-CT-02).
      *
-     * @param cardId             카드 식별자 (예: ic01c01) - 억양 채점(KAN-267)이 받는 값
+     * @param cardId             카드 식별자 (예: ic-26111-01c01) - 억양 채점(KAN-267)이 받는 값
      * @param seq                코스 안 순서 (1부터)
      * @param standard           표준어 원문 - 확인된 번역이 없으면 null (2026-10-08 결정)
      * @param dialect            사투리 대사

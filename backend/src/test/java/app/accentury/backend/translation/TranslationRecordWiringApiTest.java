@@ -72,6 +72,11 @@ class TranslationRecordWiringApiTest extends IntegrationTest {
                 public String model() {
                     return "fake-model";
                 }
+
+                @Override
+                public boolean configured() {
+                    return true;
+                }
             };
         }
     }

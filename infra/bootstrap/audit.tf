@@ -206,7 +206,6 @@ resource "aws_guardduty_detector_feature" "s3_data_events" {
 # 주의: 이 리소스를 지워도 기능은 꺼지지 않고 state에서만 빠진다 (provider 문서). 끄려면 DISABLED로 apply한다.
 resource "aws_guardduty_detector_feature" "managed" {
   for_each = {
-    RDS_LOGIN_EVENTS       = "ENABLED"
     EKS_AUDIT_LOGS         = "DISABLED"
     LAMBDA_NETWORK_LOGS    = "DISABLED"
     EBS_MALWARE_PROTECTION = "DISABLED"
@@ -216,6 +215,29 @@ resource "aws_guardduty_detector_feature" "managed" {
   name        = each.key
   status      = each.value
 }
+
+# RDS_LOGIN_EVENTS만 따로 둔다. 그 밑의 하위 설정 RDS_DATA_RISK(RDS 데이터 활동 감시)를 AWS가 꺼진 채 붙여 두었는데,
+# provider(6.61.0)가 additional_configuration 이름으로 RDS_DATA_RISK를 받지 않아 코드로 끔을 고정할 수 없다. 코드에 없으면
+# plan이 매번 지우려 하므로 이 기능에서만 additional_configuration을 무시한다 (2026-11-12 KAN-310 apply 뒤 확인). 다른
+# 기능의 하위 설정 변화는 그대로 plan에 나온다. 무시하는 동안 콘솔에서 RDS_DATA_RISK를 켜도 plan에 나오지 않으므로, 켜고
+# 끄는 것은 콘솔에서 한다. provider가 이 이름을 받게 되면 additional_configuration 블록으로 끔을 고정하고 무시를 뺀다.
+resource "aws_guardduty_detector_feature" "rds_login_events" {
+  detector_id = aws_guardduty_detector.this.id
+  name        = "RDS_LOGIN_EVENTS"
+  status      = "ENABLED"
+
+  lifecycle {
+    ignore_changes = [additional_configuration]
+  }
+}
+
+moved {
+  from = aws_guardduty_detector_feature.managed["RDS_LOGIN_EVENTS"]
+  to   = aws_guardduty_detector_feature.rds_login_events
+}
+
+# 결과를 슬랙 #infra-alerts로 보내는 EventBridge 규칙과 전달 실패 경보는 prod의 slack-alerts 모듈에 있다 (KAN-310,
+# guardduty_findings_enabled). 결과 이벤트는 기본 버스에 오므로 계정 단위 리소스라도 bootstrap에 둘 필요가 없다.
 
 output "audit_bucket" {
   value       = aws_s3_bucket.audit.bucket

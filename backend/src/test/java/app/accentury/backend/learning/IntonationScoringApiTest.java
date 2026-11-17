@@ -373,6 +373,17 @@ class IntonationScoringApiTest extends IntegrationTest {
 
     // === 도우미 ===
 
+    /** 구간 열림은 표시용이다 (KAN-359, §3.20) - 새 계정에게 잠긴 가장 높은 구간의 카드도 업로드를 막지 않는다. */
+    @Test
+    void 잠긴_구간의_카드도_업로드는_지금처럼_202다() throws Exception {
+        String access = signUp();
+        List<IntonationLearningDefinition.Course> courses = registry.current().definition().courses();
+        IntonationLearningDefinition.Course highest = courses.get(courses.size() - 1);
+        assertTrue(highest.level() > courses.get(0).level(), "가장 높은 구간은 새 계정에게 잠겨 있다");
+
+        upload(access, highest.cards().get(0).cardId(), "locked-level-1").andExpect(status().isAccepted());
+    }
+
     private List<LocalDate> attendedDates(UUID userId) {
         return jdbc.query("select attended_on from learning_attendance where user_id = ? order by attended_on",
                 (rs, rowNum) -> rs.getDate(1).toLocalDate(), userId);

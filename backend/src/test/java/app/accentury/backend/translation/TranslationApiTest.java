@@ -87,6 +87,11 @@ class TranslationApiTest extends IntegrationTest {
         public String model() {
             return MODEL;
         }
+
+        @Override
+        public boolean configured() {
+            return true;
+        }
     }
 
     /** 넘어온 기록을 받아 적기만 한다 - 버킷이 없는 테스트 배포에는 다른 저장소 빈이 없다. */

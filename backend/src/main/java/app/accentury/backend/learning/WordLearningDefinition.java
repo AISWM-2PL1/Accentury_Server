@@ -16,13 +16,16 @@ import java.util.List;
 public record WordLearningDefinition(String contentVersion, String dialect, List<Set> sets) {
 
     /**
-     * 어휘 세트 하나 = 어휘 분류 하나(10카드를 넘으면 쪼갠 조각) (§3.16).
+     * 어휘 세트 하나 (§3.16) - wd-gn-2026.11.1부터 난이도 순으로 낱말 3개씩 묶은 것이고, 첫 발행본은 어휘 분류
+     * 하나(10카드를 넘으면 쪼갠 조각)였다.
      *
-     * @param setId    세트 식별자 (예: ws01)
-     * @param seq      목록 순서 (1부터, 분류 순)
-     * @param level    레벨 1부터 5 - 낱말 근거(코퍼스, 일반, 사전)의 평균으로 발행 때 정한다
-     * @param category 어휘 분류 이름 (예: 음식과 식재료)
-     * @param title    세트 제목 - 분류가 쪼개졌으면 뒤에 번호가 붙는다
+     * @param setId    세트 식별자 (예: ws-26111-01) - 발행본끼리 겹치지 않게 버전 표식을 넣는다 (KAN-345). 시도 시작이 세트를
+     *                 현재 발행본에서만 찾으므로, 겹치면 옛 화면의 답이 다른 문항으로 채점된다. 첫 발행본은 ws01 꼴이다
+     * @param seq      목록 순서 (1부터) - 쉬운 순이다
+     * @param level    레벨 1부터 5 - 앱 학습 탭의 구간 번호다. 실사용 정답률로 쉬운 순을 정한다 (KAN-345, wd-gn-2026.11.1부터).
+     *                 첫 발행본은 낱말 근거(코퍼스, 일반, 사전)의 평균으로 정했다
+     * @param category 어휘 분류 이름 (예: 음식과 식재료) - 분류를 섞은 세트는 "종합"이다
+     * @param title    세트 제목 (예: 코스 1 단어 1)
      * @param cards    어휘 카드 (W-2)
      * @param items    객관식 문항 (W-3) - 카드 하나에 문항 하나, seq 오름차순
      */
@@ -38,7 +41,7 @@ public record WordLearningDefinition(String contentVersion, String dialect, List
     /**
      * 어휘 카드 - 표준어와 사투리 대응 (FR-WD-01).
      *
-     * @param cardId   카드 식별자 (예: ws01c01)
+     * @param cardId   카드 식별자 (예: ws-26111-01c01)
      * @param standard 표준어 (또는 뜻풀이)
      * @param dialect  경남 사투리 낱말
      */
@@ -48,7 +51,7 @@ public record WordLearningDefinition(String contentVersion, String dialect, List
     /**
      * 치환 문항 - 표준어에서 사투리로 한 방향, 4지선다 (FR-WD-02).
      *
-     * @param itemId          문항 식별자 (예: ws01q01)
+     * @param itemId          문항 식별자 (예: ws-26111-01q01)
      * @param seq             세트 안 순서 (1부터)
      * @param cardId          이 문항이 확인하는 카드
      * @param prompt          문항 문구

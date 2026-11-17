@@ -26,9 +26,17 @@ const context = vm.createContext({});
 vm.runInContext(source + '\nglobalThis.__handler = handler;', context);
 const handler = context.__handler;
 
-/** 함수가 받는 event 모양은 uri 하나만 보면 충분하다. */
-function rewrite(uri) {
-  return handler({ request: { uri } }).uri;
+/**
+ * 함수가 받는 event에서 쓰는 것은 uri와 querystring 둘이다. querystring은 CloudFront가 넘기는 모양
+ * (`{ 키: { value } }`)을 그대로 만든다. 쿼리가 없는 요청에도 빈 객체가 온다.
+ */
+function run(uri, query = {}) {
+  const querystring = Object.fromEntries(Object.entries(query).map(([key, value]) => [key, { value }]));
+  return handler({ request: { uri, querystring } });
+}
+
+function rewrite(uri, query) {
+  return run(uri, query).uri;
 }
 
 test('확장자 없는 경로는 index.html로 돌아간다', () => {
@@ -64,6 +72,79 @@ test('/privacy.html은 재작성되지 않는다 (KAN-133)', () => {
 test('점 없는 이름이 우연히 비슷해도 예약 접두사가 아니면 재작성된다', () => {
   // `/well-known`(점 없음)은 RFC 8615의 그 자리가 아니다 — SPA 경로로 다뤄야 한다.
   assert.equal(rewrite('/well-known/foo'), '/index.html');
+});
+
+// ---------------------------------------------------------------------------
+// 루트는 사투리 이야기 목록, 테스트 화면은 /test (KAN-346)
+// ---------------------------------------------------------------------------
+
+test('쿼리 없는 루트는 사투리 이야기 목록이다 (KAN-346)', () => {
+  assert.equal(rewrite('/'), '/guide/index.html');
+});
+
+test('bridge 쿼리가 붙은 루트는 SPA다 - 스토어에 나간 앱의 진입 주소 (KAN-346)', () => {
+  // 이 줄이 깨지면 이미 배포된 앱의 WebView에 글 목록이 뜬다. 앱은 고칠 수 없으므로 여기서 지킨다.
+  assert.equal(rewrite('/', { bridge: '6', app: '1.4.0' }), '/index.html');
+  assert.equal(rewrite('/', { bridge: '6', app: '1.4.0', screen: 'home' }), '/index.html');
+  // 값이 빈 키도 CloudFront는 키로 넘긴다
+  assert.equal(rewrite('/', { bridge: '' }), '/index.html');
+});
+
+test('screen 쿼리가 붙은 루트는 SPA다 - 전환 전에 만들어진 웹 주소 (KAN-346)', () => {
+  assert.equal(rewrite('/', { screen: 'result', sessionId: 'abc' }), '/index.html');
+});
+
+test('c 쿼리가 붙은 루트는 SPA다 - 공유 유입 계측 코드 (KAN-346)', () => {
+  // 목록으로 보내면 목록의 테스트 버튼이 쿼리 없는 /test라 계측 코드가 사라진다
+  assert.equal(rewrite('/', { c: 'kko_share' }), '/index.html');
+  assert.equal(rewrite('/', { c: 'ig_ad_c', utm_source: 'ig' }), '/index.html');
+});
+
+test('SPA가 읽지 않는 쿼리만 붙은 루트는 목록이다 (KAN-346)', () => {
+  // 밖에서 들어오는 링크가 붙이는 추적 쿼리가 첫 화면을 SPA로 바꾸면 안 된다
+  assert.equal(rewrite('/', { utm_source: 'kakao' }), '/guide/index.html');
+  assert.equal(rewrite('/', { utm_source: 'ig', utm_medium: 'paid', fbclid: 'x' }), '/guide/index.html');
+});
+
+test('/test는 SPA다 (KAN-346)', () => {
+  assert.equal(rewrite('/test'), '/index.html');
+  assert.equal(rewrite('/test', { screen: 'result', sessionId: 'abc' }), '/index.html');
+});
+
+test('목록의 옛 주소는 루트로 301을 보낸다 (KAN-346)', () => {
+  // 확장자 없는 두 주소를 빼면 아래 규칙이 SPA를 내줘서 목록의 주소에 테스트 화면이 뜬다
+  for (const uri of ['/guide/index.html', '/guide', '/guide/']) {
+    const response = run(uri);
+    assert.equal(response.statusCode, 301, uri);
+    assert.equal(response.headers.location.value, '/', uri);
+    // 브라우저가 301을 기한 없이 기억하지 않게 기한을 준다 - 전환을 되돌릴 수 있어야 한다
+    assert.equal(response.headers['cache-control'].value, 'public, max-age=3600', uri);
+  }
+});
+
+test('301이 쿼리를 그대로 싣는다 (KAN-346)', () => {
+  // 버리면 utm이 붙은 옛 링크의 유입이 분석 도구에서 직접 방문으로 잡힌다
+  assert.equal(
+    run('/guide/index.html', { utm_source: 'naver', utm_campaign: 'x' }).headers.location.value,
+    '/?utm_source=naver&utm_campaign=x',
+  );
+  // 값은 CloudFront가 넘긴 그대로(인코딩된 채) 붙이고, 값이 빈 키는 키만 적는다
+  assert.equal(run('/guide/', { q: '%EC%82%AC%ED%88%AC%EB%A6%AC', flag: '' }).headers.location.value, '/?q=%EC%82%AC%ED%88%AC%EB%A6%AC&flag');
+});
+
+test('301이 같은 키가 여러 번 온 쿼리를 전부 싣는다 (KAN-346)', () => {
+  const response = handler({
+    request: {
+      uri: '/guide/index.html',
+      querystring: { tag: { value: 'a', multiValue: [{ value: 'a' }, { value: 'b' }] } },
+    },
+  });
+  assert.equal(response.headers.location.value, '/?tag=a&tag=b');
+});
+
+test('목록 말고 다른 글과 글의 자산은 그대로 지나간다 (KAN-346)', () => {
+  assert.equal(rewrite('/guide/faq.html'), '/guide/faq.html');
+  assert.equal(rewrite('/guide/assets/Jua-Regular.woff2'), '/guide/assets/Jua-Regular.woff2');
 });
 
 // ---------------------------------------------------------------------------

@@ -98,12 +98,16 @@ public class WordLearningService {
      * 멱등 판별 -> 저장.
      * 소유 검사가 문항 검증보다 앞인 것은 남의 시도에 어떤 정보도 주지 않기 위해서다. 완료 가드가 멱등 판별보다
      * 먼저인 것은 §3.5와 같다 - 완료 뒤에는 같은 키의 재전송도 409다.
+     * <p>
+     * 시간 초과 답안(KAN-360)은 보기가 없는 오답이다 - 보기 검증만 건너뛰고 나머지 순서는 같으며, 보기를 고른 오답과
+     * 똑같이 계정의 오답 기록에 센다. 제한 시간은 앱이 재고 서버는 검증하지 않는다 (문항을 띄운 시각이 서버에 없다).
      */
     WordAnswerResponse answer(AppUser user, String attemptId, String itemId, @Nullable String idempotencyKey,
                               @Nullable WordAnswerRequest request) {
         rateLimits.check(RateLimits.Scope.WORD_LEARNING, user.id().toString());
         String key = IdempotencyKeys.require(idempotencyKey);
-        String choiceId = requireChoiceId(request);
+        // 시간 초과 답안이면 null이다.
+        @Nullable String choiceId = chosenChoiceId(request);
 
         Answered answered = Objects.requireNonNull(transactionTemplate.execute(tx -> {
             requireActiveAccount(user.id());
@@ -112,7 +116,7 @@ public class WordLearningService {
             WordLearningDefinition.Item item = set.item(itemId)
                     .orElseThrow(() -> new ApiException(ErrorCode.ITEM_NOT_IN_VERSION, "이 세트의 문항이 아닙니다."));
             // 이 문항의 보기가 아니면 거절한다 - 같은 세트의 다른 문항 보기도 포함 (§3.16).
-            if (item.choice(choiceId).isEmpty()) {
+            if (choiceId != null && item.choice(choiceId).isEmpty()) {
                 throw new ApiException(ErrorCode.ITEM_NOT_IN_VERSION, "이 문항의 선택지가 아닙니다.");
             }
             if (attempt.isCompleted()) {
@@ -123,7 +127,7 @@ public class WordLearningService {
                 requireSameReplay(existing.get(), key, choiceId);
                 return new Answered(false, response(attempt, item, existing.get().correct()));
             }
-            boolean correct = choiceId.equals(item.correctChoiceId());
+            boolean correct = item.correctChoiceId().equals(choiceId);
             Instant now = now();
             answers.save(new WordAttemptAnswer("waa_" + UUID.randomUUID(), attempt.id(), itemId, choiceId, correct,
                     key, now));
@@ -222,13 +226,14 @@ public class WordLearningService {
 
     /**
      * 이미 답안이 있는 문항의 처리 - 같은 키의 동일 요청만 재전송으로 인정한다 (§5.2, {@code VocabAnswerService}와 동일).
-     * 같은 키 + 같은 보기는 통과(처음 결과 반환), 같은 키 + 다른 보기는 400, 다른 키는 409.
+     * 같은 키 + 같은 보기는 통과(처음 결과 반환), 같은 키 + 다른 보기는 400, 다른 키는 409. 시간 초과(보기 null)도
+     * 하나의 답이라 시간 초과끼리는 같은 답이고, 시간 초과와 보기 사이는 다른 답이다.
      */
-    private static void requireSameReplay(WordAttemptAnswer stored, String key, String choiceId) {
+    private static void requireSameReplay(WordAttemptAnswer stored, String key, @Nullable String choiceId) {
         if (!stored.idempotencyKey().equals(key)) {
             throw new ApiException(ErrorCode.ITEM_ALREADY_ANSWERED);
         }
-        if (!stored.choiceId().equals(choiceId)) {
+        if (!Objects.equals(stored.choiceId(), choiceId)) {
             throw new ApiException(ErrorCode.VALIDATION_FAILED, "같은 Idempotency-Key로 다른 답이 제출되었습니다.");
         }
     }
@@ -248,18 +253,32 @@ public class WordLearningService {
             if (answer == null || answer.correct()) {
                 continue;
             }
+            // 시간 초과 답안은 고른 보기가 없다.
+            String chosenChoiceId = answer.choiceId();
+            String chosenText = chosenChoiceId == null ? null : item.choice(chosenChoiceId).orElseThrow().text();
             wrong.add(new WordAttemptResultResponse.WrongItem(item.itemId(), item.cardId(), item.prompt(),
-                    answer.choiceId(), item.choice(answer.choiceId()).orElseThrow().text(),
+                    chosenChoiceId, chosenText, answer.timedOut(),
                     item.correctChoiceId(), item.correctText(), item.explanation()));
         }
         int correctCount = Objects.requireNonNull(attempt.correctCount(), "완료된 시도의 정답 수가 없다");
-        return new WordAttemptResultResponse(attempt.id(), attempt.contentVersion(), attempt.setId(),
-                attempt.itemCount(), correctCount,
-                WordAttemptResultResponse.accuracyPercent(correctCount, attempt.itemCount()), List.copyOf(wrong),
+        return WordAttemptResultResponse.of(attempt.id(), attempt.contentVersion(), attempt.setId(),
+                attempt.itemCount(), correctCount, List.copyOf(wrong),
                 Objects.requireNonNull(attempt.completedAt(), "완료된 시도의 완료 시각이 없다"));
     }
 
-    private static String requireChoiceId(@Nullable WordAnswerRequest request) {
+    /**
+     * 본문에서 고른 보기를 꺼낸다 - 시간 초과 답안이면 null이다.
+     * <p>
+     * {@code timedOut}이 true면 {@code choiceId}는 없거나 null이어야 한다 (빈 문자열도 값이 있는 것으로 본다).
+     * false이거나 없으면 종전대로 {@code choiceId}가 필수다.
+     */
+    private static @Nullable String chosenChoiceId(@Nullable WordAnswerRequest request) {
+        if (request != null && Boolean.TRUE.equals(request.timedOut())) {
+            if (request.choiceId() != null) {
+                throw new ApiException(ErrorCode.VALIDATION_FAILED, "timedOut이 true면 choiceId를 보낼 수 없습니다.");
+            }
+            return null;
+        }
         if (request == null || request.choiceId() == null || request.choiceId().isBlank()) {
             throw new ApiException(ErrorCode.VALIDATION_FAILED, "choiceId가 필요합니다.");
         }

@@ -159,7 +159,9 @@ class GeminiDialectTranslatorTest {
         server.enqueue(new MockResponse.Builder().code(429).body("{\"error\": {\"status\": \"RESOURCE_EXHAUSTED\"}}").build());
         server.enqueue(answer("{\"status\": \"TRANSLATED\", \"translation\": \"밥 뭇나?\"}"));
 
-        assertThrows(DialectTranslator.Unavailable.class, () -> translator().translate("밥 먹었어?", TranslationDirection.TO_DIALECT));
+        DialectTranslator.Unavailable e = assertThrows(DialectTranslator.Unavailable.class,
+                () -> translator().translate("밥 먹었어?", TranslationDirection.TO_DIALECT));
+        assertTrue(e.consumed(), "무료 한도 429는 하루 호출 수에 남는다 (KAN-322)");
         assertEquals(1, server.getRequestCount());
         assertEquals(1, calls("rate_limited"));
     }
@@ -181,15 +183,59 @@ class GeminiDialectTranslatorTest {
         server.enqueue(new MockResponse.Builder().code(500).build());
         server.enqueue(answer("{\"status\": \"TRANSLATED\", \"translation\": \"밥 뭇나?\"}"));
 
-        assertThrows(DialectTranslator.Unavailable.class, () -> translator().translate("밥 먹었어?", TranslationDirection.TO_DIALECT));
+        DialectTranslator.Unavailable e = assertThrows(DialectTranslator.Unavailable.class,
+                () -> translator().translate("밥 먹었어?", TranslationDirection.TO_DIALECT));
+        assertTrue(e.consumed(), "Gemini가 받은 요청이다");
         assertEquals(2, server.getRequestCount());
     }
 
     @Test
-    void 키나_요청이_틀린_4xx는_다시_부르지_않는다() {
+    void 키나_요청이_틀린_4xx는_다시_부르지_않고_호출로_세지_않는다() {
+        for (int status : new int[] {400, 401, 403, 404}) {
+            server.enqueue(new MockResponse.Builder().code(status).build());
+            DialectTranslator.Unavailable e = assertThrows(DialectTranslator.Unavailable.class,
+                    () -> translator().translate("밥 먹었어?", TranslationDirection.TO_DIALECT));
+            assertFalse(e.consumed(), status + " - 키, 모델 이름 같은 설정 오류는 계정의 호출로 남지 않는다 (KAN-361)");
+        }
+        assertEquals(4, server.getRequestCount(), "다시 부르지 않는다");
+    }
+
+    @Test
+    void 앞선_시도가_5xx면_뒤의_설정_오류도_호출로_센다() {
+        server.enqueue(new MockResponse.Builder().code(503).build());
         server.enqueue(new MockResponse.Builder().code(403).build());
-        assertThrows(DialectTranslator.Unavailable.class, () -> translator().translate("밥 먹었어?", TranslationDirection.TO_DIALECT));
-        assertEquals(1, server.getRequestCount());
+
+        DialectTranslator.Unavailable e = assertThrows(DialectTranslator.Unavailable.class,
+                () -> translator().translate("밥 먹었어?", TranslationDirection.TO_DIALECT));
+        assertTrue(e.consumed(), "첫 시도가 Gemini에 닿았다");
+    }
+
+    @Test
+    void 연결조차_안_되면_호출로_세지_않는다() {
+        String url = server.url("").toString();
+        server.close();
+        GeminiDialectTranslator closed = new GeminiDialectTranslator(url, API_KEY, MODEL, Duration.ofSeconds(5),
+                Map.of(TranslationDirection.TO_DIALECT, "지시문", TranslationDirection.TO_STANDARD, "역방향 지시문"),
+                objectMapper, metrics);
+
+        DialectTranslator.Unavailable e = assertThrows(DialectTranslator.Unavailable.class,
+                () -> closed.translate("밥 먹었어?", TranslationDirection.TO_DIALECT));
+        assertFalse(e.consumed(), "요청이 Gemini에 닿지 않았다 (KAN-361)");
+    }
+
+    @Test
+    void 헤더에_못_넣는_키는_500이_아니라_Unavailable이고_호출로_세지_않는다() {
+        GeminiDialectTranslator broken = new GeminiDialectTranslator(server.url("").toString(), "key\nwith-newline", MODEL,
+                Duration.ofSeconds(5),
+                Map.of(TranslationDirection.TO_DIALECT, "지시문", TranslationDirection.TO_STANDARD, "역방향 지시문"),
+                objectMapper, metrics);
+
+        DialectTranslator.Unavailable e = assertThrows(DialectTranslator.Unavailable.class,
+                () -> broken.translate("밥 먹었어?", TranslationDirection.TO_DIALECT));
+        assertFalse(e.consumed());
+        assertFalse(e.getMessage().contains("with-newline"), "예외 메시지에 키를 싣지 않는다");
+        assertEquals(0, server.getRequestCount());
+        assertEquals(1, calls("error"));
     }
 
     @Test

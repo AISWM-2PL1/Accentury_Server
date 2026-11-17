@@ -313,6 +313,7 @@ class GuestApiTest extends IntegrationTest {
             "GET, /v0/learning/intonation-attempts/any-attempt",
             "GET, /v0/learning/home",
             "GET, /v0/learning/attendance",
+            "GET, /v0/learning/levels",
             "PUT, /v0/users/me/profile",
             "PUT, /v0/users/me/voice-consent",
             "DELETE, /v0/users/me/voice-consent",

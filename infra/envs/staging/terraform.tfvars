@@ -52,6 +52,9 @@ voice_report_enabled = false
 slack_channel_configs_enabled = false
 slack_infra_alerts_peer_envs  = []
 
+# GuardDuty 결과 알림 (KAN-310). GuardDuty는 계정 단위라 prod만 보낸다. 여기서도 켜면 같은 결과가 두 번 온다.
+slack_guardduty_findings_enabled = false
+
 ssm_prefix = "/accentury/staging"
 
 # 이미지는 staging 파이프라인만 만든다 (KAN-128 승격 모델). prod는 그 SHA를 고르기만 한다.

@@ -468,3 +468,21 @@ KAN-293(2026-10-24)에서 전달본이 이미 봉투의 `detail.stageMs`(`stt`, 
 
 ### 2026-10-24 KAN-293 MFA 첫 실행 실측
 콜드의 실체는 MFA 첫 실행이었다 (KAN-293 실측 `align` 17.5초, 그 뒤 4~6초). 그래서 콜드 기준을 "align이 처음 있는 요청까지"로 바꿨다.
+
+### 2026-11-12 KAN-310 GuardDuty 결과 슬랙 알림 실증
+
+prod env apply(토픽 정책 1건) 뒤 bootstrap apply(규칙과 대상 2건, KAN-245 미적용 기능 4건)를 하고 샘플 결과 1건
+(`UnauthorizedAccess:IAMUser/InstanceCredentialExfiltration.OutsideAWS`, 심각도 8.0)으로 확인했다. 규칙 지표는 생성 약 40초 뒤
+`MatchedEvents=1`, `Invocations=1`, `FailedInvocations=0`이었고 SNS 전달 1건, 실패 0건이었다. 슬랙 `#infra-alerts`에는
+생성 시각과 같은 분(13:38 KST)에 메시지가 왔다. 토픽 정책의 `aws:SourceArn` 조건(규칙 ARN)이 EventBridge의 SNS publish를 막는다는 리뷰 지적이 있었으나
+실측으로 막지 않았다. 슬랙 메시지는 Chatbot 기본 형식으로 Severity `HIGH`와 콘솔 링크(제목 줄)가 보였고, `[SAMPLE]` 표시는
+없었다. 샘플은 `additionalInfo`의 `"sample":true`를 확인한 뒤 보관 처리했다.
+
+apply 직후 bootstrap plan에 `RDS_LOGIN_EVENTS`의 하위 설정 `RDS_DATA_RISK`(RDS 데이터 활동 감시, 꺼짐)를 지우려는 차이가
+나왔다. AWS가 꺼진 채로 붙여 둔 것인데 provider 6.61.0이 이 이름을 `additional_configuration`으로 받지 않아, 그 블록을
+`ignore_changes`로 두었다.
+
+같은 날 PR #72 리뷰로 규칙을 bootstrap에서 prod의 slack-alerts 모듈로 옮기고 이름을 `accentury-prod-guardduty-findings`로
+바꿨다. 처음 구조는 규칙(bootstrap)과 토픽 정책 허용(prod)이 이름 문자열로만 이어져, 한쪽 이름만 바뀌면 두 apply가 모두
+성공하면서 알림만 사라질 수 있었다. 전달 실패 경보 `accentury-prod-guardduty-delivery-failed`(이메일)도 이때 더했고,
+`ignore_changes`를 `RDS_LOGIN_EVENTS` 하나로 좁히려고 그 기능을 별도 리소스로 뗐다(`moved`).

@@ -1,0 +1,1683 @@
+{
+ "sourceVersion": "gn-2026.10.2",
+ "poolPrefix": "gn-2026.10.",
+ "snapshotDate": "2026-11-15",
+ "highScore": 90,
+ "metaFiles": 67257,
+ "voice": [
+  {
+   "itemId": "v2",
+   "scriptKey": "1|10",
+   "completed": 481,
+   "unscorable": 11,
+   "misread": 18,
+   "tooQuiet": 1,
+   "high": 341,
+   "scoreSum": 42633
+  },
+  {
+   "itemId": "v3",
+   "scriptKey": "1|100",
+   "completed": 443,
+   "unscorable": 1,
+   "misread": 15,
+   "tooQuiet": 1,
+   "high": 241,
+   "scoreSum": 36396
+  },
+  {
+   "itemId": "v4",
+   "scriptKey": "1|101",
+   "completed": 240,
+   "unscorable": 2,
+   "misread": 9,
+   "tooQuiet": 1,
+   "high": 166,
+   "scoreSum": 21087
+  },
+  {
+   "itemId": "v5",
+   "scriptKey": "1|102",
+   "completed": 254,
+   "unscorable": 1,
+   "misread": 10,
+   "tooQuiet": 0,
+   "high": 107,
+   "scoreSum": 19425
+  },
+  {
+   "itemId": "v6",
+   "scriptKey": "1|104",
+   "completed": 245,
+   "unscorable": 3,
+   "misread": 8,
+   "tooQuiet": 0,
+   "high": 114,
+   "scoreSum": 18437
+  },
+  {
+   "itemId": "v8",
+   "scriptKey": "1|107",
+   "completed": 239,
+   "unscorable": 2,
+   "misread": 7,
+   "tooQuiet": 0,
+   "high": 101,
+   "scoreSum": 19195
+  },
+  {
+   "itemId": "v9",
+   "scriptKey": "1|108",
+   "completed": 222,
+   "unscorable": 7,
+   "misread": 15,
+   "tooQuiet": 0,
+   "high": 140,
+   "scoreSum": 18595
+  },
+  {
+   "itemId": "v10",
+   "scriptKey": "1|12",
+   "completed": 221,
+   "unscorable": 0,
+   "misread": 8,
+   "tooQuiet": 0,
+   "high": 158,
+   "scoreSum": 19890
+  },
+  {
+   "itemId": "v11",
+   "scriptKey": "1|13",
+   "completed": 212,
+   "unscorable": 6,
+   "misread": 7,
+   "tooQuiet": 0,
+   "high": 121,
+   "scoreSum": 17966
+  },
+  {
+   "itemId": "v13",
+   "scriptKey": "1|15",
+   "completed": 261,
+   "unscorable": 0,
+   "misread": 9,
+   "tooQuiet": 1,
+   "high": 126,
+   "scoreSum": 20274
+  },
+  {
+   "itemId": "v14",
+   "scriptKey": "1|16",
+   "completed": 251,
+   "unscorable": 0,
+   "misread": 4,
+   "tooQuiet": 0,
+   "high": 127,
+   "scoreSum": 20354
+  },
+  {
+   "itemId": "v15",
+   "scriptKey": "1|17",
+   "completed": 243,
+   "unscorable": 14,
+   "misread": 7,
+   "tooQuiet": 0,
+   "high": 144,
+   "scoreSum": 20407
+  },
+  {
+   "itemId": "v16",
+   "scriptKey": "1|19",
+   "completed": 237,
+   "unscorable": 4,
+   "misread": 8,
+   "tooQuiet": 0,
+   "high": 123,
+   "scoreSum": 18146
+  },
+  {
+   "itemId": "v17",
+   "scriptKey": "1|2",
+   "completed": 218,
+   "unscorable": 2,
+   "misread": 10,
+   "tooQuiet": 0,
+   "high": 157,
+   "scoreSum": 19425
+  },
+  {
+   "itemId": "v18",
+   "scriptKey": "1|21",
+   "completed": 215,
+   "unscorable": 3,
+   "misread": 6,
+   "tooQuiet": 0,
+   "high": 119,
+   "scoreSum": 18096
+  },
+  {
+   "itemId": "v19",
+   "scriptKey": "1|23",
+   "completed": 246,
+   "unscorable": 65,
+   "misread": 13,
+   "tooQuiet": 0,
+   "high": 161,
+   "scoreSum": 20970
+  },
+  {
+   "itemId": "v20",
+   "scriptKey": "1|24",
+   "completed": 249,
+   "unscorable": 6,
+   "misread": 9,
+   "tooQuiet": 0,
+   "high": 66,
+   "scoreSum": 16797
+  },
+  {
+   "itemId": "v22",
+   "scriptKey": "1|26",
+   "completed": 229,
+   "unscorable": 1,
+   "misread": 12,
+   "tooQuiet": 0,
+   "high": 96,
+   "scoreSum": 17930
+  },
+  {
+   "itemId": "v23",
+   "scriptKey": "1|27",
+   "completed": 222,
+   "unscorable": 6,
+   "misread": 14,
+   "tooQuiet": 0,
+   "high": 149,
+   "scoreSum": 19447
+  },
+  {
+   "itemId": "v25",
+   "scriptKey": "1|29",
+   "completed": 223,
+   "unscorable": 2,
+   "misread": 2,
+   "tooQuiet": 0,
+   "high": 155,
+   "scoreSum": 19693
+  },
+  {
+   "itemId": "v26",
+   "scriptKey": "1|3",
+   "completed": 217,
+   "unscorable": 3,
+   "misread": 4,
+   "tooQuiet": 0,
+   "high": 131,
+   "scoreSum": 18259
+  },
+  {
+   "itemId": "v27",
+   "scriptKey": "1|30",
+   "completed": 220,
+   "unscorable": 0,
+   "misread": 2,
+   "tooQuiet": 0,
+   "high": 100,
+   "scoreSum": 17393
+  },
+  {
+   "itemId": "v28",
+   "scriptKey": "1|33",
+   "completed": 213,
+   "unscorable": 2,
+   "misread": 1,
+   "tooQuiet": 1,
+   "high": 107,
+   "scoreSum": 17204
+  },
+  {
+   "itemId": "v32",
+   "scriptKey": "1|38",
+   "completed": 200,
+   "unscorable": 22,
+   "misread": 9,
+   "tooQuiet": 0,
+   "high": 117,
+   "scoreSum": 16949
+  },
+  {
+   "itemId": "v33",
+   "scriptKey": "1|39",
+   "completed": 252,
+   "unscorable": 4,
+   "misread": 9,
+   "tooQuiet": 0,
+   "high": 153,
+   "scoreSum": 20883
+  },
+  {
+   "itemId": "v34",
+   "scriptKey": "1|4",
+   "completed": 241,
+   "unscorable": 10,
+   "misread": 19,
+   "tooQuiet": 0,
+   "high": 176,
+   "scoreSum": 21397
+  },
+  {
+   "itemId": "v35",
+   "scriptKey": "1|40",
+   "completed": 239,
+   "unscorable": 9,
+   "misread": 6,
+   "tooQuiet": 0,
+   "high": 142,
+   "scoreSum": 19285
+  },
+  {
+   "itemId": "v36",
+   "scriptKey": "1|41",
+   "completed": 243,
+   "unscorable": 2,
+   "misread": 6,
+   "tooQuiet": 1,
+   "high": 96,
+   "scoreSum": 17334
+  },
+  {
+   "itemId": "v38",
+   "scriptKey": "1|43",
+   "completed": 238,
+   "unscorable": 15,
+   "misread": 19,
+   "tooQuiet": 0,
+   "high": 153,
+   "scoreSum": 20085
+  },
+  {
+   "itemId": "v40",
+   "scriptKey": "1|45",
+   "completed": 214,
+   "unscorable": 2,
+   "misread": 10,
+   "tooQuiet": 0,
+   "high": 128,
+   "scoreSum": 18074
+  },
+  {
+   "itemId": "v41",
+   "scriptKey": "1|46",
+   "completed": 232,
+   "unscorable": 11,
+   "misread": 9,
+   "tooQuiet": 0,
+   "high": 55,
+   "scoreSum": 14291
+  },
+  {
+   "itemId": "v42",
+   "scriptKey": "1|47",
+   "completed": 209,
+   "unscorable": 15,
+   "misread": 25,
+   "tooQuiet": 1,
+   "high": 110,
+   "scoreSum": 16583
+  },
+  {
+   "itemId": "v44",
+   "scriptKey": "1|49",
+   "completed": 217,
+   "unscorable": 7,
+   "misread": 8,
+   "tooQuiet": 0,
+   "high": 150,
+   "scoreSum": 19038
+  },
+  {
+   "itemId": "v46",
+   "scriptKey": "1|52",
+   "completed": 280,
+   "unscorable": 2,
+   "misread": 2,
+   "tooQuiet": 0,
+   "high": 124,
+   "scoreSum": 21359
+  },
+  {
+   "itemId": "v47",
+   "scriptKey": "1|54",
+   "completed": 272,
+   "unscorable": 5,
+   "misread": 6,
+   "tooQuiet": 0,
+   "high": 151,
+   "scoreSum": 22847
+  },
+  {
+   "itemId": "v50",
+   "scriptKey": "1|57",
+   "completed": 253,
+   "unscorable": 20,
+   "misread": 8,
+   "tooQuiet": 0,
+   "high": 164,
+   "scoreSum": 21473
+  },
+  {
+   "itemId": "v51",
+   "scriptKey": "1|58",
+   "completed": 256,
+   "unscorable": 6,
+   "misread": 10,
+   "tooQuiet": 0,
+   "high": 149,
+   "scoreSum": 20668
+  },
+  {
+   "itemId": "v52",
+   "scriptKey": "1|59",
+   "completed": 247,
+   "unscorable": 1,
+   "misread": 9,
+   "tooQuiet": 0,
+   "high": 98,
+   "scoreSum": 18354
+  },
+  {
+   "itemId": "v53",
+   "scriptKey": "1|6",
+   "completed": 239,
+   "unscorable": 6,
+   "misread": 18,
+   "tooQuiet": 0,
+   "high": 110,
+   "scoreSum": 18501
+  },
+  {
+   "itemId": "v54",
+   "scriptKey": "1|60",
+   "completed": 251,
+   "unscorable": 4,
+   "misread": 13,
+   "tooQuiet": 1,
+   "high": 124,
+   "scoreSum": 19818
+  },
+  {
+   "itemId": "v55",
+   "scriptKey": "1|62",
+   "completed": 249,
+   "unscorable": 0,
+   "misread": 2,
+   "tooQuiet": 1,
+   "high": 174,
+   "scoreSum": 21740
+  },
+  {
+   "itemId": "v56",
+   "scriptKey": "1|64",
+   "completed": 243,
+   "unscorable": 0,
+   "misread": 3,
+   "tooQuiet": 1,
+   "high": 97,
+   "scoreSum": 18922
+  },
+  {
+   "itemId": "v57",
+   "scriptKey": "1|65",
+   "completed": 272,
+   "unscorable": 0,
+   "misread": 11,
+   "tooQuiet": 0,
+   "high": 115,
+   "scoreSum": 20933
+  },
+  {
+   "itemId": "v58",
+   "scriptKey": "1|66",
+   "completed": 254,
+   "unscorable": 5,
+   "misread": 5,
+   "tooQuiet": 0,
+   "high": 181,
+   "scoreSum": 22617
+  },
+  {
+   "itemId": "v59",
+   "scriptKey": "1|68",
+   "completed": 246,
+   "unscorable": 0,
+   "misread": 6,
+   "tooQuiet": 0,
+   "high": 145,
+   "scoreSum": 20163
+  },
+  {
+   "itemId": "v61",
+   "scriptKey": "1|7",
+   "completed": 257,
+   "unscorable": 3,
+   "misread": 7,
+   "tooQuiet": 0,
+   "high": 166,
+   "scoreSum": 21750
+  },
+  {
+   "itemId": "v62",
+   "scriptKey": "1|70",
+   "completed": 246,
+   "unscorable": 2,
+   "misread": 6,
+   "tooQuiet": 1,
+   "high": 135,
+   "scoreSum": 19268
+  },
+  {
+   "itemId": "v63",
+   "scriptKey": "1|72",
+   "completed": 231,
+   "unscorable": 0,
+   "misread": 12,
+   "tooQuiet": 0,
+   "high": 167,
+   "scoreSum": 20740
+  },
+  {
+   "itemId": "v64",
+   "scriptKey": "1|73",
+   "completed": 234,
+   "unscorable": 0,
+   "misread": 7,
+   "tooQuiet": 0,
+   "high": 146,
+   "scoreSum": 19936
+  },
+  {
+   "itemId": "v65",
+   "scriptKey": "1|75",
+   "completed": 215,
+   "unscorable": 4,
+   "misread": 4,
+   "tooQuiet": 0,
+   "high": 144,
+   "scoreSum": 18632
+  },
+  {
+   "itemId": "v66",
+   "scriptKey": "1|76",
+   "completed": 209,
+   "unscorable": 0,
+   "misread": 5,
+   "tooQuiet": 0,
+   "high": 134,
+   "scoreSum": 17730
+  },
+  {
+   "itemId": "v67",
+   "scriptKey": "1|77",
+   "completed": 233,
+   "unscorable": 2,
+   "misread": 3,
+   "tooQuiet": 0,
+   "high": 82,
+   "scoreSum": 15992
+  },
+  {
+   "itemId": "v68",
+   "scriptKey": "1|79",
+   "completed": 227,
+   "unscorable": 1,
+   "misread": 1,
+   "tooQuiet": 0,
+   "high": 126,
+   "scoreSum": 18326
+  },
+  {
+   "itemId": "v69",
+   "scriptKey": "1|8",
+   "completed": 221,
+   "unscorable": 10,
+   "misread": 8,
+   "tooQuiet": 0,
+   "high": 137,
+   "scoreSum": 18665
+  },
+  {
+   "itemId": "v70",
+   "scriptKey": "1|80",
+   "completed": 220,
+   "unscorable": 1,
+   "misread": 12,
+   "tooQuiet": 0,
+   "high": 139,
+   "scoreSum": 18581
+  },
+  {
+   "itemId": "v71",
+   "scriptKey": "1|81",
+   "completed": 212,
+   "unscorable": 4,
+   "misread": 5,
+   "tooQuiet": 0,
+   "high": 148,
+   "scoreSum": 18539
+  },
+  {
+   "itemId": "v72",
+   "scriptKey": "1|82",
+   "completed": 201,
+   "unscorable": 16,
+   "misread": 32,
+   "tooQuiet": 0,
+   "high": 96,
+   "scoreSum": 16049
+  },
+  {
+   "itemId": "v73",
+   "scriptKey": "1|83",
+   "completed": 241,
+   "unscorable": 1,
+   "misread": 9,
+   "tooQuiet": 0,
+   "high": 124,
+   "scoreSum": 19596
+  },
+  {
+   "itemId": "v74",
+   "scriptKey": "1|84",
+   "completed": 229,
+   "unscorable": 5,
+   "misread": 5,
+   "tooQuiet": 0,
+   "high": 154,
+   "scoreSum": 19908
+  },
+  {
+   "itemId": "v75",
+   "scriptKey": "1|85",
+   "completed": 221,
+   "unscorable": 3,
+   "misread": 5,
+   "tooQuiet": 1,
+   "high": 142,
+   "scoreSum": 18533
+  },
+  {
+   "itemId": "v76",
+   "scriptKey": "1|86",
+   "completed": 261,
+   "unscorable": 1,
+   "misread": 4,
+   "tooQuiet": 0,
+   "high": 76,
+   "scoreSum": 18105
+  },
+  {
+   "itemId": "v77",
+   "scriptKey": "1|87",
+   "completed": 249,
+   "unscorable": 2,
+   "misread": 3,
+   "tooQuiet": 0,
+   "high": 97,
+   "scoreSum": 18162
+  },
+  {
+   "itemId": "v78",
+   "scriptKey": "1|88",
+   "completed": 239,
+   "unscorable": 9,
+   "misread": 3,
+   "tooQuiet": 0,
+   "high": 109,
+   "scoreSum": 18310
+  },
+  {
+   "itemId": "v79",
+   "scriptKey": "1|9",
+   "completed": 212,
+   "unscorable": 6,
+   "misread": 11,
+   "tooQuiet": 0,
+   "high": 78,
+   "scoreSum": 16076
+  },
+  {
+   "itemId": "v80",
+   "scriptKey": "1|90",
+   "completed": 205,
+   "unscorable": 1,
+   "misread": 4,
+   "tooQuiet": 0,
+   "high": 116,
+   "scoreSum": 16652
+  },
+  {
+   "itemId": "v81",
+   "scriptKey": "1|91",
+   "completed": 201,
+   "unscorable": 5,
+   "misread": 2,
+   "tooQuiet": 0,
+   "high": 106,
+   "scoreSum": 15939
+  },
+  {
+   "itemId": "v82",
+   "scriptKey": "1|94",
+   "completed": 239,
+   "unscorable": 4,
+   "misread": 18,
+   "tooQuiet": 0,
+   "high": 89,
+   "scoreSum": 17704
+  },
+  {
+   "itemId": "v83",
+   "scriptKey": "1|95",
+   "completed": 227,
+   "unscorable": 4,
+   "misread": 25,
+   "tooQuiet": 0,
+   "high": 85,
+   "scoreSum": 16508
+  },
+  {
+   "itemId": "v85",
+   "scriptKey": "1|98",
+   "completed": 221,
+   "unscorable": 1,
+   "misread": 27,
+   "tooQuiet": 0,
+   "high": 90,
+   "scoreSum": 17397
+  },
+  {
+   "itemId": "v86",
+   "scriptKey": "2|100",
+   "completed": 232,
+   "unscorable": 4,
+   "misread": 7,
+   "tooQuiet": 0,
+   "high": 119,
+   "scoreSum": 17947
+  },
+  {
+   "itemId": "v87",
+   "scriptKey": "2|102",
+   "completed": 221,
+   "unscorable": 2,
+   "misread": 2,
+   "tooQuiet": 1,
+   "high": 101,
+   "scoreSum": 16327
+  },
+  {
+   "itemId": "v88",
+   "scriptKey": "2|104",
+   "completed": 218,
+   "unscorable": 2,
+   "misread": 5,
+   "tooQuiet": 1,
+   "high": 115,
+   "scoreSum": 16776
+  },
+  {
+   "itemId": "v89",
+   "scriptKey": "2|107",
+   "completed": 239,
+   "unscorable": 3,
+   "misread": 3,
+   "tooQuiet": 0,
+   "high": 142,
+   "scoreSum": 19739
+  },
+  {
+   "itemId": "v90",
+   "scriptKey": "2|108",
+   "completed": 229,
+   "unscorable": 5,
+   "misread": 2,
+   "tooQuiet": 0,
+   "high": 134,
+   "scoreSum": 18779
+  },
+  {
+   "itemId": "v91",
+   "scriptKey": "2|12",
+   "completed": 228,
+   "unscorable": 3,
+   "misread": 1,
+   "tooQuiet": 0,
+   "high": 127,
+   "scoreSum": 18960
+  },
+  {
+   "itemId": "v92",
+   "scriptKey": "2|13",
+   "completed": 231,
+   "unscorable": 24,
+   "misread": 5,
+   "tooQuiet": 0,
+   "high": 94,
+   "scoreSum": 17714
+  },
+  {
+   "itemId": "v93",
+   "scriptKey": "2|14",
+   "completed": 214,
+   "unscorable": 20,
+   "misread": 1,
+   "tooQuiet": 0,
+   "high": 151,
+   "scoreSum": 18469
+  },
+  {
+   "itemId": "v94",
+   "scriptKey": "2|15",
+   "completed": 212,
+   "unscorable": 2,
+   "misread": 6,
+   "tooQuiet": 1,
+   "high": 73,
+   "scoreSum": 14843
+  },
+  {
+   "itemId": "v96",
+   "scriptKey": "2|18",
+   "completed": 227,
+   "unscorable": 1,
+   "misread": 3,
+   "tooQuiet": 0,
+   "high": 127,
+   "scoreSum": 19031
+  },
+  {
+   "itemId": "v97",
+   "scriptKey": "2|19",
+   "completed": 225,
+   "unscorable": 2,
+   "misread": 2,
+   "tooQuiet": 0,
+   "high": 130,
+   "scoreSum": 18848
+  },
+  {
+   "itemId": "v98",
+   "scriptKey": "2|2",
+   "completed": 217,
+   "unscorable": 0,
+   "misread": 8,
+   "tooQuiet": 0,
+   "high": 94,
+   "scoreSum": 16729
+  },
+  {
+   "itemId": "v99",
+   "scriptKey": "2|20",
+   "completed": 249,
+   "unscorable": 21,
+   "misread": 21,
+   "tooQuiet": 0,
+   "high": 168,
+   "scoreSum": 21278
+  },
+  {
+   "itemId": "v100",
+   "scriptKey": "2|21",
+   "completed": 245,
+   "unscorable": 8,
+   "misread": 5,
+   "tooQuiet": 0,
+   "high": 82,
+   "scoreSum": 16683
+  },
+  {
+   "itemId": "v101",
+   "scriptKey": "2|24",
+   "completed": 232,
+   "unscorable": 7,
+   "misread": 21,
+   "tooQuiet": 1,
+   "high": 125,
+   "scoreSum": 19317
+  },
+  {
+   "itemId": "v102",
+   "scriptKey": "2|25",
+   "completed": 252,
+   "unscorable": 1,
+   "misread": 13,
+   "tooQuiet": 0,
+   "high": 128,
+   "scoreSum": 20141
+  },
+  {
+   "itemId": "v103",
+   "scriptKey": "2|28",
+   "completed": 250,
+   "unscorable": 12,
+   "misread": 14,
+   "tooQuiet": 0,
+   "high": 141,
+   "scoreSum": 20487
+  },
+  {
+   "itemId": "v104",
+   "scriptKey": "2|30",
+   "completed": 247,
+   "unscorable": 3,
+   "misread": 9,
+   "tooQuiet": 0,
+   "high": 137,
+   "scoreSum": 20942
+  },
+  {
+   "itemId": "v106",
+   "scriptKey": "2|32",
+   "completed": 220,
+   "unscorable": 41,
+   "misread": 3,
+   "tooQuiet": 0,
+   "high": 87,
+   "scoreSum": 15687
+  },
+  {
+   "itemId": "v107",
+   "scriptKey": "2|35",
+   "completed": 214,
+   "unscorable": 0,
+   "misread": 4,
+   "tooQuiet": 0,
+   "high": 108,
+   "scoreSum": 17569
+  },
+  {
+   "itemId": "v108",
+   "scriptKey": "2|36",
+   "completed": 203,
+   "unscorable": 17,
+   "misread": 8,
+   "tooQuiet": 0,
+   "high": 110,
+   "scoreSum": 16169
+  },
+  {
+   "itemId": "v109",
+   "scriptKey": "2|39",
+   "completed": 226,
+   "unscorable": 4,
+   "misread": 10,
+   "tooQuiet": 0,
+   "high": 128,
+   "scoreSum": 18532
+  },
+  {
+   "itemId": "v110",
+   "scriptKey": "2|4",
+   "completed": 220,
+   "unscorable": 3,
+   "misread": 3,
+   "tooQuiet": 0,
+   "high": 100,
+   "scoreSum": 16432
+  },
+  {
+   "itemId": "v111",
+   "scriptKey": "2|41",
+   "completed": 213,
+   "unscorable": 27,
+   "misread": 8,
+   "tooQuiet": 0,
+   "high": 107,
+   "scoreSum": 16552
+  },
+  {
+   "itemId": "v112",
+   "scriptKey": "2|43",
+   "completed": 237,
+   "unscorable": 24,
+   "misread": 5,
+   "tooQuiet": 1,
+   "high": 104,
+   "scoreSum": 16701
+  },
+  {
+   "itemId": "v113",
+   "scriptKey": "2|44",
+   "completed": 228,
+   "unscorable": 8,
+   "misread": 8,
+   "tooQuiet": 1,
+   "high": 64,
+   "scoreSum": 15980
+  },
+  {
+   "itemId": "v114",
+   "scriptKey": "2|48",
+   "completed": 223,
+   "unscorable": 19,
+   "misread": 0,
+   "tooQuiet": 1,
+   "high": 124,
+   "scoreSum": 18288
+  },
+  {
+   "itemId": "v116",
+   "scriptKey": "2|54",
+   "completed": 241,
+   "unscorable": 35,
+   "misread": 26,
+   "tooQuiet": 0,
+   "high": 126,
+   "scoreSum": 19647
+  },
+  {
+   "itemId": "v117",
+   "scriptKey": "2|55",
+   "completed": 231,
+   "unscorable": 19,
+   "misread": 3,
+   "tooQuiet": 0,
+   "high": 187,
+   "scoreSum": 21061
+  },
+  {
+   "itemId": "v118",
+   "scriptKey": "2|56",
+   "completed": 220,
+   "unscorable": 21,
+   "misread": 11,
+   "tooQuiet": 0,
+   "high": 131,
+   "scoreSum": 18953
+  },
+  {
+   "itemId": "v119",
+   "scriptKey": "2|57",
+   "completed": 254,
+   "unscorable": 17,
+   "misread": 6,
+   "tooQuiet": 0,
+   "high": 101,
+   "scoreSum": 18956
+  },
+  {
+   "itemId": "v120",
+   "scriptKey": "2|58",
+   "completed": 244,
+   "unscorable": 1,
+   "misread": 8,
+   "tooQuiet": 0,
+   "high": 113,
+   "scoreSum": 19109
+  },
+  {
+   "itemId": "v121",
+   "scriptKey": "2|59",
+   "completed": 243,
+   "unscorable": 16,
+   "misread": 4,
+   "tooQuiet": 0,
+   "high": 154,
+   "scoreSum": 20555
+  },
+  {
+   "itemId": "v122",
+   "scriptKey": "2|60",
+   "completed": 267,
+   "unscorable": 6,
+   "misread": 17,
+   "tooQuiet": 0,
+   "high": 87,
+   "scoreSum": 17317
+  },
+  {
+   "itemId": "v125",
+   "scriptKey": "2|66",
+   "completed": 257,
+   "unscorable": 4,
+   "misread": 10,
+   "tooQuiet": 0,
+   "high": 185,
+   "scoreSum": 22888
+  },
+  {
+   "itemId": "v126",
+   "scriptKey": "2|67",
+   "completed": 251,
+   "unscorable": 3,
+   "misread": 9,
+   "tooQuiet": 0,
+   "high": 110,
+   "scoreSum": 19487
+  },
+  {
+   "itemId": "v127",
+   "scriptKey": "2|68",
+   "completed": 241,
+   "unscorable": 8,
+   "misread": 6,
+   "tooQuiet": 0,
+   "high": 169,
+   "scoreSum": 21307
+  },
+  {
+   "itemId": "v128",
+   "scriptKey": "2|69",
+   "completed": 224,
+   "unscorable": 12,
+   "misread": 14,
+   "tooQuiet": 0,
+   "high": 117,
+   "scoreSum": 17495
+  },
+  {
+   "itemId": "v129",
+   "scriptKey": "2|70",
+   "completed": 226,
+   "unscorable": 7,
+   "misread": 11,
+   "tooQuiet": 1,
+   "high": 117,
+   "scoreSum": 17856
+  },
+  {
+   "itemId": "v130",
+   "scriptKey": "2|71",
+   "completed": 245,
+   "unscorable": 9,
+   "misread": 21,
+   "tooQuiet": 1,
+   "high": 157,
+   "scoreSum": 20554
+  },
+  {
+   "itemId": "v131",
+   "scriptKey": "2|72",
+   "completed": 235,
+   "unscorable": 18,
+   "misread": 15,
+   "tooQuiet": 1,
+   "high": 175,
+   "scoreSum": 20875
+  },
+  {
+   "itemId": "v132",
+   "scriptKey": "2|74",
+   "completed": 222,
+   "unscorable": 61,
+   "misread": 32,
+   "tooQuiet": 1,
+   "high": 161,
+   "scoreSum": 19608
+  },
+  {
+   "itemId": "v133",
+   "scriptKey": "2|75",
+   "completed": 245,
+   "unscorable": 15,
+   "misread": 5,
+   "tooQuiet": 0,
+   "high": 157,
+   "scoreSum": 20282
+  },
+  {
+   "itemId": "v134",
+   "scriptKey": "2|78",
+   "completed": 232,
+   "unscorable": 23,
+   "misread": 16,
+   "tooQuiet": 0,
+   "high": 126,
+   "scoreSum": 18851
+  },
+  {
+   "itemId": "v135",
+   "scriptKey": "2|79",
+   "completed": 231,
+   "unscorable": 9,
+   "misread": 4,
+   "tooQuiet": 1,
+   "high": 48,
+   "scoreSum": 15764
+  },
+  {
+   "itemId": "v136",
+   "scriptKey": "2|80",
+   "completed": 233,
+   "unscorable": 0,
+   "misread": 8,
+   "tooQuiet": 0,
+   "high": 94,
+   "scoreSum": 16125
+  },
+  {
+   "itemId": "v137",
+   "scriptKey": "2|82",
+   "completed": 218,
+   "unscorable": 17,
+   "misread": 8,
+   "tooQuiet": 1,
+   "high": 113,
+   "scoreSum": 17448
+  },
+  {
+   "itemId": "v138",
+   "scriptKey": "2|87",
+   "completed": 205,
+   "unscorable": 24,
+   "misread": 14,
+   "tooQuiet": 0,
+   "high": 141,
+   "scoreSum": 17850
+  },
+  {
+   "itemId": "v139",
+   "scriptKey": "2|89",
+   "completed": 251,
+   "unscorable": 7,
+   "misread": 15,
+   "tooQuiet": 0,
+   "high": 139,
+   "scoreSum": 20463
+  },
+  {
+   "itemId": "v140",
+   "scriptKey": "2|90",
+   "completed": 238,
+   "unscorable": 2,
+   "misread": 9,
+   "tooQuiet": 0,
+   "high": 125,
+   "scoreSum": 19257
+  },
+  {
+   "itemId": "v141",
+   "scriptKey": "2|91",
+   "completed": 231,
+   "unscorable": 16,
+   "misread": 10,
+   "tooQuiet": 0,
+   "high": 134,
+   "scoreSum": 18020
+  },
+  {
+   "itemId": "v142",
+   "scriptKey": "2|94",
+   "completed": 233,
+   "unscorable": 2,
+   "misread": 17,
+   "tooQuiet": 0,
+   "high": 180,
+   "scoreSum": 21190
+  },
+  {
+   "itemId": "v143",
+   "scriptKey": "2|95",
+   "completed": 218,
+   "unscorable": 4,
+   "misread": 9,
+   "tooQuiet": 1,
+   "high": 104,
+   "scoreSum": 17835
+  },
+  {
+   "itemId": "v144",
+   "scriptKey": "2|96",
+   "completed": 215,
+   "unscorable": 2,
+   "misread": 4,
+   "tooQuiet": 0,
+   "high": 88,
+   "scoreSum": 16341
+  },
+  {
+   "itemId": "v145",
+   "scriptKey": "2|98",
+   "completed": 233,
+   "unscorable": 1,
+   "misread": 11,
+   "tooQuiet": 0,
+   "high": 33,
+   "scoreSum": 14091
+  }
+ ],
+ "vocabulary": [
+  {
+   "itemId": "w1",
+   "dialect": "정구지",
+   "answered": 645,
+   "correct": 623
+  },
+  {
+   "itemId": "w2",
+   "dialect": "짐치",
+   "answered": 631,
+   "correct": 394
+  },
+  {
+   "itemId": "w3",
+   "dialect": "무시",
+   "answered": 631,
+   "correct": 483
+  },
+  {
+   "itemId": "w4",
+   "dialect": "찌짐",
+   "answered": 628,
+   "correct": 531
+  },
+  {
+   "itemId": "w6",
+   "dialect": "국시",
+   "answered": 647,
+   "correct": 616
+  },
+  {
+   "itemId": "w7",
+   "dialect": "나락",
+   "answered": 630,
+   "correct": 264
+  },
+  {
+   "itemId": "w10",
+   "dialect": "게기",
+   "answered": 628,
+   "correct": 497
+  },
+  {
+   "itemId": "w13",
+   "dialect": "미르치",
+   "answered": 627,
+   "correct": 587
+  },
+  {
+   "itemId": "w22",
+   "dialect": "정지",
+   "answered": 627,
+   "correct": 206
+  },
+  {
+   "itemId": "w26",
+   "dialect": "저까치",
+   "answered": 608,
+   "correct": 519
+  },
+  {
+   "itemId": "w29",
+   "dialect": "이바구",
+   "answered": 606,
+   "correct": 226
+  },
+  {
+   "itemId": "w38",
+   "dialect": "비개",
+   "answered": 605,
+   "correct": 524
+  },
+  {
+   "itemId": "w47",
+   "dialect": "가새",
+   "answered": 638,
+   "correct": 388
+  },
+  {
+   "itemId": "w51",
+   "dialect": "머스마",
+   "answered": 624,
+   "correct": 570
+  },
+  {
+   "itemId": "w52",
+   "dialect": "가시나",
+   "answered": 621,
+   "correct": 606
+  },
+  {
+   "itemId": "w53",
+   "dialect": "얼라",
+   "answered": 620,
+   "correct": 566
+  },
+  {
+   "itemId": "w60",
+   "dialect": "너거",
+   "answered": 618,
+   "correct": 560
+  },
+  {
+   "itemId": "w67",
+   "dialect": "놀갱이",
+   "answered": 600,
+   "correct": 299
+  },
+  {
+   "itemId": "w73",
+   "dialect": "강생이",
+   "answered": 598,
+   "correct": 417
+  },
+  {
+   "itemId": "w74",
+   "dialect": "야시",
+   "answered": 598,
+   "correct": 492
+  },
+  {
+   "itemId": "w75",
+   "dialect": "토깨이",
+   "answered": 633,
+   "correct": 594
+  },
+  {
+   "itemId": "w76",
+   "dialect": "염생이",
+   "answered": 618,
+   "correct": 558
+  },
+  {
+   "itemId": "w90",
+   "dialect": "묵다",
+   "answered": 618,
+   "correct": 451
+  },
+  {
+   "itemId": "w92",
+   "dialect": "널찌다",
+   "answered": 616,
+   "correct": 316
+  },
+  {
+   "itemId": "w93",
+   "dialect": "댕기다",
+   "answered": 413,
+   "correct": 257
+  },
+  {
+   "itemId": "w94",
+   "dialect": "까디비다",
+   "answered": 401,
+   "correct": 361
+  },
+  {
+   "itemId": "w96",
+   "dialect": "갈차주다",
+   "answered": 400,
+   "correct": 374
+  },
+  {
+   "itemId": "w97",
+   "dialect": "쌔리다",
+   "answered": 400,
+   "correct": 320
+  },
+  {
+   "itemId": "w98",
+   "dialect": "일나다",
+   "answered": 387,
+   "correct": 262
+  },
+  {
+   "itemId": "w99",
+   "dialect": "들가다",
+   "answered": 381,
+   "correct": 347
+  },
+  {
+   "itemId": "w103",
+   "dialect": "문때다",
+   "answered": 381,
+   "correct": 368
+  },
+  {
+   "itemId": "w104",
+   "dialect": "데피다",
+   "answered": 381,
+   "correct": 360
+  },
+  {
+   "itemId": "w105",
+   "dialect": "널쭈다",
+   "answered": 429,
+   "correct": 300
+  },
+  {
+   "itemId": "w107",
+   "dialect": "꼬매다",
+   "answered": 421,
+   "correct": 408
+  },
+  {
+   "itemId": "w112",
+   "dialect": "낑가라",
+   "answered": 421,
+   "correct": 410
+  },
+  {
+   "itemId": "w113",
+   "dialect": "옇어라",
+   "answered": 420,
+   "correct": 261
+  },
+  {
+   "itemId": "w114",
+   "dialect": "데빌고 와라",
+   "answered": 441,
+   "correct": 360
+  },
+  {
+   "itemId": "w146",
+   "dialect": "주아무라",
+   "answered": 423,
+   "correct": 307
+  },
+  {
+   "itemId": "w147",
+   "dialect": "디비자라",
+   "answered": 423,
+   "correct": 409
+  },
+  {
+   "itemId": "w148",
+   "dialect": "욕보다",
+   "answered": 423,
+   "correct": 391
+  },
+  {
+   "itemId": "w115",
+   "dialect": "파이다",
+   "answered": 439,
+   "correct": 416
+  },
+  {
+   "itemId": "w117",
+   "dialect": "따시다",
+   "answered": 431,
+   "correct": 424
+  },
+  {
+   "itemId": "w118",
+   "dialect": "쪼맨하다",
+   "answered": 430,
+   "correct": 424
+  },
+  {
+   "itemId": "w120",
+   "dialect": "잠오다",
+   "answered": 430,
+   "correct": 422
+  },
+  {
+   "itemId": "w121",
+   "dialect": "애럽다",
+   "answered": 431,
+   "correct": 244
+  },
+  {
+   "itemId": "w149",
+   "dialect": "대끼리다",
+   "answered": 424,
+   "correct": 126
+  },
+  {
+   "itemId": "w150",
+   "dialect": "애비다",
+   "answered": 422,
+   "correct": 314
+  },
+  {
+   "itemId": "w122",
+   "dialect": "억수로",
+   "answered": 420,
+   "correct": 405
+  },
+  {
+   "itemId": "w123",
+   "dialect": "마이",
+   "answered": 436,
+   "correct": 425
+  },
+  {
+   "itemId": "w124",
+   "dialect": "쪼매",
+   "answered": 430,
+   "correct": 420
+  },
+  {
+   "itemId": "w125",
+   "dialect": "단디",
+   "answered": 430,
+   "correct": 372
+  },
+  {
+   "itemId": "w128",
+   "dialect": "만날천날",
+   "answered": 430,
+   "correct": 387
+  },
+  {
+   "itemId": "w129",
+   "dialect": "짜다시리",
+   "answered": 436,
+   "correct": 238
+  },
+  {
+   "itemId": "w132",
+   "dialect": "깔롱",
+   "answered": 429,
+   "correct": 396
+  },
+  {
+   "itemId": "w151",
+   "dialect": "천지빼까리더라",
+   "answered": 429,
+   "correct": 411
+  },
+  {
+   "itemId": "w152",
+   "dialect": "온전신에",
+   "answered": 429,
+   "correct": 302
+  },
+  {
+   "itemId": "w153",
+   "dialect": "오만때만",
+   "answered": 452,
+   "correct": 352
+  },
+  {
+   "itemId": "w154",
+   "dialect": "내나",
+   "answered": 443,
+   "correct": 371
+  },
+  {
+   "itemId": "w155",
+   "dialect": "퍼뜩",
+   "answered": 443,
+   "correct": 437
+  },
+  {
+   "itemId": "w156",
+   "dialect": "엥가이",
+   "answered": 443,
+   "correct": 436
+  },
+  {
+   "itemId": "w157",
+   "dialect": "똑띠",
+   "answered": 460,
+   "correct": 324
+  },
+  {
+   "itemId": "w135",
+   "dialect": "무신",
+   "answered": 439,
+   "correct": 393
+  },
+  {
+   "itemId": "w136",
+   "dialect": "어데",
+   "answered": 439,
+   "correct": 419
+  },
+  {
+   "itemId": "w139",
+   "dialect": "우예",
+   "answered": 439,
+   "correct": 372
+  },
+  {
+   "itemId": "w140",
+   "dialect": "우야든동",
+   "answered": 440,
+   "correct": 378
+  },
+  {
+   "itemId": "w141",
+   "dialect": "그라모",
+   "answered": 429,
+   "correct": 402
+  },
+  {
+   "itemId": "w143",
+   "dialect": "고마",
+   "answered": 427,
+   "correct": 363
+  },
+  {
+   "itemId": "w144",
+   "dialect": "하모",
+   "answered": 426,
+   "correct": 292
+  },
+  {
+   "itemId": "w145",
+   "dialect": "와",
+   "answered": 417,
+   "correct": 409
+  },
+  {
+   "itemId": "w158",
+   "dialect": "아인교",
+   "answered": 411,
+   "correct": 396
+  },
+  {
+   "itemId": "w159",
+   "dialect": "마",
+   "answered": 411,
+   "correct": 400
+  },
+  {
+   "itemId": "w160",
+   "dialect": "오야",
+   "answered": 411,
+   "correct": 389
+  }
+ ]
+}

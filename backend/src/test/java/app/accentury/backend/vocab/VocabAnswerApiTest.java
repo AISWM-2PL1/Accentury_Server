@@ -238,7 +238,8 @@ class VocabAnswerApiTest extends IntegrationTest {
     @Test
     void choiceId가_없으면_400이다() throws Exception {
         SessionHandle session = createSession();
-        String[] broken = {"{}", "{\"choiceId\": null}", "{\"choiceId\": \"\"}", ""};
+        // 학습의 시간 초과 답안(KAN-360, timedOut)은 레벨테스트에 없다 - 보기 없는 제출은 여전히 400이다.
+        String[] broken = {"{}", "{\"choiceId\": null}", "{\"choiceId\": \"\"}", "", "{\"timedOut\": true}"};
 
         for (int i = 0; i < broken.length; i++) {
             mockMvc.perform(answer(session, "w1", "no-choice-" + i, broken[i]))

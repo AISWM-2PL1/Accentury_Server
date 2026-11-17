@@ -3,6 +3,8 @@ package app.accentury.backend.learning;
 import app.accentury.backend.IntegrationTest;
 import app.accentury.backend.RedisTestcontainer;
 import app.accentury.backend.common.AccenturyProperties;
+import app.accentury.backend.testdefinition.TestDefinition;
+import app.accentury.backend.testdefinition.TestDefinitionRegistry;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
@@ -16,12 +18,15 @@ import org.springframework.test.web.servlet.request.MockHttpServletRequestBuilde
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.ObjectMapper;
 
+import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.Map;
+import java.util.Set;
 import java.util.UUID;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
@@ -33,7 +38,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 /**
  * 억양 학습 콘텐츠 API의 실행 가능한 명세 (KAN-264, 명세서 §3.17) - 실제 PostgreSQL과 Redis 위에서 가짜 IdP로 돈다.
  * <p>
- * 기대값은 발행본 {@code in-gn-2026.10.1}(V10)을 {@link IntonationLearningRegistry}에서 읽는다 - 발행본이 재발행되면
+ * 기대값은 발행본 {@code in-gn-2026.11.1}(V20, KAN-345)을 {@link IntonationLearningRegistry}에서 읽는다 - 발행본이 재발행되면
  * 테스트가 조용히 옛 내용을 검사하지 않게 하려는 것이다.
  */
 @AutoConfigureMockMvc
@@ -51,6 +56,9 @@ class IntonationLearningApiTest extends IntegrationTest {
 
     @Autowired
     private IntonationLearningRegistry registry;
+
+    @Autowired
+    private TestDefinitionRegistry testDefinitions;
 
     @Test
     void 토큰이_없으면_두_경로_모두_401이다() throws Exception {
@@ -110,17 +118,54 @@ class IntonationLearningApiTest extends IntegrationTest {
     }
 
     @Test
-    void 발행본은_검수한_레벨테스트_음성_풀_전부를_어절_수_레벨로_싣는다() {
+    void 발행본은_구간_다섯에_코스_다섯씩_카드_세_장씩_싣는다() {
         IntonationLearningDefinition current = registry.current().definition();
-        assertEquals("in-gn-2026.10.1", current.contentVersion());
-        // KAN-276이 같은 버전을 검수한 gn-2026.10.2의 음성 124문장으로 덮어썼다 (원래 gn-2026.10.1의 145문장).
-        assertEquals(124, current.courses().stream().mapToInt(course -> course.cards().size()).sum());
+        assertEquals("in-gn-2026.11.1", current.contentVersion());
+        // KAN-345 - 앱 학습 탭의 구간이 level이다. 구간마다 코스 5개, 코스마다 카드 3장이고 seq 순서가 쉬운 순이다.
+        assertEquals(25, current.courses().size());
+        Set<String> scriptKeys = new HashSet<>();
         for (IntonationLearningDefinition.Course course : current.courses()) {
-            assertTrue(course.cards().size() <= 10, course.courseId());
+            assertEquals((course.seq() - 1) / 5 + 1, course.level(), course.courseId());
+            assertEquals(3, course.cards().size(), course.courseId());
             for (IntonationLearningDefinition.Card card : course.cards()) {
-                int words = card.dialect().trim().split("\\s+").length;
-                assertEquals(Math.min(Math.max(words - 8, 1), 5), course.level(), card.cardId());
+                assertTrue(scriptKeys.add(card.scriptKey()), "한 문장이 두 코스에 들어갔다: " + card.cardId());
             }
+        }
+        assertEquals(75, scriptKeys.size());
+    }
+
+    @Test
+    void 발행본의_카드는_전부_레벨테스트_음성_풀의_문항이다() {
+        // 새 문장을 넣지 않는다 (KAN-345) - 대사, scriptKey, 가이드 곡선이 원천 정의 gn-2026.10.2의 VOICE 문항 그대로다.
+        Map<String, TestDefinition.Item> pool = new LinkedHashMap<>();
+        for (TestDefinition.Item item : testDefinitions.get("gn-2026.10.2").definition().items()) {
+            if (item.scriptKey() != null) {
+                pool.put(item.scriptKey(), item);
+            }
+        }
+        for (IntonationLearningDefinition.Course course : registry.current().definition().courses()) {
+            for (IntonationLearningDefinition.Card card : course.cards()) {
+                TestDefinition.Item source = pool.get(card.scriptKey());
+                assertNotNull(source, "레벨테스트 음성 풀에 없는 문장이다: " + card.cardId());
+                assertEquals(source.prompt(), card.dialect(), card.cardId());
+                assertEquals(source.guideF0(), card.guideF0(), card.cardId());
+            }
+        }
+    }
+
+    @Test
+    void 발행본의_식별자는_앞선_발행본과_겹치지_않는다() {
+        // 녹음 업로드는 카드를 현재 발행본에서만 찾는다 (IntonationScoringService). 식별자가 겹치면 배포 전에 옛 코스를
+        // 연 사람의 녹음이 같은 식별자의 다른 문장으로 오류 없이 채점된다 (PR #73 리뷰). 겹치지 않으면 404다.
+        Set<String> previous = new HashSet<>();
+        for (IntonationLearningDefinition.Course course
+                : registry.find("in-gn-2026.10.1").orElseThrow().definition().courses()) {
+            previous.add(course.courseId());
+            course.cards().forEach(card -> previous.add(card.cardId()));
+        }
+        for (IntonationLearningDefinition.Course course : registry.current().definition().courses()) {
+            assertFalse(previous.contains(course.courseId()), course.courseId());
+            course.cards().forEach(card -> assertFalse(previous.contains(card.cardId()), card.cardId()));
         }
     }
 

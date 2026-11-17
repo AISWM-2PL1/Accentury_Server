@@ -229,4 +229,6 @@ aws cloudtrail lookup-events --lookup-attributes AttributeKey=EventName,Attribut
 ```
 
 GuardDuty는 서울 리전 detector 하나다. 켜 둔 보호는 S3 데이터 이벤트와 RDS 로그인 이벤트뿐이고, AWS가 기본으로 켜는
-EKS 감사 로그, Lambda 네트워크 로그, EBS 악성코드 검사는 `audit.tf`가 끈다. 발견 사항은 콘솔 GuardDuty에서 본다.
+EKS 감사 로그, Lambda 네트워크 로그, EBS 악성코드 검사는 `audit.tf`가 끈다. RDS 보호 밑의 데이터 활동 감시(`RDS_DATA_RISK`)는
+꺼져 있고, provider가 이 이름을 받지 않아 코드가 아니라 콘솔에서 관리한다. 발견 사항 중 심각도 4 이상(Medium, High,
+Critical)은 슬랙 `#infra-alerts`로 오고, Low는 콘솔 GuardDuty에서만 본다 (KAN-310, [alarms.md "GuardDuty 결과"](alarms.md#guardduty-결과-kan-310)).

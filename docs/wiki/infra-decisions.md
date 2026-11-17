@@ -24,6 +24,13 @@
   JSON 대신 index.html을 받아 Universal Link 검증이 성립하지 않는다. 예외를 접두사 통째로
   잡은 이유는 RFC 8615가 그 아래를 기계 판독 메타데이터용으로 예약했기 때문이다.
   `infra/modules/edge/spa-rewrite.test.mjs`가 이 동작을 붙들고 있다.
+  루트(`/`)는 사투리 이야기 목록(`/guide/index.html`)을 내준다 (KAN-346, 2026-11-15). 읽을 글이 있는
+  문서를 첫 화면으로 두고, 테스트 화면(SPA)은 `/test`로 연다. S3의 키를 옮기지 않고 Function에서 가른
+  이유는 스토어에 나간 앱이 루트에 `bridge` 쿼리를 붙여 WebView로 열기 때문이다. 버킷의 `index.html`을
+  글로 바꾸면 고칠 수 없는 기존 앱의 화면이 깨진다. 그래서 루트라도 쿼리에 SPA가 읽는 키(`bridge`,
+  `screen`, 공유 유입 계측 코드 `c`)가 있으면 SPA를 내준다. `utm_*`만 붙은 루트는 목록이다. 목록의 옛 주소
+  `/guide/index.html`, `/guide`, `/guide/`는 쿼리를 실은 채 루트로 301을 보낸다. 되돌릴 때는 Function만
+  원복하면 된다.
 - **RDS 마스터 비밀번호**: `manage_master_user_password`로 RDS가 생성해
   Secrets Manager에 보관한다. 코드, tfvars, state 어디에도 평문이 없다.
 - **AMI는 tfvars에 명시 (ai 호스트, KAN-246)**: `ai_ami_id`에 AMI ID를 적는다. 처음에는 SSM의 "최신 AMI"

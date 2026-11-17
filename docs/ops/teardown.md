@@ -332,6 +332,7 @@ destroy 전에:
   지워진다.
 - prod를 철거하면 prod가 소유한 슬랙 Chatbot 채널 설정(`#infra-alerts`, `#daily-user`)도 함께 지워져 staging 토픽의 슬랙
   구독까지 끊긴다 (채널당 계정에 설정이 하나뿐이라 prod가 두 환경 몫을 갖는다).
+  GuardDuty 결과 알림(KAN-310)도 규칙이 prod에 있어 함께 지워진다. prod를 다시 지으면 다시 생긴다.
 - **destroy 직후 그 환경의 GitHub environment 변수 `DEPLOY_PAUSED`를 `true`로 둔다. 두 레포 모두다.** 환경이 없는데 병합이
   일어나면 배포 워크플로가 역할 부재로 `AssumeRoleWithWebIdentity` 거부라는 헷갈리는 메시지로 실패한다 (2026-08-27 실제 발생).
   이 레포(Accentury_Server)에서는 Image Deploy(`deploy.yml`)가, Accentury_App에서는 Web Deploy가 이 변수를 본다. 변수가
