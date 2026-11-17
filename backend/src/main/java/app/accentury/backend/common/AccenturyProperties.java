@@ -451,8 +451,9 @@ public record AccenturyProperties(Session session,
      *
      * @param apiKey       Gemini API 키 (Google AI Studio, 환경별 프로젝트). SSM SecureString
      *                     {@code ACCENTURY_TRANSLATION_APIKEY}가 넣는다 - 콘솔이 발급하는 값이라 Terraform은 자리만 만든다.
-     *                     <b>없거나 자리 표시 값({@link SsmPlaceholder#UNSET})이면 번역이 전부 503
+     *                     <b>없거나 자리 표시 값({@link SsmPlaceholder#UNSET})이면 서버 사전 검사를 통과한 번역이 503
      *                     {@code TRANSLATION_UNAVAILABLE}이다</b> - 기동과 다른 기능은 영향이 없다 (후기 슬랙 URL과 같은 사정).
+     *                     앞뒤 공백과 줄바꿈은 떼어 낸다 - SSM 값 끝의 개행이 헤더 예외로 500을 내던 것을 막는다 (PR #77 리뷰).
      * @param model        호출할 모델 이름. 코드 수정 없이 바꾸는 자리다 (2026-10-08 결정 - 품질이 모자라면
      *                     {@code gemini-3.8-flash}). 배포에서는 SSM {@code ACCENTURY_TRANSLATION_MODEL}이 넣는다.
      * @param baseUrl      Gemini API 기준 주소. 테스트가 MockWebServer로 바꾸는 자리다.
@@ -471,6 +472,10 @@ public record AccenturyProperties(Session session,
                               @Nullable String recordBucket,
                               @Nullable String region,
                               @DefaultValue("6") int rateLimitPerMinute) {
+
+        public Translation {
+            apiKey = apiKey == null ? null : apiKey.strip();
+        }
 
         /** 2026-10-08 결정 모델 - 구글 모델 문서가 속도와 비용이 중요한 단순 텍스트 작업에 권장하는 최신 모델이다. */
         public static final String DEFAULT_MODEL = "gemini-3.5-flash-lite";
@@ -509,7 +514,8 @@ public record AccenturyProperties(Session session,
         public static final int DAILY_LIMIT = 5;
 
         /**
-         * 계정당 하루 LLM 호출 상한 - 결과와 상관없이 세고 돌려주지 않는다 (명세서 §2.5, §3.18, KAN-322). {@link #DAILY_LIMIT}은
+         * 계정당 하루 LLM 호출 상한 - 결과와 상관없이 세고 돌려주지 않는다 (명세서 §2.5, §3.18, KAN-322). 예외는 요청이 Gemini에
+         * 닿지 않았거나 키, 모델 이름 같은 설정 오류로 거절된 실패 하나다 - 그 호출은 돌려준다 (KAN-361). {@link #DAILY_LIMIT}은
          * 성공만 세어 LLM이 거절하는 문장을 반복하면 걸리지 않고, 한 계정이 프로젝트 몫 RPD 500을 다 쓰면 그날 모든 사용자의
          * 번역이 503이 된다. 20은 성공 5건의 4배라 번역 불가가 섞인 정상 사용을 막지 않으면서 어느 계정도 RPD의 4%를 넘지
          * 못한다. Gemini 재시도 1회는 따로 세지 않아 재시도까지 치면 상한은 8%다 - 재시도는 연결 실패, 5xx, 시간 초과에서만
@@ -517,7 +523,7 @@ public record AccenturyProperties(Session session,
          */
         public static final int DAILY_CALL_LIMIT = 20;
 
-        /** 키가 들어 있는가 - 비었거나 자리 표시 값이면 번역은 503이다. */
+        /** 키가 들어 있는가 - 비었거나 자리 표시 값이면 사전 검사를 통과한 번역은 503이다 (LLM을 부르지 않는다, KAN-361). */
         public boolean apiKeyConfigured() {
             return apiKey != null && !apiKey.isBlank() && !SsmPlaceholder.UNSET.equals(apiKey);
         }

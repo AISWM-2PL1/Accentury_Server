@@ -115,8 +115,9 @@ class TranslationService {
             finish(attempt, TranslationResult.REJECTED, null, null);
             throw new ApiException(ErrorCode.TRANSLATION_REJECTED);
         }
-        // 키가 없으면 LLM을 부를 수 없다 - 한도 칸과 호출 수를 건드리기 전에 끝낸다 (KAN-361). 키가 있는 판에서 LLM이
-        // 실패한 호출은 지금처럼 호출 수에 남는다 (KAN-322) - 그때는 Gemini 무료 한도(RPD)를 실제로 썼을 수 있다.
+        // 키가 없으면 LLM을 부를 수 없다 - 한도 칸과 호출 수를 건드리기 전에 끝낸다 (KAN-361). 키가 있는 판의 LLM 실패는
+        // 요청이 Gemini에 닿았을 수 있으면 호출 수에 남고(KAN-322, RPD를 실제로 썼을 수 있다), 닿지 않았거나 설정 오류면
+        // translateWithin이 돌려준다.
         if (!translator.configured()) {
             finish(attempt, TranslationResult.LLM_FAILED, null, null);
             throw new ApiException(ErrorCode.TRANSLATION_UNAVAILABLE);
@@ -164,6 +165,11 @@ class TranslationService {
         try {
             reply = translator.translate(input, attempt.direction());
         } catch (DialectTranslator.Unavailable e) {
+            if (!e.consumed()) {
+                // 요청이 Gemini에 닿지 않았거나 키, 모델 이름 같은 설정 오류로 거절됐다 - 호출 수를 남기면 설정을 고쳐도 그 계정이
+                // 그날 429로 잠긴다 (KAN-361, PR #77 리뷰). 성공 칸은 부르는 쪽 finally가 돌려준다.
+                quota.releaseCall(slot);
+            }
             finish(attempt, TranslationResult.LLM_FAILED, null, elapsedMs(llmStarted));
             throw new ApiException(ErrorCode.TRANSLATION_UNAVAILABLE);
         }

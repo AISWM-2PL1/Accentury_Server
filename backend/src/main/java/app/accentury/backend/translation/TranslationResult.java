@@ -14,7 +14,10 @@ public enum TranslationResult {
     TOO_LONG("too_long"),
     /** 계정의 일일 한도나 호출 수 상한 초과 - 429 {@code TRANSLATION_DAILY_LIMIT_EXCEEDED}. LLM을 부르지 않는다 (2026-10-15, KAN-322). */
     LIMITED("limited"),
-    /** LLM 호출 실패, 시간 초과, 무료 한도 소진(429), 일일 한도 저장소 장애 - 503 {@code TRANSLATION_UNAVAILABLE}. */
+    /**
+     * LLM 호출 실패, 시간 초과, 무료 한도 소진(429), 일일 한도 저장소 장애, API 키 없음(LLM을 부르지 않는다, KAN-361) - 503
+     * {@code TRANSLATION_UNAVAILABLE}.
+     */
     LLM_FAILED("llm_failed");
 
     private final String metricTag;

@@ -49,6 +49,11 @@ class TranslationServiceQuotaTest {
         public String model() {
             return "fake-model";
         }
+
+        @Override
+        public boolean configured() {
+            return true;
+        }
     };
 
     /** 칸과 호출 수의 규칙만 보는 서비스 - 분당 제한은 아래 전용 테스트가 실제 한도로 본다. */
@@ -85,10 +90,40 @@ class TranslationServiceQuotaTest {
     }
 
     @Test
-    void 호출_전_거절은_칸을_잡지도_않는다() {
-        assertCode(ErrorCode.TRANSLATION_TOO_LONG, () -> translate("가".repeat(101)));
-        assertCode(ErrorCode.TRANSLATION_REJECTED, () -> translate("ㅓㅗㅁ니ㅏㅓㅗㅁㅇ니랑노라ㅣㅓ"));
+    void 호출_전_거절은_칸을_잡지도_않는다_키가_없는_배포도_같다() {
+        for (TranslationService target : List.of(service, unconfiguredService())) {
+            assertCode(ErrorCode.TRANSLATION_TOO_LONG, () -> translate(target, "가".repeat(101)));
+            assertCode(ErrorCode.TRANSLATION_REJECTED, () -> translate(target, "ㅓㅗㅁ니ㅏㅓㅗㅁㅇ니랑노라ㅣㅓ"));
+        }
         assertEquals(0, quota.acquired);
+    }
+
+    @Test
+    void Gemini에_닿았을_수_있는_LLM_실패는_칸만_돌려주고_호출_수는_남긴다() {
+        llm = text -> {
+            throw new DialectTranslator.Unavailable("timeout", true);
+        };
+        assertCode(ErrorCode.TRANSLATION_UNAVAILABLE, () -> translate("밥 먹었어?"));
+
+        assertEquals(1, quota.released.size(), "성공 칸은 돌려준다");
+        assertEquals(1, quota.calls, "RPD를 썼을 수 있는 호출은 하루 호출 수에 남는다 (KAN-322)");
+        assertEquals(0, quota.callsReleased);
+    }
+
+    @Test
+    void Gemini에_닿지_않은_실패는_호출_수도_돌려줘_스물한_번째도_429가_아니다() {
+        llm = text -> {
+            throw new DialectTranslator.Unavailable("status 403", false);
+        };
+        int requests = AccenturyProperties.Translation.DAILY_CALL_LIMIT + 1;
+        for (int i = 0; i < requests; i++) {
+            assertCode(ErrorCode.TRANSLATION_UNAVAILABLE, () -> translate("밥 먹었어?"));
+        }
+
+        assertEquals(0, quota.calls, "키, 모델 이름 오류와 연결 실패로 계정이 그날 잠기지 않는다 (KAN-361)");
+        assertEquals(requests, quota.callsReleased);
+        assertEquals(0, quota.used);
+        assertTrue(records.stream().allMatch(r -> r.result() == TranslationResult.LLM_FAILED));
     }
 
     @Test
@@ -111,20 +146,10 @@ class TranslationServiceQuotaTest {
             assertCode(ErrorCode.TRANSLATION_UNAVAILABLE, () -> translate(unconfigured, "밥 먹었어?"));
         }
 
-        assertEquals(0, quota.acquired, "칸을 잡지 않는다");
-        assertEquals(0, quota.calls, "부르지 않은 LLM 호출을 세지 않는다 (KAN-361)");
-        assertEquals(0, quota.used);
+        assertEquals(0, quota.calls, "칸을 잡지 않아 부르지 않은 LLM 호출을 세지 않는다 (KAN-361)");
         assertEquals(requests, records.size(), "호출 상한을 넘겨도 429가 아니라 503이고 전부 기록된다");
         assertTrue(records.stream().allMatch(r -> r.result() == TranslationResult.LLM_FAILED));
         assertTrue(records.stream().allMatch(r -> r.llmMs() == null), "LLM을 부르지 않았다");
-    }
-
-    @Test
-    void 키가_없어도_호출_전_거절은_그대로_422다() {
-        TranslationService unconfigured = unconfiguredService();
-        assertCode(ErrorCode.TRANSLATION_TOO_LONG, () -> translate(unconfigured, "가".repeat(101)));
-        assertCode(ErrorCode.TRANSLATION_REJECTED, () -> translate(unconfigured, "ㅓㅗㅁ니ㅏㅓㅗㅁㅇ니랑노라ㅣㅓ"));
-        assertEquals(0, quota.calls);
     }
 
     @Test
@@ -199,14 +224,17 @@ class TranslationServiceQuotaTest {
     }
 
     private TranslationService serviceWith(RateLimits rateLimits) {
-        return new TranslationService(translator, quota, records::add, rateLimits, Clock.systemUTC(),
+        return serviceWith(translator, rateLimits);
+    }
+
+    private TranslationService serviceWith(DialectTranslator target, RateLimits rateLimits) {
+        return new TranslationService(target, quota, records::add, rateLimits, Clock.systemUTC(),
                 new SimpleMeterRegistry());
     }
 
     /** API 키가 없는 배포의 번역기를 꽂은 서비스 (KAN-361). */
     private TranslationService unconfiguredService() {
-        return new TranslationService(TranslationConfig.unconfigured("fake-model"), quota, records::add,
-                mock(RateLimits.class), Clock.systemUTC(), new SimpleMeterRegistry());
+        return serviceWith(TranslationConfig.unconfigured("fake-model"), mock(RateLimits.class));
     }
 
     private static RateLimits realRateLimits() {
@@ -234,6 +262,7 @@ class TranslationServiceQuotaTest {
         int used;
         int acquired;
         int calls;
+        int callsReleased;
         boolean down;
         final List<Slot> released = new ArrayList<>();
 
@@ -257,6 +286,12 @@ class TranslationServiceQuotaTest {
         public void release(Slot slot) {
             released.add(slot);
             used--;
+        }
+
+        @Override
+        public void releaseCall(Slot slot) {
+            callsReleased++;
+            calls = Math.max(calls - 1, 0);
         }
 
         @Override
