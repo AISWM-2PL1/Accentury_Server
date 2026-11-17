@@ -26,7 +26,8 @@ import java.util.concurrent.TimeUnit;
  * 사투리 텍스트 번역 (KAN-266, 명세서 §3.18) - 두 방향이다 (KAN-316, {@link TranslationDirection}).
  * <p>
  * 순서: 형식 검사(400, {@code text}와 {@code direction}) → 분당 제한(429 {@code RATE_LIMITED}) → 길이(422 {@code TRANSLATION_TOO_LONG}) →
- * 서버 사전 검사(422 {@code TRANSLATION_REJECTED}) → 일일 한도(429 {@code TRANSLATION_DAILY_LIMIT_EXCEEDED}) →
+ * 서버 사전 검사(422 {@code TRANSLATION_REJECTED}) → API 키 확인(키가 없는 배포면 503 {@code TRANSLATION_UNAVAILABLE}, KAN-361) →
+ * 일일 한도(429 {@code TRANSLATION_DAILY_LIMIT_EXCEEDED}) →
  * LLM 호출(실패면 503 {@code TRANSLATION_UNAVAILABLE}) → 응답 검사(어기면 422 {@code TRANSLATION_REJECTED}) → 200.
  * 400과 분당 제한을 뺀 모든 끝에서 결과 종류를 지표로 세고 번역 기록을 넘긴다.
  * <p>
@@ -111,6 +112,12 @@ class TranslationService {
         if (TranslationHarness.rejectsBeforeLlm(input)) {
             finish(attempt, TranslationResult.REJECTED, null, null);
             throw new ApiException(ErrorCode.TRANSLATION_REJECTED);
+        }
+        // 키가 없으면 LLM을 부를 수 없다 - 한도 칸과 호출 수를 건드리기 전에 끝낸다 (KAN-361). 키가 있는 판에서 LLM이
+        // 실패한 호출은 지금처럼 호출 수에 남는다 (KAN-322) - 그때는 Gemini 무료 한도(RPD)를 실제로 썼을 수 있다.
+        if (!translator.configured()) {
+            finish(attempt, TranslationResult.LLM_FAILED, null, null);
+            throw new ApiException(ErrorCode.TRANSLATION_UNAVAILABLE);
         }
 
         TranslationQuota.Slot slot;

@@ -104,6 +104,30 @@ class TranslationServiceQuotaTest {
     }
 
     @Test
+    void 키가_없는_배포는_칸도_호출_수도_쓰지_않고_503이다() {
+        TranslationService unconfigured = unconfiguredService();
+        int requests = AccenturyProperties.Translation.DAILY_CALL_LIMIT + 1;
+        for (int i = 0; i < requests; i++) {
+            assertCode(ErrorCode.TRANSLATION_UNAVAILABLE, () -> translate(unconfigured, "밥 먹었어?"));
+        }
+
+        assertEquals(0, quota.acquired, "칸을 잡지 않는다");
+        assertEquals(0, quota.calls, "부르지 않은 LLM 호출을 세지 않는다 (KAN-361)");
+        assertEquals(0, quota.used);
+        assertEquals(requests, records.size(), "호출 상한을 넘겨도 429가 아니라 503이고 전부 기록된다");
+        assertTrue(records.stream().allMatch(r -> r.result() == TranslationResult.LLM_FAILED));
+        assertTrue(records.stream().allMatch(r -> r.llmMs() == null), "LLM을 부르지 않았다");
+    }
+
+    @Test
+    void 키가_없어도_호출_전_거절은_그대로_422다() {
+        TranslationService unconfigured = unconfiguredService();
+        assertCode(ErrorCode.TRANSLATION_TOO_LONG, () -> translate(unconfigured, "가".repeat(101)));
+        assertCode(ErrorCode.TRANSLATION_REJECTED, () -> translate(unconfigured, "ㅓㅗㅁ니ㅏㅓㅗㅁㅇ니랑노라ㅣㅓ"));
+        assertEquals(0, quota.calls);
+    }
+
+    @Test
     void 소진이면_LLM_없이_429이고_LIMITED로_기록한다() {
         quota.used = 5;
         ApiException limited = assertThrows(ApiException.class, () -> translate("밥 먹었어?"));
@@ -177,6 +201,12 @@ class TranslationServiceQuotaTest {
     private TranslationService serviceWith(RateLimits rateLimits) {
         return new TranslationService(translator, quota, records::add, rateLimits, Clock.systemUTC(),
                 new SimpleMeterRegistry());
+    }
+
+    /** API 키가 없는 배포의 번역기를 꽂은 서비스 (KAN-361). */
+    private TranslationService unconfiguredService() {
+        return new TranslationService(TranslationConfig.unconfigured("fake-model"), quota, records::add,
+                mock(RateLimits.class), Clock.systemUTC(), new SimpleMeterRegistry());
     }
 
     private static RateLimits realRateLimits() {
