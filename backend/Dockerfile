@@ -53,7 +53,13 @@ EXPOSE 8080
 # JVM은 기본적으로 컨테이너 메모리 한도의 25%만 힙으로 쓴다 - 512MB 컨테이너면 힙이
 # 128MB라 기동조차 빠듯하다. 한도의 75%를 쓰게 올리고, 힙이 마르면 살아 있는 척하지 말고
 # 즉시 죽어 오케스트레이터가 다시 띄우게 한다(ExitOnOutOfMemoryError).
-ENV JAVA_OPTS="-XX:MaxRAMPercentage=75.0 -XX:InitialRAMPercentage=50.0 -XX:+ExitOnOutOfMemoryError"
+# -XX:-UseBASE64Intrinsics는 CVE-2026-114938(java4shell)의 임시 차단이다. AVX-512 VBMI를 지원하는 x64 CPU에서
+# Base64 인트린직이 메모리를 망가뜨려 원격 코드 실행까지 이어진다(OpenJDK 2026-11-17 권고, Adoptium 안내).
+# Fargate는 X86_64이고 어떤 CPU를 받을지 고를 수 없어 걸린다고 본다. 고친 Temurin은 25.0.5.1+2인데 Docker Hub
+# 이미지가 아직 없다(2026-11-19 확인). 위 두 FROM의 digest를 25.0.5.1 이상으로 올릴 때 이 플래그를 뺀다.
+# 끄면 Base64 인코딩과 디코딩이 순수 Java 경로로 돈다. 앱과 라이브러리가 Base64로 다루는 값은 토큰, 키, 체크섬처럼
+# 짧아서 체감할 만큼 느려지지 않는다.
+ENV JAVA_OPTS="-XX:MaxRAMPercentage=75.0 -XX:InitialRAMPercentage=50.0 -XX:+ExitOnOutOfMemoryError -XX:-UseBASE64Intrinsics"
 
 # exec로 넘겨 java가 PID 1이 되게 한다 - 그래야 docker stop의 SIGTERM이 셸에 먹히지 않고
 # 스프링의 우아한 종료까지 도달한다.
