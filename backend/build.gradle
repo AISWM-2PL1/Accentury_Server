@@ -1,6 +1,6 @@
 plugins {
 	id 'java'
-	id 'org.springframework.boot' version '4.1.0'
+	id 'org.springframework.boot' version '4.1.2'
 	id 'io.spring.dependency-management' version '1.1.7'
 }
 
@@ -35,10 +35,12 @@ dependencies {
 	// 거치지 않는다 (application.yml 기본은 pgjdbc 직접). Java 17+ 빌드는 Boot가 주는 Jackson 3
 	// (tools.jackson)으로 시크릿 JSON을 읽는다 - 별도 jackson-databind 2.x가 필요 없다.
 	runtimeOnly 'software.amazon.jdbc:aws-advanced-jdbc-wrapper:4.4.0'
-	// wrapper 4.4.0이 빌드된 SDK 버전과 맞춘다 (POM optional 의존성이라 직접 적어야 한다). 버전은
-	// BOM 한 곳에 두어 SDK 모듈이 늘어도 서로 어긋나지 않게 한다. 플러그인은 동기 클라이언트만 쓰므로
-	// 비동기용 netty 클라이언트는 이미지에서 뺀다 (PR 리뷰).
-	implementation platform('software.amazon.awssdk:bom:2.46.10')
+	// wrapper의 SDK는 POM optional 의존성이라 직접 적어야 한다. 버전은 BOM 한 곳에 두어 SDK 모듈이 늘어도 서로
+	// 어긋나지 않게 한다. 판은 Micrometer CloudWatch 레지스트리가 끌어오는 판(Boot 4.1.2의 Micrometer 1.17.2는 2.46.21)
+	// 이상으로 둔다. 그보다 낮으면 sdk-core 같은 공용 모듈만 그 판으로 올라가 S3, Secrets Manager 모듈과 어긋난다
+	// (KAN-365). wrapper 4.4.0이 빌드된 2.46.10과는 같은 2.46 안의 패치 차이다. 플러그인은 동기 클라이언트만
+	// 쓰므로 비동기용 netty 클라이언트는 이미지에서 뺀다 (PR 리뷰).
+	implementation platform('software.amazon.awssdk:bom:2.46.21')
 	// staging 전용 학습 데이터 S3 (KAN-201, training 패키지). 동기 클라이언트(아래 apache-client)만 쓰므로
 	// secretsmanager와 같이 netty를 뺀다 - netty는 cloudwatch 줄이 이미 runtimeOnly로 넣는다. 버킷 설정이
 	// 없으면 클라이언트 빈 자체가 안 생긴다.

@@ -60,6 +60,7 @@ backend가 부르는 이름 `ai.accentury.internal`은 내부 ALB(`accentury-{en
 | ASG 상태 검사 | ELB, 유예 900초 | 첫 부팅(docker 설치 + 이미지 약 6GB pull + 모델 적재)이 실측 약 3분 22초다. 파이프라인의 healthy 대기(600초)에 pull을 더한 여유다. |
 | 확대 | `accentury.analysis.processing.value` Maximum >= 10, 1분 x 1회 -> +1, 워밍업 300초 | backend의 폴링 혼잡 임계치와 같은 지점이다. CPU는 추론 1건이 약 6초라 밀림보다 늦다. 한 사람의 음성은 3건이라 연달아 올려도 10에 닿지 않는다. 워밍업은 prod 실측 부팅(시작에서 healthy까지) 약 3분 + 경보 해제 지연 1~2분이다. |
 | 축소 | 같은 지표 <= 1, 1분 x 15회 -> -1, 그 뒤 ALARM이 유지되는 동안 약 3분마다 다시 -1 (min까지) | 늘어난 인스턴스는 늘어난 동안만 과금이라 확대보다 훨씬 느리게 접는다. 실측 3에서 2가 16분, 2에서 1이 19분이다. |
+| 저녁 피크 (prod, 2026-11-28까지 한시) | 매일 20:00 KST 최소 2대(희망 2), 24:00 KST 최소 1대로 되돌림. 같은 기간 확대 기준은 6 | 확대는 대기열이 쌓인 뒤 시작되고 새 인스턴스가 일하기까지 약 4분이 걸려, 몰리는 시간대를 미리 2대로 맞이한다. 끝 예약은 최소 대수만 되돌려 축소 경보가 줄이게 둔다. 20:00~24:00 사이에는 prod plan에 ASG `min_size` 변경이 보이므로 ai-host를 apply하지 않는다. 배포 파이프라인은 reload 동안 예약을 멈추지 않으므로 19:50~20:10에는 prod Image Deploy를 하지 않는다. 11/29에 `envs/prod/main.tf`의 `peak_schedule`과 `scale_out_threshold`를 지운다 (KAN-363). |
 | SG | backend-sg -> ai-alb-sg -> ai-sg (8000) | backend 태스크가 호스트에 직접 닿는 길은 없다. |
 
 **MAX를 바꾸려면** 두 환경 tfvars의 `ai_max_size`를 고치고 apply한다. plan에 ASG 속성 변경 1건만 보여야 한다.

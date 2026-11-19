@@ -248,6 +248,18 @@ module "ai_host" {
   dns_name                 = module.network.ai_dns_name
   vpc_cidr                 = var.vpc_cidr
   scaling_metric_namespace = local.backend_metric_namespace
+
+  # 저녁 피크 한시 적용 (KAN-363) - 2026-11-28 20:00~24:00 KST가 마지막이다. 11/29에 두 값을 지운다(예약은 end_time 뒤
+  # AWS에서 사라져 남겨 두면 plan이 다시 만들려 한다). 그동안 확대 기준(6)이 backend 폴링 혼잡 기준(congestion-threshold
+  # 10)과 다르다 - 혼잡 기준까지 바꾸면 Release 승격이 필요해 인프라 쪽만 낮췄다.
+  scale_out_threshold = 6
+  peak_schedule = {
+    min_size  = 2
+    start     = "0 20 * * *"
+    end       = "0 0 * * *"
+    time_zone = "Asia/Seoul"
+    end_time  = "2026-11-28T16:00:00Z"
+  }
 }
 
 # AI 호스트 AMI 사전 적재 파이프라인 (KAN-285). EC2 Image Builder가 최신 AL2023에 docker, compose, 활성 accentury/ai
