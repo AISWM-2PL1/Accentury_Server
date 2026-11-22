@@ -451,8 +451,10 @@ resource "aws_lambda_function" "report" {
   handler          = "voice_report.handler"
   filename         = data.archive_file.report[0].output_path
   source_code_hash = data.archive_file.report[0].output_base64sha256
-  timeout          = 120
-  memory_size      = 256
+  # 매번 버킷 전체를 나열해 실행 시간이 객체 수에 비례한다. 객체 약 12만 개에서 256MB/120초가 타임아웃 나서
+  # 1024MB(CPU도 함께 는다)/600초로 올렸다. 1024MB에서 39초였다.
+  timeout          = 600
+  memory_size      = 1024
 
   environment {
     variables = {
