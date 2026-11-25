@@ -325,8 +325,11 @@ public record AccenturyProperties(Session session,
     public record Training(@Nullable String bucket, @Nullable String region, @Nullable String keyPrefix,
                            @DefaultValue(Training.VOICE_CONSENT_VERSION) String consentVersion) {
 
-        /** 게시 중인 음성 저장 동의 버전 - 동의 문구를 고칠 때 앱과 웹의 상수와 함께 올린다 (KAN-269). */
-        public static final String VOICE_CONSENT_VERSION = "2026-10-04";
+        /**
+         * 게시 중인 음성 저장 동의 버전 - 동의 문구를 고칠 때 앱과 웹의 상수와 함께 올린다 (KAN-269).
+         * 2026-11-24: App Store 5.1.1(i) 거절 대응으로 동의 문구에 수신처(자체 서버, 외부 AI 미전송)를 밝히며 올렸다 (KAN-366).
+         */
+        public static final String VOICE_CONSENT_VERSION = "2026-11-24";
     }
 
     /**

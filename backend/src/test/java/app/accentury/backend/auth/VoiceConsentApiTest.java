@@ -119,7 +119,7 @@ class VoiceConsentApiTest extends IntegrationTest {
     }
 
     @ParameterizedTest
-    @ValueSource(strings = {"2026-01-01", "latest", " " + CONSENT_VERSION, CONSENT_VERSION + "-rc"})
+    @ValueSource(strings = {"2026-01-01", "2026-10-04", "latest", " " + CONSENT_VERSION, CONSENT_VERSION + "-rc"})
     void 게시_중인_버전과_다른_동의는_400이고_기록되지_않는다(String version) throws Exception {
         String access = signUp();
 
