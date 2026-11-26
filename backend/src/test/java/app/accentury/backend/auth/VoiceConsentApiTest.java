@@ -171,12 +171,14 @@ class VoiceConsentApiTest extends IntegrationTest {
         assertNull(voiceConsents.forSession(session));
     }
 
-    @Test
-    void 게시_중인_버전과_다른_동의_버전은_400이고_세션이_생기지_않는다() throws Exception {
+    // KAN-366: 2026-10-04는 옛 웹 번들이 실제로 보내는 값이다 - 400을 받으면 동의 없이 세션을 한 번 다시 만든다.
+    @ParameterizedTest
+    @ValueSource(strings = {"2026-01-01", "2026-10-04"})
+    void 게시_중인_버전과_다른_동의_버전은_400이고_세션이_생기지_않는다(String version) throws Exception {
         long before = sessions.count();
 
         mockMvc.perform(post("/v0/sessions").contentType(MediaType.APPLICATION_JSON)
-                        .content("{\"voiceConsentVersion\": \"2026-01-01\"}"))
+                        .content("{\"voiceConsentVersion\": \"" + version + "\"}"))
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.code").value("VALIDATION_FAILED"));
 
